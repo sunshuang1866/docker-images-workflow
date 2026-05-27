@@ -128,8 +128,7 @@ jobs:
               '',
               '| 阶段 | 状态 |',
               '|------|------|',
-              '| Phase 0 · 需求澄清 | 🔄 进行中 |',
-              '| Phase 1 · 需求分析 | ⬜ - |',
+              '| Phase 1 · 需求分析 | 🔄 进行中 |',
               '| 🔒 审核关卡 1 | ⬜ - |',
               '| Phase 2 · 架构设计 | ⬜ - |',
               '| Phase 3 · 架构评审 | ⬜ - |',
@@ -254,8 +253,7 @@ jobs:
               '',
               '| 阶段 | 状态 |',
               '|------|------|',
-              '| Phase 0 · 需求澄清 | 🔄 进行中 |',
-              '| Phase 1 · 需求分析 | ⬜ - |',
+              '| Phase 1 · 需求分析 | 🔄 进行中 |',
               '| 🔒 审核关卡 1 | ⬜ - |',
               '| Phase 2 · 架构设计 | ⬜ - |',
               '| Phase 3 · 架构评审 | ⬜ - |',
@@ -392,8 +390,7 @@ jobs:
               '',
               '| 阶段 | 状态 |',
               '|------|------|',
-              '| Phase 0 · 需求澄清 | 🔄 进行中 |',
-              '| Phase 1 · 需求分析 | ⬜ - |',
+              '| Phase 1 · 需求分析 | 🔄 进行中 |',
               '| 🔒 审核关卡 1 | ⬜ - |',
               '| Phase 2 · 架构设计 | ⬜ - |',
               '| Phase 3 · 架构评审 | ⬜ - |',
@@ -422,7 +419,7 @@ jobs:
             });
             console.log('✅ Posted progress board to source issue');
 
-      - name: Execute Phase 0 - 需求澄清
+      - name: Execute Phase 1 - 需求分析
         env:
           GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
@@ -431,13 +428,12 @@ jobs:
           TARGET_REPO: ${{ github.event.client_payload.source_repo }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
           OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || '' }}
-        run: python scripts/stages/00-phase0-clarification.py
+        run: python scripts/stages/01-requirements-analysis.py
 
-      - name: Wait for user response (Phase 0)
+      - name: Wait for user response (Phase 1)
         run: |
-          echo "⏳ Phase 0 完成，等待用户回复..."
-          echo "用户需要在源仓库 Issue 中回复 4 个问题的答案"
-          echo "可以使用 /ai-answer 命令快速回答"
+          echo "✅ Phase 1 需求分析完成"
+          echo "请检查源仓库 Issue 中的分析结果"
 
   # 处理 /accept 和 /retry 命令
   on-command:
