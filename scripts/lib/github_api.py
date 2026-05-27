@@ -67,8 +67,8 @@ def list_comments(owner: str, repo: str, issue_number: int, per_page: int = 30) 
 
 
 def add_labels(owner: str, repo: str, issue_number: int, labels: List[str]) -> str:
-    """添加标签"""
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}"
+    """添加标签（追加，不覆盖已有标签）"""
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/labels"
     response = requests.post(
         url,
         headers=get_headers(),
