@@ -83,33 +83,45 @@ def fetch_recent_issues(
     """
     log(f"📡 Fetching issues from {repo} with labels: {trigger_labels}")
     
-    # 使用 labels 参数直接过滤有触发标签的 issues
-    labels_filter = ','.join(trigger_labels)
-    url = f"https://api.github.com/repos/{repo}/issues"
-    params = {
-        'state': 'all',
-        'labels': labels_filter,  # 直接过滤标签
-        'per_page': min(max_events, 100),
-        'sort': 'updated',
-        'direction': 'desc'
-    }
+    all_issues = []
     
-    try:
-        response = requests.get(
-            url,
-            headers=get_github_headers(token),
-            params=params,
-            timeout=30
-        )
-        response.raise_for_status()
-        issues = response.json()
-        
-        log(f"  ✅ Found {len(issues)} issues with trigger labels")
-        return issues
-        
-    except Exception as e:
-        log(f"  ❌ Failed to fetch issues: {e}")
-        return []
+    # GitHub API 的 labels 参数是 AND 关系，需要分别查询每个标签
+    for label in trigger_labels:
+        try:
+            url = f"https://api.github.com/repos/{repo}/issues"
+            params = {
+                'state': 'all',
+                'labels': label,  # 单个标签，OR 关系
+                'per_page': min(max_events, 100),
+                'sort': 'updated',
+                'direction': 'desc'
+            }
+            
+            response = requests.get(
+                url,
+                headers=get_github_headers(token),
+                params=params,
+                timeout=30
+            )
+            response.raise_for_status()
+            issues = response.json()
+            
+            log(f"  ✅ Label '{label}': Found {len(issues)} issues")
+            all_issues.extend(issues)
+            
+        except Exception as e:
+            log(f"  ❌ Failed to fetch issues with label '{label}': {e}")
+    
+    # 去重（同一个 issue 可能有多个触发标签）
+    seen_ids = set()
+    unique_issues = []
+    for issue in all_issues:
+        if issue['id'] not in seen_ids:
+            seen_ids.add(issue['id'])
+            unique_issues.append(issue)
+    
+    log(f"  📊 Total unique issues: {len(unique_issues)}")
+    return unique_issues
 
 
 def is_issue_processed(issue_id: int, repo: str, state: Dict[str, Any]) -> bool:
