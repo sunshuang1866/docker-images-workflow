@@ -90,7 +90,7 @@ def fetch_recent_issues(
         try:
             url = f"https://api.github.com/repos/{repo}/issues"
             params = {
-                'state': 'all',
+                'state': 'open',  # 只查询开放的 Issue
                 'labels': label,  # 单个标签，OR 关系
                 'per_page': min(max_events, 100),
                 'sort': 'updated',
@@ -116,11 +116,16 @@ def fetch_recent_issues(
     seen_ids = set()
     unique_issues = []
     for issue in all_issues:
+        # 跳过已关闭的 Issue
+        if issue.get('state') == 'closed':
+            log(f"  ⏭️  Skipping closed issue #{issue['number']}: {issue.get('title', '')}")
+            continue
+        
         if issue['id'] not in seen_ids:
             seen_ids.add(issue['id'])
             unique_issues.append(issue)
     
-    log(f"  📊 Total unique issues: {len(unique_issues)}")
+    log(f"  📊 Total unique issues (excluding closed): {len(unique_issues)}")
     return unique_issues
 
 

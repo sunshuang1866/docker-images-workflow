@@ -1,3 +1,2 @@
 # tech-design-team Python dependencies
-# No external dependencies required - uses only Python standard library
-# and GitHub CLI (gh) for GitHub API interactions
+requests>=2.28.0

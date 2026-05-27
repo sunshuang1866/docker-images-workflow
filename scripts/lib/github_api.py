@@ -1,94 +1,91 @@
 #!/usr/bin/env python3
 """
-GitHub API 封装 - Python 版本 (使用 GitHub CLI)
+GitHub API 封装 - Python 版本 (使用 requests 库)
 """
 
 import os
 import json
-import subprocess
+import requests
 from typing import List, Dict, Any, Optional
 
 GH_TOKEN = os.getenv('GITHUB_TOKEN', '')
 
 
-def run_gh(cmd: str) -> str:
-    """运行 gh 命令并返回 stdout"""
-    env = os.environ.copy()
-    if GH_TOKEN:
-        env['GH_TOKEN'] = GH_TOKEN
-    
-    result = subprocess.run(
-        f'gh {cmd}',
-        shell=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    
-    if result.returncode != 0:
-        raise RuntimeError(f'gh command failed: {result.stderr}')
-    
-    return result.stdout.strip()
-
-
-def run_gh_json(cmd: str) -> Any:
-    """运行 gh 命令并解析 JSON 输出"""
-    output = run_gh(cmd)
-    return json.loads(output)
+def get_headers() -> Dict[str, str]:
+    """获取 GitHub API 请求头"""
+    return {
+        'Authorization': f'token {GH_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json',
+    }
 
 
 def get_issue(owner: str, repo: str, issue_number: int) -> Dict[str, Any]:
     """获取 Issue 详情"""
-    cmd = f'issue view {issue_number} --repo {owner}/{repo} --json title,body,number,user,labels'
-    return run_gh_json(cmd)
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}"
+    response = requests.get(url, headers=get_headers(), timeout=30)
+    response.raise_for_status()
+    return response.json()
 
 
 def add_issue_comment(owner: str, repo: str, issue_number: int, body: str) -> str:
     """添加 Issue 评论"""
-    # 使用 stdin 传递 body，避免 shell 转义问题
-    env = os.environ.copy()
-    if GH_TOKEN:
-        env['GH_TOKEN'] = GH_TOKEN
-    
-    result = subprocess.run(
-        f'gh issue comment {issue_number} --repo {owner}/{repo}',
-        shell=True,
-        input=body,
-        capture_output=True,
-        text=True,
-        env=env,
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    response = requests.post(
+        url,
+        headers=get_headers(),
+        json={'body': body},
+        timeout=30
     )
-    
-    if result.returncode != 0:
-        raise RuntimeError(f'Failed to add comment: {result.stderr}')
-    
-    return result.stdout.strip()
+    response.raise_for_status()
+    return 'Comment added'
 
 
 def update_comment(owner: str, repo: str, comment_id: int, body: str) -> str:
     """更新评论"""
-    cmd = f'api repos/{owner}/{repo}/issues/comments/{comment_id} --method PATCH --field body={json.dumps(body)}'
-    return run_gh(cmd)
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}"
+    response = requests.patch(
+        url,
+        headers=get_headers(),
+        json={'body': body},
+        timeout=30
+    )
+    response.raise_for_status()
+    return 'Comment updated'
 
 
 def list_comments(owner: str, repo: str, issue_number: int, per_page: int = 30) -> List[Dict[str, Any]]:
     """列出 Issue 评论"""
-    cmd = f'api repos/{owner}/{repo}/issues/{issue_number}/comments --field per_page={per_page}'
-    return run_gh_json(cmd)
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    response = requests.get(
+        url,
+        headers=get_headers(),
+        params={'per_page': per_page},
+        timeout=30
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def add_labels(owner: str, repo: str, issue_number: int, labels: List[str]) -> str:
     """添加标签"""
-    labels_str = ','.join(labels)
-    cmd = f'issue edit {issue_number} --repo {owner}/{repo} --add-label "{labels_str}"'
-    return run_gh(cmd)
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}"
+    response = requests.post(
+        url,
+        headers=get_headers(),
+        json={'labels': labels},
+        timeout=30
+    )
+    response.raise_for_status()
+    return 'Labels added'
 
 
 def remove_label(owner: str, repo: str, issue_number: int, label: str) -> Optional[str]:
     """移除标签"""
     try:
-        cmd = f'issue edit {issue_number} --repo {owner}/{repo} --remove-label "{label}"'
-        return run_gh(cmd)
+        url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/labels/{label}"
+        response = requests.delete(url, headers=get_headers(), timeout=30)
+        response.raise_for_status()
+        return 'Label removed'
     except:
         # label may not exist, ignore
         return None
