@@ -153,9 +153,13 @@ def run_opencode(
     log(f'    bin:     {opencode_bin}')
     log(f'    args:    {json.dumps(opencode_args)}')
     log(f'    cwd:     {work_dir}')
+    log(f'    model:   {model}')
     log(f'    prompt:  {len(full_prompt)} chars → {prompt_dump_file}')
     log(f'    log:     {log_file}')
     log(f'    output:  {output_file}')
+    api_key = os.environ.get('OPENAI_API_KEY', '')
+    base_url = os.environ.get('OPENAI_BASE_URL', '')
+    log(f'    api:     key={("***" + api_key[-4:]) if len(api_key) > 4 else "NOT SET"}, base_url={base_url or "default"}')
     log(f'    replay:  cd {work_dir} && cat {prompt_dump_file} | {opencode_bin} {" ".join(opencode_args)}')
     
     t0 = time.time()
@@ -221,6 +225,24 @@ def run_opencode(
         
         duration = time.time() - t0
         
+        # 输出 opencode 的 stdout/stderr 到 workflow log
+        stderr_text = stderr.decode('utf-8', errors='replace').strip()
+        stdout_text = stdout.decode('utf-8', errors='replace').strip()
+        
+        if stderr_text:
+            for line in stderr_text.split('\n'):
+                log(f'  [stderr] {line}')
+        if stdout_text:
+            # 只输出最后几行避免刷屏
+            stdout_lines = stdout_text.split('\n')
+            if len(stdout_lines) > 20:
+                log(f'  [stdout] ... ({len(stdout_lines)} lines total, showing last 20)')
+                for line in stdout_lines[-20:]:
+                    log(f'  [stdout] {line}')
+            else:
+                for line in stdout_lines:
+                    log(f'  [stdout] {line}')
+        
         if timed_out:
             raise TimeoutError(
                 f'opencode [{label}] TIMEOUT after {duration:.1f}s '
@@ -234,6 +256,7 @@ def run_opencode(
                 raise RuntimeError(
                     f'opencode [{label}] exit {process.returncode} '
                     f'但未生成 outputFile {output_file}。\n'
+                    f'stderr: {stderr_text[:2000]}\n'
                     f'replay: cd {work_dir} && cat {prompt_dump_file} | {opencode_bin} {" ".join(opencode_args)}'
                 )
             

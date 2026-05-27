@@ -428,6 +428,8 @@ jobs:
           ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
           ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
           TARGET_REPO: ${{ github.event.client_payload.source_repo }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || '' }}
         run: python scripts/stages/00-phase0-clarification.py
 
       - name: Wait for user response (Phase 0)
