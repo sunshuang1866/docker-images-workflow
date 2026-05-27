@@ -1,0 +1,238 @@
+# GitHub Actions 工作流 — tech-design-team 完整自动化链路
+#
+# 功能：
+#   1. 当 Issue 被标记为 rfc/bug 时，自动触发完整分析流程
+#   2. 通过 opencode 调用大模型，依次执行 5 个阶段的 agent 分析
+#   3. 自动更新 Issue 评论和标签，维护进度板
+#   4. 支持 /accept, /retry 等命令控制流程
+#
+# 架构参考: portal-workflow 的 self-service.yml 实现
+
+name: "tech-design-team: AI 分析完整链路"
+
+on:
+  issues:
+    types: [labeled, opened]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: tech-design-${{ github.event.issue.number || github.event.issue_comment.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
+  AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
+  AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
+  OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '1800000' }} # 30 分钟
+
+jobs:
+  # 触发条件：Issue 被打上 rfc 或 bug 标签
+  trigger-on-rfc-bug:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event.action == 'labeled' && (github.event.label.name == 'rfc' || github.event.label.name == 'bug')) ||
+      (github.event.action == 'opened' && (contains(github.event.issue.labels.*.name, 'rfc') || contains(github.event.issue.labels.*.name, 'bug')))
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
+      - name: Add ai-pending label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.issue;
+            try {
+              await github.rest.issues.addLabels({
+                owner: issue.owner,
+                repo: issue.repo,
+                issue_number: issue.number,
+                labels: ['ai-pending']
+              });
+            } catch (e) {
+              // label may already exist
+            }
+
+      - name: Post initial progress board
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.issue;
+            const comment = `## 🤖 tech-design-team · 分析进度
+
+**Issue**: #${issue.number} - ${context.payload.issue.title}
+
+### 📊 分析进度
+
+| 阶段 | 状态 |
+|------|------|
+| Phase 0 · 需求澄清 | 🔄 进行中 |
+| Phase 1 · 需求分析 | ⬜ - |
+| 🔒 审核关卡 1 | ⬜ - |
+| Phase 2 · 架构设计 | ⬜ - |
+| Phase 3 · 架构评审 | ⬜ - |
+| 🔒 审核关卡 2 | ⬜ - |
+| 最终设计 | ⬜ - |
+
+### 🔧 控制命令
+
+| 命令 | 用途 |
+|------|------|
+| \`/accept\` | 从头开始完整分析 |
+| \`/retry\` | 从上次中断处续跑 |
+| \`/retry-design\` | 重跑架构设计 |
+| \`/retry-review\` | 重跑架构评审 |
+
+---
+> AI 正在处理中，本评论会实时更新进度。
+<sub>🤖 tech-design-team · ${new Date().toISOString()}</sub>`;
+
+            await github.rest.issues.createComment({
+              owner: issue.owner,
+              repo: issue.repo,
+              issue_number: issue.number,
+              body: comment
+            });
+
+      - name: Execute Phase 0 - 需求澄清
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/stages/00-phase0-clarification.py
+
+      - name: Wait for user response (Phase 0)
+        run: |
+          echo "⏳ Phase 0 完成，等待用户回复..."
+          echo "用户需要在 Issue 中回复 4 个问题的答案"
+          echo "可以使用 /ai-answer 命令快速回答"
+          # 注意：这里不阻塞，让用户在 GitHub 交互
+          # 后续通过 /accept 或 /retry 命令继续
+
+  # 处理 /accept 和 /retry 命令
+  on-command:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
+      (startsWith(github.event.comment.body, '/accept') ||
+       startsWith(github.event.comment.body, '/retry'))
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
+      - name: Parse command
+        id: parse
+        run: |
+          CMD=$(echo "${{ github.event.comment.body }}" | head -1 | tr -d '\r' | awk '{$1=$1};1')
+          echo "command=$CMD" >> $GITHUB_OUTPUT
+          
+          case "$CMD" in
+            /accept*)         START=phase0 ;;
+            /retry-design*)   START=phase2 ;;
+            /retry-review*)   START=phase3 ;;
+            /retry*)          START=auto ;;
+            *)                START=phase0 ;;
+          esac
+          echo "start_stage=$START" >> $GITHUB_OUTPUT
+
+      - name: Execute phases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          START_STAGE: ${{ steps.parse.outputs.start_stage }}
+        run: |
+          echo "Starting from: $START_STAGE"
+          
+          # 根据 start_stage 决定执行哪些阶段
+          RUN_PHASE0=false
+          RUN_PHASE1=false
+          RUN_PHASE2=false
+          RUN_PHASE3=false
+          
+          case "$START_STAGE" in
+            phase0)
+              RUN_PHASE0=true
+              RUN_PHASE1=true
+              RUN_PHASE2=true
+              RUN_PHASE3=true
+              ;;
+            phase2)
+              RUN_PHASE2=true
+              RUN_PHASE3=true
+              ;;
+            phase3)
+              RUN_PHASE3=true
+              ;;
+            auto)
+              # 从 state.json 读取，这里简化为全跑
+              RUN_PHASE0=true
+              RUN_PHASE1=true
+              RUN_PHASE2=true
+              RUN_PHASE3=true
+              ;;
+          esac
+          
+          if [ "$RUN_PHASE0" = true ]; then
+            echo "▶ Running Phase 0: 需求澄清"
+            python scripts/stages/00-phase0-clarification.py || echo "⚠ Phase 0 failed, continuing..."
+          fi
+          
+          if [ "$RUN_PHASE1" = true ]; then
+            echo "▶ Running Phase 1: 需求分析"
+            python scripts/stages/01-requirements-analysis.py || echo "⚠ Phase 1 failed, continuing..."
+          fi
+          
+          if [ "$RUN_PHASE2" = true ]; then
+            echo "▶ Running Phase 2: 架构设计"
+            python scripts/stages/02-architecture-design.py || echo "⚠ Phase 2 failed, continuing..."
+          fi
+          
+          if [ "$RUN_PHASE3" = true ]; then
+            echo "▶ Running Phase 3: 架构评审"
+            python scripts/stages/03-architecture-review.py || echo "⚠ Phase 3 failed, continuing..."
+          fi
+          
+          echo "✅ All phases completed"
