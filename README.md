@@ -143,11 +143,13 @@ AI 会在分析时自动读取并遵守这些规范。
 
 - Python 3.11+
 - GitHub Actions 运行环境
-- AI 模型配置（通过 GitHub Variables 设置）
+- AI 模型配置（通过 GitHub Variables 和 Secrets 设置）
 
 ### 环境变量
 
-在仓库 Settings → Secrets and variables → Actions → Variables 中配置：
+在仓库 Settings → Secrets and variables → Actions 中配置：
+
+#### Variables（公开配置）
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -155,6 +157,45 @@ AI 会在分析时自动读取并遵守这些规范。
 | `AI_AGENT` | AI Agent 类型 | `build` |
 | `AI_EXTRA_ARGS` | AI 运行额外参数 | `--dangerously-skip-permissions` |
 | `OPENCODE_TIMEOUT_MS` | OpenCode 超时时间（毫秒） | `1800000` (30分钟) |
+| `OPENAI_BASE_URL` | AI API 基础地址（可选） | 留空使用默认地址 |
+
+#### Secrets（敏感配置）
+
+| Secret 名称 | 说明 | 必需 |
+|-------------|------|------|
+| `OPENAI_API_KEY` | AI 模型的 API 密钥 | ✅ **必需** |
+| `WATCH_TOKEN` | 监控仓库的 GitHub Token | ✅ **必需** |
+| `DISPATCH_TOKEN` | 跨仓库操作的 GitHub Token（可选） | 可选 |
+
+### AI API Key 配置说明
+
+**获取 API Key：**
+
+根据你的 AI 模型提供商获取 API Key：
+
+| 提供商 | 获取地址 | 示例 |
+|--------|---------|------|
+| 阿里通义 | https://bailian.console.aliyun.com/ | `sk-xxxxx` |
+| OpenAI | https://platform.openai.com/api-keys | `sk-proj-xxxxx` |
+| 智谱 AI | https://open.bigmodel.cn/ | `xxxxx.xxxxx` |
+| 其他兼容 OpenAI 接口的服务 | - | - |
+
+**配置步骤：**
+
+1. 进入仓库 Settings → Secrets and variables → Actions
+2. 点击 **New repository secret**
+3. Name: `OPENAI_API_KEY`
+4. Secret: 粘贴你的 API Key
+5. 点击 **Add secret**
+
+**可选：配置自定义 API 地址**
+
+如果使用其他兼容 OpenAI 接口的服务：
+
+1. 点击 **New repository variable**
+2. Name: `OPENAI_BASE_URL`
+3. Value: `https://your-api-endpoint.com/v1`
+4. 点击 **Add variable**
 
 ## 故障排查
 

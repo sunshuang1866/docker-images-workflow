@@ -20,10 +20,15 @@ permissions:
   contents: read
 
 env:
+  # AI 模型配置
   AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
   AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
   AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
   OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '1800000' }}
+  
+  # AI API 密钥（必需）
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+  OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || '' }}
 
 jobs:
   monitor:
