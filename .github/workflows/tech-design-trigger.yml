@@ -358,7 +358,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          path: dev-workflow
 
       - name: Checkout source repo code
         uses: actions/checkout@v4
@@ -368,65 +367,12 @@ jobs:
           fetch-depth: 1
           path: source-repo
 
-      - name: Discover and load project conventions
-        id: conventions
-        run: |
-          echo "🔍 Loading project conventions from source repo..."
-          
-          CONVENTION_CONTENT=""
-          
-          # 读取 README.md
-          if [ -f "source-repo/README.md" ]; then
-            CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 项目说明 (README.md)\n$(cat source-repo/README.md | head -100)"
-          fi
-          
-          # 读取架构文档
-          for file in docs/ARCHITECTURE.md ARCHITECTURE.md docs/DESIGN_PRINCIPLES.md DESIGN_PRINCIPLES.md; do
-            if [ -f "source-repo/$file" ]; then
-              CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 架构文档 ($file)\n$(cat source-repo/$file | head -100)"
-            fi
-          done
-          
-          # 读取代码规范
-          for file in docs/CODE_STYLE.md CODE_STYLE.md CONTRIBUTING.md .github/CONTRIBUTING.md; do
-            if [ -f "source-repo/$file" ]; then
-              CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 代码规范 ($file)\n$(cat source-repo/$file | head -50)"
-            fi
-          done
-          
-          # 读取 AI 规则文件
-          for file in CLAUDE.md .cursorrules .github/copilot-instructions.md; do
-            if [ -f "source-repo/$file" ]; then
-              CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## AI 开发规则 ($file)\n$(cat source-repo/$file | head -100)"
-            fi
-          done
-          
-          # 读取技术栈信息
-          if [ -f "source-repo/package.json" ]; then
-            CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 项目元数据 (package.json)\n$(cat source-repo/package.json)"
-          fi
-          if [ -f "source-repo/requirements.txt" ]; then
-            CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## Python 依赖 (requirements.txt)\n$(cat source-repo/requirements.txt)"
-          fi
-          
-          # 输出到文件
-          echo -e "$CONVENTION_CONTENT" > dev-workflow/source-conventions.md
-          
-          if [ -z "$CONVENTION_CONTENT" ]; then
-            echo "⚠️ 未发现项目规范文件"
-            echo "has_conventions=false" >> $GITHUB_OUTPUT
-          else
-            echo "✅ Loaded project conventions"
-            echo "has_conventions=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        working-directory: dev-workflow
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -435,6 +381,52 @@ jobs:
         run: |
           npm install -g opencode-ai
           opencode --version
+
+      - name: Discover and load project conventions
+        id: conventions
+        run: |
+          echo "🔍 Loading project conventions from source repo..."
+          
+          CONVENTION_CONTENT=""
+          
+          if [ -f "source-repo/README.md" ]; then
+            CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 项目说明 (README.md)\n$(cat source-repo/README.md | head -100)"
+          fi
+          
+          for file in docs/ARCHITECTURE.md ARCHITECTURE.md docs/DESIGN_PRINCIPLES.md DESIGN_PRINCIPLES.md; do
+            if [ -f "source-repo/$file" ]; then
+              CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 架构文档 ($file)\n$(cat source-repo/$file | head -100)"
+            fi
+          done
+          
+          for file in docs/CODE_STYLE.md CODE_STYLE.md CONTRIBUTING.md .github/CONTRIBUTING.md; do
+            if [ -f "source-repo/$file" ]; then
+              CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 代码规范 ($file)\n$(cat source-repo/$file | head -50)"
+            fi
+          done
+          
+          for file in CLAUDE.md .cursorrules .github/copilot-instructions.md; do
+            if [ -f "source-repo/$file" ]; then
+              CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## AI 开发规则 ($file)\n$(cat source-repo/$file | head -100)"
+            fi
+          done
+          
+          if [ -f "source-repo/package.json" ]; then
+            CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## 项目元数据 (package.json)\n$(cat source-repo/package.json)"
+          fi
+          if [ -f "source-repo/requirements.txt" ]; then
+            CONVENTION_CONTENT="$CONVENTION_CONTENT\n\n## Python 依赖 (requirements.txt)\n$(cat source-repo/requirements.txt)"
+          fi
+          
+          echo -e "$CONVENTION_CONTENT" > source-conventions.md
+          
+          if [ -z "$CONVENTION_CONTENT" ]; then
+            echo "⚠️ 未发现项目规范文件"
+            echo "has_conventions=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Loaded project conventions"
+            echo "has_conventions=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Extract watch event info
         id: extract
@@ -521,13 +513,12 @@ jobs:
 
       - name: Execute Phase 0 - 需求澄清
         env:
-          PYTHONPATH: dev-workflow
           GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
           ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
           ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
           GITHUB_REPOSITORY: ${{ github.event.client_payload.source_repo }}
-        run: python dev-workflow/scripts/stages/00-phase0-clarification.py
+        run: python scripts/stages/00-phase0-clarification.py
 
       - name: Wait for user response (Phase 0)
         run: |
