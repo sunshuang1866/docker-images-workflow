@@ -28,7 +28,7 @@ permissions:
 
 env:
   # AI 模型配置
-  AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
+  AI_MODEL: ${{ vars.AI_MODEL || 'glm-5.1' }}
   AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
   AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
   OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '1800000' }} # 30 分钟
