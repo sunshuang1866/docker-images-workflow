@@ -69,24 +69,26 @@ def fetch_recent_issues(
     max_events: int = 50
 ) -> List[Dict[str, Any]]:
     """
-    获取仓库中最近被打上触发标签的 Issue
+    获取仓库中带有触发标签的 Issue
     
     Args:
         repo: 仓库地址 (owner/repo)
         trigger_labels: 触发标签列表
-        since: ISO 时间字符串
+        since: ISO 时间字符串（保留但不用于过滤）
         token: GitHub Token
         max_events: 最大事件数
     
     Returns:
         Issue 列表
     """
-    log(f"📡 Fetching issues from {repo} since {since}")
+    log(f"📡 Fetching issues from {repo} with labels: {trigger_labels}")
     
+    # 使用 labels 参数直接过滤有触发标签的 issues
+    labels_filter = ','.join(trigger_labels)
     url = f"https://api.github.com/repos/{repo}/issues"
     params = {
         'state': 'all',
-        'since': since,
+        'labels': labels_filter,  # 直接过滤标签
         'per_page': min(max_events, 100),
         'sort': 'updated',
         'direction': 'desc'
@@ -102,15 +104,8 @@ def fetch_recent_issues(
         response.raise_for_status()
         issues = response.json()
         
-        # 过滤出有触发标签的 Issue
-        triggered = []
-        for issue in issues:
-            labels = [l['name'] for l in issue.get('labels', [])]
-            if any(label in trigger_labels for label in labels):
-                triggered.append(issue)
-        
-        log(f"  ✅ Found {len(issues)} issues, {len(triggered)} triggered")
-        return triggered
+        log(f"  ✅ Found {len(issues)} issues with trigger labels")
+        return issues
         
     except Exception as e:
         log(f"  ❌ Failed to fetch issues: {e}")
@@ -212,6 +207,13 @@ def process_all_repos():
     # 是否测试特定仓库
     test_repo = os.getenv('TEST_REPO', '')
     
+    # 是否强制重新处理所有 Issue（忽略状态文件）
+    force_reprocess = os.getenv('FORCE_REPROCESS', '').lower() in ('true', '1', 'yes')
+    
+    if force_reprocess:
+        log("⚠️  FORCE_REPROCESS enabled: will reprocess all issues")
+        state['processed_issues'] = {}
+    
     log(f"🔍 Starting monitoring cycle")
     log(f"   Since: {since_time}")
     log(f"   Max events per run: {max_events}")
@@ -255,10 +257,18 @@ def process_all_repos():
         for issue in issues:
             issue_id = issue['id']
             issue_number = issue['number']
+            issue_title = issue.get('title', 'Untitled')
+            issue_state = issue.get('state', 'unknown')
+            labels = [l['name'] for l in issue.get('labels', [])]
+            
+            log(f"  📋 Issue #{issue_number}: {issue_title} (state: {issue_state})")
+            log(f"     Labels: {labels}")
             
             if is_issue_processed(issue_id, repo, state):
                 log(f"  ⏭️  Already processed: #{issue_number}")
                 continue
+            
+            log(f"  🚀 Triggering analysis for #{issue_number}...")
             
             # 触发 AI 分析
             success = trigger_ai_analysis(issue, repo, dispatch_token)
