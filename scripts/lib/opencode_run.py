@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 # 默认配置
-DEFAULT_MODEL = os.getenv('AI_MODEL', 'openai/glm-5.1')
+DEFAULT_MODEL = os.getenv('AI_MODEL', 'alibaba-cn/glm-5.1')
 DEFAULT_AGENT = os.getenv('AI_AGENT', 'build')
 DEFAULT_EXTRA_RAW = os.getenv('AI_EXTRA_ARGS', '--dangerously-skip-permissions')
 DEFAULT_TIMEOUT = int(os.getenv('OPENCODE_TIMEOUT_MS', '1800000'))  # 30 分钟
