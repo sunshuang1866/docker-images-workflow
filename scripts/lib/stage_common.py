@@ -24,6 +24,14 @@ def agent_prompt_file(name: str) -> str:
     return os.path.join(PROJECT_ROOT, '.github', 'agents', f'{name}.md')
 
 
+def get_conventions_file() -> Optional[str]:
+    """获取项目规范文件路径（如果存在）"""
+    conventions_path = os.path.join(PROJECT_ROOT, 'source-conventions.md')
+    if os.path.exists(conventions_path):
+        return conventions_path
+    return None
+
+
 def parse_env() -> Dict[str, Any]:
     """
     从 GitHub Actions env 解析公共参数

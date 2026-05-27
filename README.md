@@ -90,7 +90,22 @@
 https://api.github.com/repos/你的用户名/dev-workflow/dispatches
 ```
 
-#### 3. 使用
+#### 3. 提供项目规范（可选但推荐）
+
+为了让 AI 分析更贴合你的项目，建议在源仓库中提供以下文件（会自动识别）：
+
+| 文件路径 | 用途 | 优先级 |
+|---------|------|--------|
+| `README.md` | 项目说明、技术栈 | ⭐⭐⭐ |
+| `docs/ARCHITECTURE.md` 或 `ARCHITECTURE.md` | 架构文档 | ⭐⭐⭐ |
+| `CONTRIBUTING.md` 或 `.github/CONTRIBUTING.md` | 贡献指南、代码规范 | ⭐⭐ |
+| `docs/CODE_STYLE.md` 或 `CODE_STYLE.md` | 代码风格规范 | ⭐⭐ |
+| `CLAUDE.md` 或 `.cursorrules` | AI 开发规则 | ⭐⭐⭐ |
+| `package.json` / `requirements.txt` | 技术栈信息 | ⭐ |
+
+AI 会在分析时自动读取并遵守这些规范。
+
+#### 4. 使用
 
 在**源仓库**中：
 1. 创建 Issue
@@ -99,6 +114,7 @@ https://api.github.com/repos/你的用户名/dev-workflow/dispatches
    - ✅ 源 Issue 被打上 `ai-pending` 标签
    - ✅ 源 Issue 收到进度看板评论
    - ✅ dev-workflow 仓库开始执行 AI 分析
+   - ✅ AI 会读取并遵守项目规范
 
 ### 控制命令
 

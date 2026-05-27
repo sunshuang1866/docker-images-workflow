@@ -46,6 +46,7 @@ def run_opencode(
     agent: str = DEFAULT_AGENT,
     extra_args_raw: str = DEFAULT_EXTRA_RAW,
     label: str = 'opencode',
+    conventions_file: Optional[str] = None,
 ) -> Dict[str, str]:
     """
     跑一次 opencode
@@ -91,14 +92,34 @@ def run_opencode(
     
     context_json = json.dumps(context or {}, indent=2, ensure_ascii=False)
     
+    # 读取项目规范（如果有）
+    conventions_text = ''
+    if conventions_file and os.path.exists(conventions_file):
+        with open(conventions_file, 'r', encoding='utf-8') as f:
+            conventions_text = f.read()
+        log(f'📋 Loaded conventions from {conventions_file} ({len(conventions_text)} chars)')
+    
     # 拼接完整 prompt
-    full_prompt = '\n'.join([
+    prompt_parts = [
         prompt_body.strip(),
         '',
         '## 上下文 (Context)',
         '```json',
         context_json,
         '```',
+    ]
+    
+    # 如果有项目规范，注入到 prompt 中
+    if conventions_text:
+        prompt_parts.extend([
+            '',
+            '## 项目规范与约束 (Project Conventions)',
+            '以下是当前项目的规范要求，请在分析和设计时严格遵守：',
+            '',
+            conventions_text,
+        ])
+    
+    prompt_parts.extend([
         '',
         '## 任务指令',
         instruction or '',
@@ -107,6 +128,8 @@ def run_opencode(
         f'请把最终结果写入文件: `{output_file}`',
         '(写入完成后即可结束，无需在 stdout 重复输出全文)',
     ])
+    
+    full_prompt = '\n'.join(prompt_parts)
     
     # 提前删旧文件
     if os.path.exists(output_file):

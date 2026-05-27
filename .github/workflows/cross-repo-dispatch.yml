@@ -10,6 +10,7 @@ on:
 
 permissions:
   issues: read
+  contents: read
 
 jobs:
   dispatch:
@@ -19,6 +20,46 @@ jobs:
       (github.event.action == 'opened' && (contains(github.event.issue.labels.*.name, 'rfc') || contains(github.event.issue.labels.*.name, 'bug')))
 
     steps:
+      - name: Checkout source repo code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: source-repo
+
+      - name: Discover project conventions
+        id: conventions
+        run: |
+          echo "🔍 Discovering project conventions..."
+          
+          CONVENTIONS=""
+          
+          # 查找常见的规范文件
+          for file in .github/CODE_OF_CONDUCT.md CONTRIBUTING.md .github/CONTRIBUTING.md \
+                      docs/ARCHITECTURE.md docs/DESIGN_PRINCIPLES.md \
+                      docs/TECH_STACK.md docs/CODE_STYLE.md \
+                      ARCHITECTURE.md DESIGN_PRINCIPLES.md \
+                      .eslintrc* .prettierrc* pyproject.toml setup.cfg \
+                      .editorconfig CLAUDE.md .cursorrules; do
+            if [ -f "source-repo/$file" ]; then
+              CONVENTIONS="$CONVENTIONS\n- $file"
+            fi
+          done
+          
+          # 查找项目描述文件
+          if [ -f "source-repo/package.json" ]; then
+            CONVENTIONS="$CONVENTIONS\n- package.json (项目元数据)"
+          fi
+          if [ -f "source-repo/README.md" ]; then
+            CONVENTIONS="$CONVENTIONS\n- README.md (项目说明)"
+          fi
+          
+          if [ -z "$CONVENTIONS" ]; then
+            CONVENTIONS="\n(未发现明确的规范文件)"
+          fi
+          
+          echo "Found convention files: $CONVENTIONS"
+          echo "conventions_list=$(echo -e "$CONVENTIONS" | head -20)" >> $GITHUB_OUTPUT
+
       - name: Send dispatch to dev-workflow
         run: |
           PAYLOAD=$(cat <<EOF
@@ -31,7 +72,8 @@ jobs:
               "source_repo": "${{ github.repository }}",
               "source_owner": "${{ github.repository_owner }}",
               "labels": $(echo '${{ toJSON(github.event.issue.labels) }}'),
-              "action": "${{ github.event.action }}"
+              "action": "${{ github.event.action }}",
+              "has_conventions": true
             }
           }
           EOF

@@ -26,6 +26,7 @@ from scripts.lib.stage_common import (
     agent_prompt_file,
     comment_agent_output,
     log_stage,
+    get_conventions_file,
 )
 from scripts.lib.work_context import ensure_work_dir, write_state, read_file
 
@@ -93,6 +94,7 @@ async def main():
         work_dir=work_dir,
         output_file=output_file,
         label='phase2',
+        conventions_file=get_conventions_file(),
     )
     
     # 评论 issue
