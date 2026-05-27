@@ -15,6 +15,8 @@ on:
     types: [labeled, opened]
   issue_comment:
     types: [created]
+  repository_dispatch:
+    types: [issue-trigger]
 
 concurrency:
   group: tech-design-${{ github.event.issue.number || github.event.issue_comment.issue.number }}
@@ -131,6 +133,126 @@ jobs:
           echo "可以使用 /ai-answer 命令快速回答"
           # 注意：这里不阻塞，让用户在 GitHub 交互
           # 后续通过 /accept 或 /retry 命令继续
+
+  # 触发条件：从其他仓库接收 repository_dispatch 事件
+  trigger-on-dispatch:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
+      - name: Extract dispatch info
+        id: extract
+        run: |
+          echo "issue_number=${{ github.event.client_payload.issue_number }}" >> $GITHUB_OUTPUT
+          echo "issue_title=${{ github.event.client_payload.issue_title }}" >> $GITHUB_OUTPUT
+          echo "source_repo=${{ github.event.client_payload.source_repo }}" >> $GITHUB_OUTPUT
+          echo "Source repo: ${{ github.event.client_payload.source_repo }}"
+          echo "Issue #${{ github.event.client_payload.issue_number }}: ${{ github.event.client_payload.issue_title }}"
+
+      - name: Add ai-pending label to source issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DISPATCH_TOKEN }}
+          script: |
+            const sourceRepo = `${{ github.event.client_payload.source_repo }}`.split('/');
+            const owner = sourceRepo[0];
+            const repo = sourceRepo[1];
+            const issueNumber = ${{ github.event.client_payload.issue_number }};
+            
+            try {
+              await github.rest.issues.addLabels({
+                owner: owner,
+                repo: repo,
+                issue_number: issueNumber,
+                labels: ['ai-pending']
+              });
+              console.log('✅ Added ai-pending label to source issue');
+            } catch (e) {
+              console.log('Label may already exist:', e.message);
+            }
+
+      - name: Post initial progress board to source issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DISPATCH_TOKEN }}
+          script: |
+            const sourceRepo = `${{ github.event.client_payload.source_repo }}`.split('/');
+            const owner = sourceRepo[0];
+            const repo = sourceRepo[1];
+            const issueNumber = ${{ github.event.client_payload.issue_number }};
+            const issueTitle = `${{ github.event.client_payload.issue_title }}`;
+            
+            const comment = `## 🤖 tech-design-team · 分析进度
+
+**Issue**: #${issueNumber} - ${issueTitle}
+**来源仓库**: ${{ github.event.client_payload.source_repo }}
+
+### 📊 分析进度
+
+| 阶段 | 状态 |
+|------|------|
+| Phase 0 · 需求澄清 | 🔄 进行中 |
+| Phase 1 · 需求分析 | ⬜ - |
+| 🔒 审核关卡 1 | ⬜ - |
+| Phase 2 · 架构设计 | ⬜ - |
+| Phase 3 · 架构评审 | ⬜ - |
+| 🔒 审核关卡 2 | ⬜ - |
+| 最终设计 | ⬜ - |
+
+### 🔧 控制命令
+
+| 命令 | 用途 |
+|------|------|
+| \`/accept\` | 从头开始完整分析 |
+| \`/retry\` | 从上次中断处续跑 |
+| \`/retry-design\` | 重跑架构设计 |
+| \`/retry-review\` | 重跑架构评审 |
+
+---
+> AI 正在处理中，本评论会实时更新进度。
+<sub>🤖 tech-design-team · ${new Date().toISOString()}</sub>`;
+
+            await github.rest.issues.createComment({
+              owner: owner,
+              repo: repo,
+              issue_number: issueNumber,
+              body: comment
+            });
+            console.log('✅ Posted progress board to source issue');
+
+      - name: Execute Phase 0 - 需求澄清
+        env:
+          GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+          ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
+          ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+          GITHUB_REPOSITORY: ${{ github.event.client_payload.source_repo }}
+        run: python scripts/stages/00-phase0-clarification.py
+
+      - name: Wait for user response (Phase 0)
+        run: |
+          echo "⏳ Phase 0 完成，等待用户回复..."
+          echo "用户需要在源仓库 Issue 中回复 4 个问题的答案"
+          echo "可以使用 /ai-answer 命令快速回答"
 
   # 处理 /accept 和 /retry 命令
   on-command:
