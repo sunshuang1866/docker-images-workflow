@@ -60,6 +60,23 @@ jobs:
           fetch-depth: 1
           path: source-repo
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: dev-workflow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OpenCode
+        working-directory: dev-workflow
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
       - name: Discover and load project conventions
         id: conventions
         run: |
@@ -409,8 +426,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        working-directory: dev-workflow
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Install OpenCode
         run: |
@@ -501,17 +520,16 @@ jobs:
             console.log('✅ Posted progress board to source issue');
 
       - name: Execute Phase 0 - 需求澄清
-        working-directory: dev-workflow
         env:
+          PYTHONPATH: dev-workflow
           GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
           ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
           ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
           GITHUB_REPOSITORY: ${{ github.event.client_payload.source_repo }}
-        run: python scripts/stages/00-phase0-clarification.py
+        run: python dev-workflow/scripts/stages/00-phase0-clarification.py
 
       - name: Wait for user response (Phase 0)
-        working-directory: dev-workflow
         run: |
           echo "⏳ Phase 0 完成，等待用户回复..."
           echo "用户需要在源仓库 Issue 中回复 4 个问题的答案"
