@@ -147,34 +147,37 @@ jobs:
         with:
           script: |
             const issue = context.issue;
-            const comment = `## 🤖 tech-design-team · 分析进度
-
-**Issue**: #${issue.number} - ${context.payload.issue.title}
-
-### 📊 分析进度
-
-| 阶段 | 状态 |
-|------|------|
-| Phase 0 · 需求澄清 | 🔄 进行中 |
-| Phase 1 · 需求分析 | ⬜ - |
-| 🔒 审核关卡 1 | ⬜ - |
-| Phase 2 · 架构设计 | ⬜ - |
-| Phase 3 · 架构评审 | ⬜ - |
-| 🔒 审核关卡 2 | ⬜ - |
-| 最终设计 | ⬜ - |
-
-### 🔧 控制命令
-
-| 命令 | 用途 |
-|------|------|
-| \`/accept\` | 从头开始完整分析 |
-| \`/retry\` | 从上次中断处续跑 |
-| \`/retry-design\` | 重跑架构设计 |
-| \`/retry-review\` | 重跑架构评审 |
-
----
-> AI 正在处理中，本评论会实时更新进度。
-<sub>🤖 tech-design-team · ${new Date().toISOString()}</sub>`;
+            const timestamp = new Date().toISOString();
+            const comment = [
+              '## 🤖 tech-design-team · 分析进度',
+              '',
+              `**Issue**: #${issue.number} - ${context.payload.issue.title}`,
+              '',
+              '### 📊 分析进度',
+              '',
+              '| 阶段 | 状态 |',
+              '|------|------|',
+              '| Phase 0 · 需求澄清 | 🔄 进行中 |',
+              '| Phase 1 · 需求分析 | ⬜ - |',
+              '| 🔒 审核关卡 1 | ⬜ - |',
+              '| Phase 2 · 架构设计 | ⬜ - |',
+              '| Phase 3 · 架构评审 | ⬜ - |',
+              '| 🔒 审核关卡 2 | ⬜ - |',
+              '| 最终设计 | ⬜ - |',
+              '',
+              '### 🔧 控制命令',
+              '',
+              '| 命令 | 用途 |',
+              '|------|------|',
+              '| `/accept` | 从头开始完整分析 |',
+              '| `/retry` | 从上次中断处续跑 |',
+              '| `/retry-design` | 重跑架构设计 |',
+              '| `/retry-review` | 重跑架构评审 |',
+              '',
+              '---',
+              '> AI 正在处理中，本评论会实时更新进度。',
+              `<sub>🤖 tech-design-team · ${timestamp}</sub>`
+            ].join('\n');
 
             await github.rest.issues.createComment({
               owner: issue.owner,
@@ -268,36 +271,39 @@ jobs:
             const repo = sourceRepo[1];
             const issueNumber = ${{ github.event.client_payload.issue_number }};
             const issueTitle = `${{ github.event.client_payload.issue_title }}`;
+            const timestamp = new Date().toISOString();
             
-            const comment = `## 🤖 tech-design-team · 分析进度
-
-**Issue**: #${issueNumber} - ${issueTitle}
-**来源仓库**: ${{ github.event.client_payload.source_repo }}
-
-### 📊 分析进度
-
-| 阶段 | 状态 |
-|------|------|
-| Phase 0 · 需求澄清 | 🔄 进行中 |
-| Phase 1 · 需求分析 | ⬜ - |
-| 🔒 审核关卡 1 | ⬜ - |
-| Phase 2 · 架构设计 | ⬜ - |
-| Phase 3 · 架构评审 | ⬜ - |
-| 🔒 审核关卡 2 | ⬜ - |
-| 最终设计 | ⬜ - |
-
-### 🔧 控制命令
-
-| 命令 | 用途 |
-|------|------|
-| \`/accept\` | 从头开始完整分析 |
-| \`/retry\` | 从上次中断处续跑 |
-| \`/retry-design\` | 重跑架构设计 |
-| \`/retry-review\` | 重跑架构评审 |
-
----
-> AI 正在处理中，本评论会实时更新进度。
-<sub>🤖 tech-design-team · ${new Date().toISOString()}</sub>`;
+            const comment = [
+              '## 🤖 tech-design-team · 分析进度',
+              '',
+              `**Issue**: #${issueNumber} - ${issueTitle}`,
+              `**来源仓库**: ${{ github.event.client_payload.source_repo }}`,
+              '',
+              '### 📊 分析进度',
+              '',
+              '| 阶段 | 状态 |',
+              '|------|------|',
+              '| Phase 0 · 需求澄清 | 🔄 进行中 |',
+              '| Phase 1 · 需求分析 | ⬜ - |',
+              '| 🔒 审核关卡 1 | ⬜ - |',
+              '| Phase 2 · 架构设计 | ⬜ - |',
+              '| Phase 3 · 架构评审 | ⬜ - |',
+              '| 🔒 审核关卡 2 | ⬜ - |',
+              '| 最终设计 | ⬜ - |',
+              '',
+              '### 🔧 控制命令',
+              '',
+              '| 命令 | 用途 |',
+              '|------|------|',
+              '| `/accept` | 从头开始完整分析 |',
+              '| `/retry` | 从上次中断处续跑 |',
+              '| `/retry-design` | 重跑架构设计 |',
+              '| `/retry-review` | 重跑架构评审 |',
+              '',
+              '---',
+              '> AI 正在处理中，本评论会实时更新进度。',
+              `<sub>🤖 tech-design-team · ${timestamp}</sub>`
+            ].join('\n');
 
             await github.rest.issues.createComment({
               owner: owner,
@@ -451,36 +457,39 @@ jobs:
             const repo = sourceRepo[1];
             const issueNumber = ${{ github.event.client_payload.issue_number }};
             const issueTitle = `${{ github.event.client_payload.issue_title }}`;
+            const timestamp = new Date().toISOString();
             
-            const comment = `## 🤖 tech-design-team · 分析进度
-
-**Issue**: #${issueNumber} - ${issueTitle}
-**来源仓库**: ${{ github.event.client_payload.source_repo }}
-
-### 📊 分析进度
-
-| 阶段 | 状态 |
-|------|------|
-| Phase 0 · 需求澄清 | 🔄 进行中 |
-| Phase 1 · 需求分析 | ⬜ - |
-| 🔒 审核关卡 1 | ⬜ - |
-| Phase 2 · 架构设计 | ⬜ - |
-| Phase 3 · 架构评审 | ⬜ - |
-| 🔒 审核关卡 2 | ⬜ - |
-| 最终设计 | ⬜ - |
-
-### 🔧 控制命令
-
-| 命令 | 用途 |
-|------|------|
-| \`/accept\` | 从头开始完整分析 |
-| \`/retry\` | 从上次中断处续跑 |
-| \`/retry-design\` | 重跑架构设计 |
-| \`/retry-review\` | 重跑架构评审 |
-
----
-> AI 正在处理中，本评论会实时更新进度。
-<sub>🤖 tech-design-team · ${new Date().toISOString()}</sub>`;
+            const comment = [
+              '## 🤖 tech-design-team · 分析进度',
+              '',
+              `**Issue**: #${issueNumber} - ${issueTitle}`,
+              `**来源仓库**: ${{ github.event.client_payload.source_repo }}`,
+              '',
+              '### 📊 分析进度',
+              '',
+              '| 阶段 | 状态 |',
+              '|------|------|',
+              '| Phase 0 · 需求澄清 | 🔄 进行中 |',
+              '| Phase 1 · 需求分析 | ⬜ - |',
+              '| 🔒 审核关卡 1 | ⬜ - |',
+              '| Phase 2 · 架构设计 | ⬜ - |',
+              '| Phase 3 · 架构评审 | ⬜ - |',
+              '| 🔒 审核关卡 2 | ⬜ - |',
+              '| 最终设计 | ⬜ - |',
+              '',
+              '### 🔧 控制命令',
+              '',
+              '| 命令 | 用途 |',
+              '|------|------|',
+              '| `/accept` | 从头开始完整分析 |',
+              '| `/retry` | 从上次中断处续跑 |',
+              '| `/retry-design` | 重跑架构设计 |',
+              '| `/retry-review` | 重跑架构评审 |',
+              '',
+              '---',
+              '> AI 正在处理中，本评论会实时更新进度。',
+              `<sub>🤖 tech-design-team · ${timestamp}</sub>`
+            ].join('\n');
 
             await github.rest.issues.createComment({
               owner: owner,
