@@ -141,9 +141,18 @@ def trigger_ai_analysis(issue: Dict[str, Any], repo: str, token: str):
     
     log(f"🚀 Triggering AI analysis for #{issue_number}: {issue_title}")
     
+    # 获取目标仓库（dev-workflow 仓库）
+    target_repo = os.getenv('GITHUB_REPOSITORY', '')
+    if not target_repo:
+        # 如果在本地测试，使用默认值
+        target_repo = 'ZhengZhenyu/dev-workflow'
+        log(f"⚠️  GITHUB_REPOSITORY not set, using default: {target_repo}")
+    
+    log(f"   Target repo: {target_repo}")
+    
     # 方式 1: 通过 repository_dispatch 触发本地工作流
     # 这样可以在同一个仓库内启动完整的分析流程
-    dispatch_url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPOSITORY', '')}/dispatches"
+    dispatch_url = f"https://api.github.com/repos/{target_repo}/dispatches"
     
     payload = {
         'event_type': 'watched-issue-trigger',
@@ -217,6 +226,9 @@ def process_all_repos():
     log(f"🔍 Starting monitoring cycle")
     log(f"   Since: {since_time}")
     log(f"   Max events per run: {max_events}")
+    log(f"   GITHUB_REPOSITORY: {os.getenv('GITHUB_REPOSITORY', 'NOT SET')}")
+    log(f"   WATCH_TOKEN configured: {'Yes' if watch_token else 'No'}")
+    log(f"   DISPATCH_TOKEN configured: {'Yes' if dispatch_token else 'No'}")
     if test_repo:
         log(f"   Test mode: {test_repo}")
     
