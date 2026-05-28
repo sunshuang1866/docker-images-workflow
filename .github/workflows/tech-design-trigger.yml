@@ -133,7 +133,6 @@ jobs:
 
       - name: Run 需求分析
         env:
-          GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           TARGET_REPO: ${{ github.event.client_payload.source_repo }}
         run: python scripts/stages/01-requirements-analysis.py
 
@@ -201,7 +200,6 @@ jobs:
 
       - name: Run 架构设计
         env:
-          GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           TARGET_REPO: ${{ github.event.client_payload.source_repo }}
         run: python scripts/stages/02-architecture-design.py
 
@@ -269,7 +267,6 @@ jobs:
 
       - name: Run 架构评审
         env:
-          GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           TARGET_REPO: ${{ github.event.client_payload.source_repo }}
         run: python scripts/stages/03-architecture-review.py
 
