@@ -1,25 +1,11 @@
-# GitHub Actions 工作流 — tech-design-team 完整自动化链路
-#
-# 功能：
-#   1. 当 Issue 被标记为 rfc/bug 时，自动触发完整分析流程
-#   2. 通过 opencode 调用大模型，依次执行 5 个阶段的 agent 分析
-#   3. 自动更新 Issue 评论和标签，维护进度板
-#   4. 支持 /accept, /retry 等命令控制流程
-#
-# 架构参考: portal-workflow 的 self-service.yml 实现
-
-name: "tech-design-team: AI 分析完整链路"
+name: "tech-design-team: AI 分析链路"
 
 on:
-  issues:
-    types: [labeled, opened]
-  issue_comment:
-    types: [created]
   repository_dispatch:
-    types: [issue-trigger, watched-issue-trigger, watched-issue-command]
+    types: [run-phase]
 
 concurrency:
-  group: tech-design-${{ github.event.issue.number || github.event.client_payload.issue_number || github.run_id }}
+  group: tech-design-${{ github.event.client_payload.issue_number }}-${{ github.event.client_payload.source_repo }}
   cancel-in-progress: false
 
 permissions:
@@ -27,288 +13,31 @@ permissions:
   contents: read
 
 env:
-  # AI 模型配置
   AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
   AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
   AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
-  OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }} # 10 分钟
-  
-  # AI API 密钥（必需）
+  OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }}
   DASHSCOPE_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
 
 jobs:
-  # 触发条件：Issue 被打上 rfc 或 bug 标签
-  trigger-on-rfc-bug:
+  init:
     runs-on: ubuntu-latest
-    if: |
-      (github.event.action == 'labeled' && (github.event.label.name == 'rfc' || github.event.label.name == 'bug')) ||
-      (github.event.action == 'opened' && (contains(github.event.issue.labels.*.name, 'rfc') || contains(github.event.issue.labels.*.name, 'bug')))
+    if: github.event.action == 'run-phase' && github.event.client_payload.phase == 'init'
+    env:
+      SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+      ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
+      ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+    outputs:
+      has_conventions: ${{ steps.conventions.outputs.has_conventions }}
 
     steps:
-      - name: Checkout dev-workflow code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          path: dev-workflow
-
-      - name: Checkout source repo code
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.client_payload.source_repo }}
-          token: ${{ secrets.DISPATCH_TOKEN }}
-          fetch-depth: 1
-          path: source-repo
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        working-directory: dev-workflow
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Install OpenCode
-        working-directory: dev-workflow
-        run: |
-          npm install -g opencode-ai
-          opencode --version
-
-      - name: Discover and load project conventions
-        id: conventions
-        run: python dev-workflow/scripts/lib/discover_conventions.py source-repo dev-workflow/source-conventions.md
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Install OpenCode
-        run: |
-          npm install -g opencode-ai
-          opencode --version
-
-      - name: Add ai-pending label
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issue = context.issue;
-            try {
-              await github.rest.issues.addLabels({
-                owner: issue.owner,
-                repo: issue.repo,
-                issue_number: issue.number,
-                labels: ['ai-pending']
-              });
-            } catch (e) {
-              // label may already exist
-            }
-
-      - name: Post initial progress board
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issue = context.issue;
-            const timestamp = new Date().toISOString();
-            const comment = [
-              '## 🤖 tech-design-team · 分析进度',
-              '',
-              `**Issue**: #${issue.number} - ${context.payload.issue.title}`,
-              '',
-              '### 📊 分析进度',
-              '',
-              '| 阶段 | 状态 |',
-              '|------|------|',
-              '| Phase 1 · 需求分析 | 🔄 进行中 |',
-              '| 🔒 审核关卡 1 | ⬜ - |',
-              '| Phase 2 · 架构设计 | ⬜ - |',
-              '| Phase 3 · 架构评审 | ⬜ - |',
-              '| 🔒 审核关卡 2 | ⬜ - |',
-              '| 最终设计 | ⬜ - |',
-              '',
-              '### 🔧 控制命令',
-              '',
-              '| 命令 | 用途 |',
-              '|------|------|',
-              '| `/accept` | 从头开始完整分析 |',
-              '| `/retry` | 从上次中断处续跑 |',
-              '| `/retry-design` | 重跑架构设计 |',
-              '| `/retry-review` | 重跑架构评审 |',
-              '',
-              '---',
-              '> AI 正在处理中，本评论会实时更新进度。',
-              `<sub>🤖 tech-design-team · ${timestamp}</sub>`
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: issue.owner,
-              repo: issue.repo,
-              issue_number: issue.number,
-              body: comment
-            });
-
-      - name: Execute Phase 0 - 需求澄清
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/stages/00-phase0-clarification.py
-
-      - name: Wait for user response (Phase 0)
-        run: |
-          echo "⏳ Phase 0 完成，等待用户回复..."
-          echo "用户需要在 Issue 中回复 4 个问题的答案"
-          echo "可以使用 /ai-answer 命令快速回答"
-          # 注意：这里不阻塞，让用户在 GitHub 交互
-          # 后续通过 /accept 或 /retry 命令继续
-
-  # 触发条件：从其他仓库接收 repository_dispatch 事件（旧版兼容）
-  trigger-on-dispatch:
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'repository_dispatch' &&
-      github.event.action == 'issue-trigger'
-
-    steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-
-      - name: Install OpenCode
-        run: |
-          npm install -g opencode-ai
-          opencode --version
-
-      - name: Extract dispatch info
-        id: extract
-        run: |
-          echo "issue_number=${{ github.event.client_payload.issue_number }}" >> $GITHUB_OUTPUT
-          echo "issue_title=${{ github.event.client_payload.issue_title }}" >> $GITHUB_OUTPUT
-          echo "source_repo=${{ github.event.client_payload.source_repo }}" >> $GITHUB_OUTPUT
-          echo "Source repo: ${{ github.event.client_payload.source_repo }}"
-          echo "Issue #${{ github.event.client_payload.issue_number }}: ${{ github.event.client_payload.issue_title }}"
-
-      - name: Add ai-pending label to source issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.DISPATCH_TOKEN }}
-          script: |
-            const sourceRepo = `${{ github.event.client_payload.source_repo }}`.split('/');
-            const owner = sourceRepo[0];
-            const repo = sourceRepo[1];
-            const issueNumber = ${{ github.event.client_payload.issue_number }};
-            
-            try {
-              await github.rest.issues.addLabels({
-                owner: owner,
-                repo: repo,
-                issue_number: issueNumber,
-                labels: ['ai-pending']
-              });
-              console.log('✅ Added ai-pending label to source issue');
-            } catch (e) {
-              console.log('Label may already exist:', e.message);
-            }
-
-      - name: Post initial progress board to source issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.DISPATCH_TOKEN }}
-          script: |
-            const sourceRepo = `${{ github.event.client_payload.source_repo }}`.split('/');
-            const owner = sourceRepo[0];
-            const repo = sourceRepo[1];
-            const issueNumber = ${{ github.event.client_payload.issue_number }};
-            const issueTitle = `${{ github.event.client_payload.issue_title }}`;
-            const timestamp = new Date().toISOString();
-            
-            const comment = [
-              '## 🤖 tech-design-team · 分析进度',
-              '',
-              `**Issue**: #${issueNumber} - ${issueTitle}`,
-              `**来源仓库**: ${{ github.event.client_payload.source_repo }}`,
-              '',
-              '### 📊 分析进度',
-              '',
-              '| 阶段 | 状态 |',
-              '|------|------|',
-              '| Phase 1 · 需求分析 | 🔄 进行中 |',
-              '| 🔒 审核关卡 1 | ⬜ - |',
-              '| Phase 2 · 架构设计 | ⬜ - |',
-              '| Phase 3 · 架构评审 | ⬜ - |',
-              '| 🔒 审核关卡 2 | ⬜ - |',
-              '| 最终设计 | ⬜ - |',
-              '',
-              '### 🔧 控制命令',
-              '',
-              '| 命令 | 用途 |',
-              '|------|------|',
-              '| `/accept` | 从头开始完整分析 |',
-              '| `/retry` | 从上次中断处续跑 |',
-              '| `/retry-design` | 重跑架构设计 |',
-              '| `/retry-review` | 重跑架构评审 |',
-              '',
-              '---',
-              '> AI 正在处理中，本评论会实时更新进度。',
-              `<sub>🤖 tech-design-team · ${timestamp}</sub>`
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: owner,
-              repo: repo,
-              issue_number: issueNumber,
-              body: comment
-            });
-            console.log('✅ Posted progress board to source issue');
-
-      - name: Execute Phase 0 - 需求澄清
-        env:
-          GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
-          ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
-          ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
-          TARGET_REPO: ${{ github.event.client_payload.source_repo }}
-        run: python scripts/stages/00-phase0-clarification.py
-
-      - name: Wait for user response (Phase 0)
-        run: |
-          echo "⏳ Phase 0 完成，等待用户回复..."
-          echo "用户需要在源仓库 Issue 中回复 4 个问题的答案"
-          echo "可以使用 /ai-answer 命令快速回答"
-
-  # 触发条件：从 watchlist 监控触发的 Issue
-  trigger-on-watch:
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'repository_dispatch' &&
-      github.event.action == 'watched-issue-trigger'
-
-    steps:
-      - name: Checkout dev-workflow code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Checkout source repo code
+      - name: Checkout source repo
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.client_payload.source_repo }}
@@ -321,7 +50,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -331,131 +60,54 @@ jobs:
           npm install -g opencode-ai
           opencode --version
 
-      - name: Discover and load project conventions
+      - name: Load conventions
         id: conventions
-        run: python scripts/lib/discover_conventions.py
+        run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
 
-      - name: Extract watch event info
-        id: extract
-        run: |
-          echo "issue_number=${{ github.event.client_payload.issue_number }}" >> $GITHUB_OUTPUT
-          echo "issue_title=${{ github.event.client_payload.issue_title }}" >> $GITHUB_OUTPUT
-          echo "source_repo=${{ github.event.client_payload.source_repo }}" >> $GITHUB_OUTPUT
-          echo "Source repo: ${{ github.event.client_payload.source_repo }}"
-          echo "Issue #${{ github.event.client_payload.issue_number }}: ${{ github.event.client_payload.issue_title }}"
+      - name: Ensure labels
+        run: python scripts/lib/phase_helper.py ensure-labels
 
-      - name: Add ai-pending label to source issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
-          script: |
-            const sourceRepo = `${{ github.event.client_payload.source_repo }}`.split('/');
-            const owner = sourceRepo[0];
-            const repo = sourceRepo[1];
-            const issueNumber = ${{ github.event.client_payload.issue_number }};
-            
-            try {
-              await github.rest.issues.addLabels({
-                owner: owner,
-                repo: repo,
-                issue_number: issueNumber,
-                labels: ['ai-pending']
-              });
-              console.log('✅ Added ai-pending label to source issue');
-            } catch (e) {
-              console.log('Label may already exist:', e.message);
-            }
+      - name: Add labels
+        run: python scripts/lib/phase_helper.py add-labels
 
-      - name: Post initial progress board to source issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
-          script: |
-            const sourceRepo = `${{ github.event.client_payload.source_repo }}`.split('/');
-            const owner = sourceRepo[0];
-            const repo = sourceRepo[1];
-            const issueNumber = ${{ github.event.client_payload.issue_number }};
-            const issueTitle = `${{ github.event.client_payload.issue_title }}`;
-            const timestamp = new Date().toISOString();
-            
-            const comment = [
-              '## 🤖 tech-design-team · 分析进度',
-              '',
-              `**Issue**: #${issueNumber} - ${issueTitle}`,
-              `**来源仓库**: ${{ github.event.client_payload.source_repo }}`,
-              '',
-              '### 📊 分析进度',
-              '',
-              '| 阶段 | 状态 |',
-              '|------|------|',
-              '| Phase 1 · 需求分析 | 🔄 进行中 |',
-              '| 🔒 审核关卡 1 | ⬜ - |',
-              '| Phase 2 · 架构设计 | ⬜ - |',
-              '| Phase 3 · 架构评审 | ⬜ - |',
-              '| 🔒 审核关卡 2 | ⬜ - |',
-              '| 最终设计 | ⬜ - |',
-              '',
-              '### 🔧 控制命令',
-              '',
-              '| 命令 | 用途 |',
-              '|------|------|',
-              '| `/accept` | 从头开始完整分析 |',
-              '| `/retry` | 从上次中断处续跑 |',
-              '| `/retry-design` | 重跑架构设计 |',
-              '| `/retry-review` | 重跑架构评审 |',
-              '',
-              '---',
-              '> AI 正在处理中，本评论会实时更新进度。',
-              `<sub>🤖 tech-design-team · ${timestamp}</sub>`
-            ].join('\n');
+      - name: Post progress board
+        run: python scripts/lib/phase_helper.py post-board
 
-            await github.rest.issues.createComment({
-              owner: owner,
-              repo: repo,
-              issue_number: issueNumber,
-              body: comment
-            });
-            console.log('✅ Posted progress board to source issue');
+      - name: Auto-trigger Phase 1
+        run: python scripts/lib/phase_helper.py self-dispatch phase1
 
-      - name: Execute Phase 1 - 需求分析
-        env:
-          GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
-          ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
-          ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
-          TARGET_REPO: ${{ github.event.client_payload.source_repo }}
-        run: |
-          # 让 build agent 能立即找到源代码
-          WORK_DIR="$HOME/tech-design-data/work/${{ github.event.client_payload.issue_number }}"
-          mkdir -p "$WORK_DIR"
-          ln -sf "$PWD/source-repo" "$WORK_DIR/source-repo"
-          python scripts/stages/01-requirements-analysis.py
-
-      - name: Wait for user response (Phase 1)
-        run: |
-          echo "✅ Phase 1 需求分析完成"
-          echo "请检查源仓库 Issue 中的分析结果"
-
-  # 处理 /accept 和 /retry 命令（支持 issue_comment + repository_dispatch）
-  on-command:
+  phase1:
     runs-on: ubuntu-latest
     if: |
-      (github.event_name == 'issue_comment' && github.event.action == 'created' &&
-       (startsWith(github.event.comment.body, '/accept') || startsWith(github.event.comment.body, '/retry'))) ||
-      (github.event_name == 'repository_dispatch' && github.event.action == 'watched-issue-command')
+      github.event_name == 'repository_dispatch' &&
+      github.event.action == 'run-phase' &&
+      github.event.client_payload.phase == 'phase1'
+    env:
+      SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+      ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
+      ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.source_repo }}
+          token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          fetch-depth: 1
+          path: source-repo
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -465,80 +117,162 @@ jobs:
           npm install -g opencode-ai
           opencode --version
 
-      - name: Parse command
-        id: parse
+      - name: Load conventions
+        run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
+
+      - name: Prepare work dir
         run: |
-          CMD="${{ github.event.client_payload.command }}"
-          if [ -z "$CMD" ]; then
-            CMD=$(echo "${{ github.event.comment.body }}" | head -1 | tr -d '\r' | awk '{$1=$1};1')
-          fi
-          echo "command=$CMD" >> $GITHUB_OUTPUT
+          mkdir -p "$HOME/tech-design-data/work/$ISSUE_NUMBER"
+          ln -sf "$(pwd)/source-repo" "$HOME/tech-design-data/work/$ISSUE_NUMBER/source-repo"
+          ln -sf "$(pwd)/source-conventions.md" "$HOME/tech-design-data/work/$ISSUE_NUMBER/source-conventions.md"
 
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            ISSUE_NUM="${{ github.event.client_payload.issue_number }}"
-            ISSUE_TITLE="${{ github.event.client_payload.issue_title }}"
-            SOURCE_REPO="${{ github.event.client_payload.source_repo }}"
-          else
-            ISSUE_NUM="${{ github.event.issue.number }}"
-            ISSUE_TITLE="${{ github.event.issue.title }}"
-            SOURCE_REPO="${{ github.repository }}"
-          fi
-          echo "issue_number=$ISSUE_NUM" >> $GITHUB_OUTPUT
-          echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
-          echo "source_repo=$SOURCE_REPO" >> $GITHUB_OUTPUT
+      - name: Mark phase running
+        run: python scripts/lib/phase_helper.py set-label phase1 running
 
-          case "$CMD" in
-            /accept*)         START=phase2 ;;
-            /retry-design*)   START=phase2 ;;
-            /retry-review*)   START=phase3 ;;
-            /retry*)          START=phase1 ;;
-            *)                START=phase2 ;;
-          esac
-          echo "start_stage=$START" >> $GITHUB_OUTPUT
-          echo "command_parsed: $CMD → start_stage=$START"
-
-      - name: Execute phases
+      - name: Run Phase 1
         env:
           GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.parse.outputs.issue_number }}
-          ISSUE_TITLE: ${{ steps.parse.outputs.issue_title }}
-          TARGET_REPO: ${{ steps.parse.outputs.source_repo }}
-          START_STAGE: ${{ steps.parse.outputs.start_stage }}
+          TARGET_REPO: ${{ github.event.client_payload.source_repo }}
+        run: python scripts/stages/01-requirements-analysis.py
+
+      - name: Update progress board
+        if: success()
+        run: python scripts/lib/phase_helper.py update-board phase1 done
+
+      - name: Mark failed
+        if: failure()
+        run: python scripts/lib/phase_helper.py update-board phase1 failed
+
+  phase2:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'repository_dispatch' &&
+      github.event.action == 'run-phase' &&
+      github.event.client_payload.phase == 'phase2'
+    env:
+      SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+      ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
+      ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.source_repo }}
+          token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          fetch-depth: 1
+          path: source-repo
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
         run: |
-          echo "Starting from: $START_STAGE"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-          RUN_PHASE1=false
-          RUN_PHASE2=false
-          RUN_PHASE3=false
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
 
-          case "$START_STAGE" in
-            phase1)
-              RUN_PHASE1=true
-              RUN_PHASE2=true
-              RUN_PHASE3=true
-              ;;
-            phase2)
-              RUN_PHASE2=true
-              RUN_PHASE3=true
-              ;;
-            phase3)
-              RUN_PHASE3=true
-              ;;
-          esac
+      - name: Load conventions
+        run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
 
-          if [ "$RUN_PHASE1" = true ]; then
-            echo "▶ Running Phase 1: 需求分析"
-            python scripts/stages/01-requirements-analysis.py || echo "⚠ Phase 1 failed, continuing..."
-          fi
+      - name: Prepare work dir
+        run: |
+          mkdir -p "$HOME/tech-design-data/work/$ISSUE_NUMBER"
+          ln -sf "$(pwd)/source-repo" "$HOME/tech-design-data/work/$ISSUE_NUMBER/source-repo"
+          ln -sf "$(pwd)/source-conventions.md" "$HOME/tech-design-data/work/$ISSUE_NUMBER/source-conventions.md"
 
-          if [ "$RUN_PHASE2" = true ]; then
-            echo "▶ Running Phase 2: 架构设计"
-            python scripts/stages/02-architecture-design.py || echo "⚠ Phase 2 failed, continuing..."
-          fi
+      - name: Mark phase running
+        run: python scripts/lib/phase_helper.py set-label phase2 running
 
-          if [ "$RUN_PHASE3" = true ]; then
-            echo "▶ Running Phase 3: 架构评审"
-            python scripts/stages/03-architecture-review.py || echo "⚠ Phase 3 failed, continuing..."
-          fi
+      - name: Run Phase 2
+        env:
+          GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ github.event.client_payload.source_repo }}
+        run: python scripts/stages/02-architecture-design.py
 
-          echo "✅ All phases completed"
+      - name: Update progress board
+        if: success()
+        run: python scripts/lib/phase_helper.py update-board phase2 done
+
+      - name: Mark failed
+        if: failure()
+        run: python scripts/lib/phase_helper.py update-board phase2 failed
+
+  phase3:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'repository_dispatch' &&
+      github.event.action == 'run-phase' &&
+      github.event.client_payload.phase == 'phase3'
+    env:
+      SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+      ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
+      ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.source_repo }}
+          token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          fetch-depth: 1
+          path: source-repo
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
+      - name: Load conventions
+        run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
+
+      - name: Prepare work dir
+        run: |
+          mkdir -p "$HOME/tech-design-data/work/$ISSUE_NUMBER"
+          ln -sf "$(pwd)/source-repo" "$HOME/tech-design-data/work/$ISSUE_NUMBER/source-repo"
+          ln -sf "$(pwd)/source-conventions.md" "$HOME/tech-design-data/work/$ISSUE_NUMBER/source-conventions.md"
+
+      - name: Mark phase running
+        run: python scripts/lib/phase_helper.py set-label phase3 running
+
+      - name: Run Phase 3
+        env:
+          GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ github.event.client_payload.source_repo }}
+        run: python scripts/stages/03-architecture-review.py
+
+      - name: Update progress board
+        if: success()
+        run: python scripts/lib/phase_helper.py update-board phase3 done
+
+      - name: Mark failed
+        if: failure()
+        run: python scripts/lib/phase_helper.py update-board phase3 failed
