@@ -19,14 +19,14 @@ Label 体系:
   ai-arch-design-done        架构设计完成
   ai-arch-design-fail        架构设计失败
   ai-arch-review             架构评审进行中
-  ai-arch-review-done        架构评审完成
-  ai-arch-review-fail        架构评审失败
-  ai-done                    全流程完成
+  ai-arch-review-done       架构评审完成
+  ai-arch-review-fail       架构评审失败
+  ai-design-done            设计流程完成（等待人工确认或开发）
 
 命令体系:
   /analyze          入口命令：触发全流程（命令触发模式下使用）
-  /accept           确认当前阶段，推进到下一阶段
-  /retry            重跑当前失败阶段
+  /accept           确认当前阶段完成，进入下一阶段
+  /retry            重跑当前失败阶段，或在 design-done 状态下重跑架构评审
   /skip             跳过当前失败/完成阶段
   /retry-req        重跑需求分析
   /retry-arch       重跑架构设计
@@ -54,13 +54,15 @@ PHASE_STAGE_FILE = {
 NEXT_PHASE = {
     'req-analysis': 'arch-design',
     'arch-design': 'arch-review',
-    'arch-review': 'done',
+    'arch-review': 'design-done',
 }
+
+DESIGN_DONE_PHASE = 'design-done'
 
 PHASE_LABEL_REGEX = r'^(req-analysis|arch-design|arch-review)$'
 
 LABEL_REGEX = re.compile(
-    r'^ai-(pending|done|req-analysis|arch-design|arch-review)(?:-(done|fail))?$'
+    r'^ai-(pending|design-done|req-analysis|arch-design|arch-review)(?:-(done|fail))?$'
 )
 
 STATUSES = ['pending', 'running', 'done', 'fail']
@@ -70,7 +72,7 @@ ALL_AI_LABELS = [
     'ai-req-analysis', 'ai-req-analysis-done', 'ai-req-analysis-fail',
     'ai-arch-design', 'ai-arch-design-done', 'ai-arch-design-fail',
     'ai-arch-review', 'ai-arch-review-done', 'ai-arch-review-fail',
-    'ai-done',
+    'ai-design-done',
 ]
 
 LABEL_COLORS = {
@@ -84,7 +86,7 @@ LABEL_COLORS = {
     'ai-arch-review': '0052cc',
     'ai-arch-review-done': '0e8a16',
     'ai-arch-review-fail': 'd73a4a',
-    'ai-done': '5319e7',
+    'ai-design-done': '5319e7',
 }
 
 LABEL_DESCRIPTIONS = {
@@ -98,7 +100,7 @@ LABEL_DESCRIPTIONS = {
     'ai-arch-review': 'AI 分析: 架构评审进行中',
     'ai-arch-review-done': 'AI 分析: 架构评审完成',
     'ai-arch-review-fail': 'AI 分析: 架构评审失败',
-    'ai-done': 'AI 分析: 全流程完成',
+    'ai-design-done': 'AI 分析: 设计流程完成',
 }
 
 ENTRY_COMMAND = '/analyze'
@@ -144,8 +146,8 @@ class PhaseState:
 
 
 def build_label(phase: str, status: str) -> str:
-    if phase == 'done':
-        return 'ai-done'
+    if phase == DESIGN_DONE_PHASE:
+        return 'ai-design-done'
     if status == 'running':
         return f'ai-{phase}'
     return f'ai-{phase}-{status}'
@@ -155,8 +157,8 @@ def parse_phase_from_labels(labels: List[str]) -> PhaseState:
     for label in labels:
         if label == 'ai-pending':
             return PhaseState(phase=None, status='pending', label=label)
-        if label == 'ai-done':
-            return PhaseState(phase='done', status='done', label=label)
+        if label == 'ai-design-done':
+            return PhaseState(phase=DESIGN_DONE_PHASE, status='done', label=label)
         m = LABEL_REGEX.match(label)
         if m:
             phase = m.group(1)
@@ -181,7 +183,9 @@ def should_apply_command(command: str, label_state: Optional[PhaseState]) -> Opt
     current = label_state.phase
     status = label_state.status
 
-    if current == 'done':
+    if current == DESIGN_DONE_PHASE:
+        if command == '/retry':
+            return 'arch-review'
         return None
 
     if command == '/accept':
@@ -197,7 +201,7 @@ def should_apply_command(command: str, label_state: Optional[PhaseState]) -> Opt
     if command == '/skip':
         if status in ('fail', 'done'):
             nxt = NEXT_PHASE.get(current)
-            return nxt or 'done'
+            return nxt or DESIGN_DONE_PHASE
         return None
 
     if command in PHASE_RETRY_COMMANDS:

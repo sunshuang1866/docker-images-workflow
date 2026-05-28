@@ -45,6 +45,8 @@ from scripts.lib.state_machine import (
     PHASE_DISPLAY,
     NEXT_PHASE,
     AUTO_ADVANCE,
+    DESIGN_DONE_PHASE,
+    build_label,
     STUCK_TIMEOUT_MINUTES,
 )
 
@@ -181,7 +183,7 @@ def has_entry_command(comments: List[Dict[str, Any]]) -> Optional[Dict[str, str]
 # ── Stuck 检测 ──
 
 def check_stuck_phase(issue: Dict[str, Any], label_state: PhaseState) -> bool:
-    if not label_state.is_running or label_state.phase == 'done':
+    if not label_state.is_running or label_state.phase == DESIGN_DONE_PHASE:
         return False
     updated_at = issue.get('updated_at', '')
     if not updated_at:
@@ -228,18 +230,24 @@ def dispatch_phase(repo: str, issue: Dict[str, Any], phase: str, token: str) -> 
         return False
 
 
-def mark_issue_stuck(repo: str, issue_number: int, label_state: PhaseState, token: str):
-    owner, name = repo.split('/')
+def set_label_on_issue(owner: str, name: str, issue_number: int, new_label: str, token: str):
     url = f"https://api.github.com/repos/{owner}/{name}/issues/{issue_number}"
     resp = requests.get(url, headers=get_headers(token), timeout=30)
     resp.raise_for_status()
     current_labels = [l['name'] for l in resp.json().get('labels', [])]
 
     keep_labels = [l for l in current_labels if not l.startswith('ai-')]
-    keep_labels.append(build_label(label_state.phase, 'fail'))
+    keep_labels.append(new_label)
 
     labels_url = f"https://api.github.com/repos/{owner}/{name}/issues/{issue_number}/labels"
     requests.put(labels_url, headers=get_headers(token), json={'labels': keep_labels}, timeout=30)
+    log(f"  🏷️ #{issue_number}: → {new_label}")
+
+
+def mark_issue_stuck(repo: str, issue_number: int, label_state: PhaseState, token: str):
+    owner, name = repo.split('/')
+    new_label = build_label(label_state.phase, 'fail')
+    set_label_on_issue(owner, name, issue_number, new_label, token)
 
     comment_url = f"https://api.github.com/repos/{owner}/{name}/issues/{issue_number}/comments"
     body = f"⚠️ **Stuck detection**: {PHASE_DISPLAY.get(label_state.phase, label_state.phase)} "
@@ -367,11 +375,11 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
                 mark_issue_stuck(repo, issue_number, label_state, watch_token)
             continue
 
-        if label_state.is_done and label_state.phase not in (None, 'done'):
+        if label_state.is_done and label_state.phase not in (None, DESIGN_DONE_PHASE):
             if AUTO_ADVANCE.get(label_state.phase, False):
                 target = NEXT_PHASE.get(label_state.phase)
-                if target == 'done':
-                    log(f"    ✅ #{issue_number}: {label_state.phase} done → all phases complete")
+                if target == DESIGN_DONE_PHASE:
+                    log(f"    ✅ #{issue_number}: {label_state.phase} done → all design phases complete")
                 elif target:
                     log(f"    🔄 #{issue_number}: {label_state.phase} done → auto-advance to {target}")
                     issue_data = {
@@ -398,8 +406,11 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
         log(f"    🔔 #{issue_number}: {command_info['command']} → {target} "
             f"(from {label_state.label})")
 
-        if target == 'done':
-            log(f"    ✅ #{issue_number}: all phases complete")
+        if target == DESIGN_DONE_PHASE:
+            log(f"    ✅ #{issue_number}: all design phases complete → marking ai-design-done")
+            owner, name = repo.split('/')
+            new_label = build_label(DESIGN_DONE_PHASE, 'done')
+            set_label_on_issue(owner, name, issue_number, new_label, watch_token)
             continue
 
         issue_data = {

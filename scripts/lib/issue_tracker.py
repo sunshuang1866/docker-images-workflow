@@ -64,7 +64,7 @@ def is_issue_tracked(labels: List[str]) -> bool:
 
 
 def should_skip_issue(labels: List[str]) -> bool:
-    return 'ai-done' in labels
+    return 'ai-design-done' in labels
 
 
 def get_ai_labels_on_issue(owner: str, repo: str, issue_number: int) -> List[str]:

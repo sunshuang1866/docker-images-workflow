@@ -66,7 +66,7 @@
 ### 状态流转
 
 ```
-/analyze（未追踪）→ init → req-analysis（自动）→ arch-design（/accept）→ arch-review（自动）→ done（/accept）
+/analyze（未追踪）→ init → req-analysis（自动）→ arch-design（/accept）→ arch-review（自动）→ design-done（/accept）
                                         ↓ fail                ↓ fail              ↓ fail
                                     /retry 或 /skip        /retry 或 /skip      /retry 或 /skip
 ```
@@ -74,7 +74,8 @@
 - `init` 到 `req-analysis` 自动推进
 - `req-analysis-done` 到 `arch-design` 需用户 `/accept` 确认
 - `arch-design-done` 到 `arch-review` 自动推进（AI 自动进行架构评审）
-- `arch-review-done` 到 `done` 需用户 `/accept` 确认（人工最终确认）
+- `arch-review-done` 到 `design-done` 需用户 `/accept` 确认（人工最终确认，标记为 `ai-design-done`）
+- 在 `ai-design-done` 状态下 `/retry` 可重跑架构评审
 
 ### 控制命令
 
@@ -82,7 +83,7 @@
 |------|------|
 | `/analyze` | 启动分析（未追踪的 Issue，命令触发模式下使用） |
 | `/accept` | 确认当前阶段完成，进入下一阶段 |
-| `/retry` | 重跑当前失败阶段 |
+| `/retry` | 重跑当前失败阶段，或在 `ai-design-done` 状态下重跑架构评审 |
 | `/skip` | 跳过当前失败/完成阶段 |
 | `/retry-req` | 重跑需求分析 |
 | `/retry-arch` | 重跑架构设计 |

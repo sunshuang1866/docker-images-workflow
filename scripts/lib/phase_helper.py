@@ -26,6 +26,7 @@ from scripts.lib.state_machine import (
     LABEL_DESCRIPTIONS,
     NEXT_PHASE,
     PHASE_DISPLAY,
+    DESIGN_DONE_PHASE,
     build_label,
 )
 
@@ -190,7 +191,7 @@ def cmd_update_board():
 
     if status == 'done':
         next_phase = NEXT_PHASE.get(phase)
-        if next_phase and next_phase != 'done' and stages.get(next_phase, 'pending') == 'pending':
+        if next_phase and next_phase != DESIGN_DONE_PHASE and stages.get(next_phase, 'pending') == 'pending':
             stages[next_phase] = 'in_progress'
 
     _ensure_board(owner, repo, issue_number, params['issue_title'], params['source_repo'], stages)
