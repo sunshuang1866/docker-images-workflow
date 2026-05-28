@@ -27,6 +27,7 @@ from scripts.lib.state_machine import (
     NEXT_PHASE,
     PHASE_DISPLAY,
     DESIGN_DONE_PHASE,
+    AUTO_ADVANCE,
     build_label,
 )
 
@@ -197,18 +198,25 @@ def cmd_update_board():
     _ensure_board(owner, repo, issue_number, params['issue_title'], params['source_repo'], stages)
     print(f'✅ Board updated: {phase} → {status}')
 
+    if status == 'done' and AUTO_ADVANCE.get(phase, False):
+        next_phase = NEXT_PHASE.get(phase)
+        if next_phase == DESIGN_DONE_PHASE:
+            set_issue_label(owner, repo, issue_number, DESIGN_DONE_PHASE, 'done')
+            print(f'✅ Auto-advance: {phase} done → design-done')
+        elif next_phase:
+            set_issue_label(owner, repo, issue_number, next_phase, 'running')
+            print(f'✅ Auto-advance: {phase} done → {next_phase} running')
+            success = _dispatch_next_phase(next_phase, params)
+            if not success:
+                print(f'⚠️ Auto-advance dispatch failed, falling back to done label')
+                set_issue_label(owner, repo, issue_number, phase, 'done')
+        return
+
     set_issue_label(owner, repo, issue_number, phase, status)
 
 
-def cmd_self_dispatch():
-    if len(sys.argv) < 3:
-        print('Usage: phase_helper.py self-dispatch <phase>')
-        sys.exit(1)
-    phase = sys.argv[2]
-
-    params = get_params()
+def _dispatch_next_phase(phase: str, params: dict) -> bool:
     target_repo = os.getenv('GITHUB_REPOSITORY', 'ZhengZhenyu/dev-workflow')
-
     url = f"https://api.github.com/repos/{target_repo}/dispatches"
     payload = {
         'event_type': 'run-phase',
@@ -220,12 +228,27 @@ def cmd_self_dispatch():
             'issue_body': params['issue_body'],
         }
     }
+    try:
+        resp = requests.post(url, headers=get_headers(), json=payload, timeout=30)
+        if resp.status_code == 204:
+            print(f'✅ Dispatched: phase={phase} for #{params["issue_number"]}')
+            return True
+        else:
+            print(f'❌ Dispatch failed HTTP {resp.status_code}: {resp.text}')
+            return False
+    except Exception as e:
+        print(f'❌ Dispatch error: {e}')
+        return False
 
-    resp = requests.post(url, headers=get_headers(), json=payload, timeout=30)
-    if resp.status_code == 204:
-        print(f'✅ Self-dispatched: phase={phase} for #{params["issue_number"]}')
-    else:
-        print(f'❌ Self-dispatch failed HTTP {resp.status_code}: {resp.text}')
+
+def cmd_self_dispatch():
+    if len(sys.argv) < 3:
+        print('Usage: phase_helper.py self-dispatch <phase>')
+        sys.exit(1)
+    phase = sys.argv[2]
+    params = get_params()
+    success = _dispatch_next_phase(phase, params)
+    if not success:
         sys.exit(1)
 
 

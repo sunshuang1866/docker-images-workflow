@@ -384,7 +384,7 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
                     new_label = build_label(DESIGN_DONE_PHASE, 'done')
                     set_label_on_issue(owner, name, issue_number, new_label, watch_token)
                 elif target:
-                    log(f"    🔄 #{issue_number}: {label_state.phase} done → auto-advance to {target}")
+                    log(f"    🔄 #{issue_number}: {label_state.phase} done → auto-advance fallback to {target}")
                     issue_data = {
                         'number': issue['number'],
                         'title': issue.get('title', ''),
