@@ -113,7 +113,7 @@ PHASE_RETRY_COMMANDS = {
 
 ALL_COMMANDS = [ENTRY_COMMAND] + FLOW_COMMANDS + list(PHASE_RETRY_COMMANDS.keys())
 
-AUTO_ADVANCE = {'init': True, 'req-analysis': False, 'arch-design': False}
+AUTO_ADVANCE = {'init': True, 'req-analysis': False, 'arch-design': True}
 
 TRIGGER_MODES = ['label', 'command', 'both']
 

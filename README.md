@@ -66,14 +66,15 @@
 ### 状态流转
 
 ```
-/analyze（未追踪）→ init → req-analysis（自动）→ arch-design（/accept）→ arch-review（/accept）→ done
+/analyze（未追踪）→ init → req-analysis（自动）→ arch-design（/accept）→ arch-review（自动）→ done（/accept）
                                         ↓ fail                ↓ fail              ↓ fail
                                     /retry 或 /skip        /retry 或 /skip      /retry 或 /skip
 ```
 
 - `init` 到 `req-analysis` 自动推进
 - `req-analysis-done` 到 `arch-design` 需用户 `/accept` 确认
-- `arch-design-done` 到 `arch-review` 需用户 `/accept` 确认
+- `arch-design-done` 到 `arch-review` 自动推进（AI 自动进行架构评审）
+- `arch-review-done` 到 `done` 需用户 `/accept` 确认（人工最终确认）
 
 ### 控制命令
 

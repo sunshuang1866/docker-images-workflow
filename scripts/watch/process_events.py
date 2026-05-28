@@ -14,7 +14,7 @@ Issue 监控 + 命令处理 — Label 驱动状态机
   /analyze (未追踪) → dispatch init
   ai-pending → init 自动 dispatch req-analysis
   ai-req-analysis-done + /accept → dispatch arch-design
-  ai-arch-design-done + /accept → dispatch arch-review
+  ai-arch-design-done → 自动 dispatch arch-review (无需 /accept)
   ai-arch-review-done + /accept → 标记完成
   ai-*-fail + /retry → dispatch 对应 phase
   ai-*-fail + /skip → dispatch 下一 phase
@@ -44,6 +44,7 @@ from scripts.lib.state_machine import (
     PHASE_RETRY_COMMANDS,
     PHASE_DISPLAY,
     NEXT_PHASE,
+    AUTO_ADVANCE,
     STUCK_TIMEOUT_MINUTES,
 )
 
@@ -365,6 +366,21 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
             if check_stuck_phase(issue, label_state):
                 mark_issue_stuck(repo, issue_number, label_state, watch_token)
             continue
+
+        if label_state.is_done and label_state.phase not in (None, 'done'):
+            if AUTO_ADVANCE.get(label_state.phase, False):
+                target = NEXT_PHASE.get(label_state.phase)
+                if target == 'done':
+                    log(f"    ✅ #{issue_number}: {label_state.phase} done → all phases complete")
+                elif target:
+                    log(f"    🔄 #{issue_number}: {label_state.phase} done → auto-advance to {target}")
+                    issue_data = {
+                        'number': issue['number'],
+                        'title': issue.get('title', ''),
+                        'body': issue.get('body') or '',
+                    }
+                    dispatch_phase(repo, issue_data, target, dispatch_token)
+                continue
 
         comments = fetch_all_comments(repo, issue_number, watch_token)
         command_info = parse_command_from_comments(comments)
