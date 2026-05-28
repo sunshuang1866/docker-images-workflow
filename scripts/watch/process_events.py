@@ -114,41 +114,61 @@ def fetch_all_open_issues(repo: str, token: str, max_issues: int = 50) -> List[D
         return []
 
 
-def fetch_recent_comments(repo: str, issue_number: int, token: str,
-                          count: int = 10) -> List[Dict[str, Any]]:
+def fetch_all_comments(repo: str, issue_number: int, token: str) -> List[Dict[str, Any]]:
     url = f"https://api.github.com/repos/{repo}/issues/{issue_number}/comments"
-    params = {'per_page': count, 'sort': 'created', 'direction': 'desc'}
-    try:
-        resp = requests.get(url, headers=get_headers(token), params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        log(f"  ❌ Comments for #{issue_number}: {e}")
-        return []
+    params = {'per_page': 100, 'sort': 'created', 'direction': 'asc', 'page': 1}
+    all_comments: List[Dict[str, Any]] = []
+    while True:
+        try:
+            resp = requests.get(url, headers=get_headers(token), params=params, timeout=30)
+            resp.raise_for_status()
+            page_data = resp.json()
+            if not page_data:
+                break
+            all_comments.extend(page_data)
+            if len(page_data) < params['per_page']:
+                break
+            params['page'] += 1
+        except Exception as e:
+            log(f"  ❌ Comments for #{issue_number} (page {params['page']}): {e}")
+            break
+    log(f"  💬 #{issue_number}: fetched {len(all_comments)} total comments")
+    return all_comments
 
 
 # ── 命令解析 ──
 
+def _find_command_in_body(body: str, commands: List[str]) -> Optional[str]:
+    for line in body.split('\n'):
+        stripped = line.strip()
+        for cmd in commands:
+            if stripped.startswith(cmd):
+                return cmd
+    return None
+
+
 def parse_command_from_comments(comments: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
     for comment in sorted(comments, key=lambda c: c.get('created_at', ''), reverse=True):
         body = (comment.get('body') or '').strip()
-        first_line = body.split('\n')[0].strip()
-        for cmd in ALL_COMMANDS:
-            if first_line.startswith(cmd):
-                return {
-                    'command': cmd,
-                    'comment_id': str(comment['id']),
-                    'comment_user': comment.get('user', {}).get('login', ''),
-                    'created_at': comment.get('created_at', ''),
-                }
+        if not body:
+            continue
+        cmd = _find_command_in_body(body, ALL_COMMANDS)
+        if cmd:
+            return {
+                'command': cmd,
+                'comment_id': str(comment['id']),
+                'comment_user': comment.get('user', {}).get('login', ''),
+                'created_at': comment.get('created_at', ''),
+            }
     return None
 
 
 def has_entry_command(comments: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
     for comment in sorted(comments, key=lambda c: c.get('created_at', ''), reverse=True):
         body = (comment.get('body') or '').strip()
-        first_line = body.split('\n')[0].strip()
-        if first_line.startswith(ENTRY_COMMAND):
+        if not body:
+            continue
+        if _find_command_in_body(body, [ENTRY_COMMAND]):
             return {
                 'comment_id': str(comment['id']),
                 'comment_user': comment.get('user', {}).get('login', ''),
@@ -290,6 +310,10 @@ def process_all():
 
             if trigger_mode in ('command', 'both'):
                 comments = fetch_recent_comments(repo, issue['number'], watch_token)
+                log(f"  💬 #{issue['number']}: fetched {len(comments)} comments")
+                for c in comments:
+                    preview = (c.get('body') or '')[:80].replace('\n', '\\n')
+                    log(f"     comment by {c.get('user', {}).get('login', '?')}: {preview}")
                 entry = has_entry_command(comments)
                 if entry:
                     new_count += 1
@@ -346,7 +370,7 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
                 mark_issue_stuck(repo, issue_number, label_state, watch_token)
             continue
 
-        comments = fetch_recent_comments(repo, issue_number, watch_token)
+        comments = fetch_all_comments(repo, issue_number, watch_token)
         command_info = parse_command_from_comments(comments)
 
         if not command_info:
