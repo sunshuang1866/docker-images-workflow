@@ -81,10 +81,10 @@ def extract_body_from_comment(comment_body: str) -> Optional[str]:
 
     pattern = re.compile(
         r'^## ' + re.escape(heading_keyword) + r'\s*\n'
-        r'(?:.*\n)*'
+        r'(?:.*\n)*?'
         r'^---\s*\n'
-        r'(.+)',
-        re.MULTILINE | re.DOTALL,
+        r'(?s:(.+))',
+        re.MULTILINE,
     )
     match = pattern.search(comment_body)
     if match:
