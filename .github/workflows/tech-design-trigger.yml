@@ -28,6 +28,7 @@ jobs:
       ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
       ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
       ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
     outputs:
       has_conventions: ${{ steps.conventions.outputs.has_conventions }}
 
@@ -87,6 +88,7 @@ jobs:
       ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
       ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
       ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
 
     steps:
       - name: Checkout
@@ -154,6 +156,7 @@ jobs:
       ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
       ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
       ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
 
     steps:
       - name: Checkout
@@ -221,6 +224,7 @@ jobs:
       ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
       ISSUE_TITLE: ${{ github.event.client_payload.issue_title }}
       ISSUE_BODY: ${{ github.event.client_payload.issue_body }}
+      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
 
     steps:
       - name: Checkout
