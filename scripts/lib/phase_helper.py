@@ -15,8 +15,10 @@ import os
 import sys
 import json
 import requests
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.lib.state_machine import (
     ALL_AI_LABELS,
