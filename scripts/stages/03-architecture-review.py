@@ -81,8 +81,15 @@ async def main():
         conventions_file=get_conventions_file(),
     )
 
-    with open(output_file, 'r', encoding='utf-8') as f:
-        review_content = f.read()
+    if not os.path.exists(output_file):
+        raise RuntimeError(
+            f'opencode 未生成输出文件: {output_file}\n'
+            f'result: {result}'
+        )
+
+    review_content = read_file(env['issue_number'], '03-architecture-review.md')
+    if not review_content:
+        raise RuntimeError(f'输出文件存在但读取失败: {output_file}')
 
     verdict = 'PASSED'
     if '<!-- review-verdict: NEEDS_ADJUSTMENT -->' in review_content:
