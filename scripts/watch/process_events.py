@@ -379,7 +379,10 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
             if AUTO_ADVANCE.get(label_state.phase, False):
                 target = NEXT_PHASE.get(label_state.phase)
                 if target == DESIGN_DONE_PHASE:
-                    log(f"    ✅ #{issue_number}: {label_state.phase} done → all design phases complete")
+                    log(f"    ✅ #{issue_number}: {label_state.phase} done → all design phases complete → marking ai-design-done")
+                    owner, name = repo.split('/')
+                    new_label = build_label(DESIGN_DONE_PHASE, 'done')
+                    set_label_on_issue(owner, name, issue_number, new_label, watch_token)
                 elif target:
                     log(f"    🔄 #{issue_number}: {label_state.phase} done → auto-advance to {target}")
                     issue_data = {
@@ -389,6 +392,7 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
                     }
                     dispatch_phase(repo, issue_data, target, dispatch_token)
                 continue
+            # AUTO_ADVANCE=False: fall through to command check below
 
         comments = fetch_all_comments(repo, issue_number, watch_token)
         command_info = parse_command_from_comments(comments)
