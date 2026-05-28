@@ -3,7 +3,7 @@
     {
       "repo": "opensourceways/community-health",
       "trigger_labels": ["feature", "bug"],
-      "trigger_mode": "label",
+      "trigger_mode": "command",
       "enabled": true,
       "description": "community-health 项目"
     }
