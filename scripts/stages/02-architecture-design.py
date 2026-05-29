@@ -2,9 +2,12 @@
 """
 Stage 2: 架构设计
 
-输入: 需求分析报告
+输入: 需求分析报告 + (可选) 架构评审反馈
 输出: $HOME/tech-design-data/work/<issue>/02-architecture-design.md
 副作用: 评论 Issue
+
+当存在前一轮 arch-review 产出时，将其作为 review_feedback 传入 context，
+使 architect agent 针对评审意见进行修订而非从头重做。
 """
 
 import os
@@ -50,16 +53,33 @@ async def main():
     if not requirements_md:
         raise RuntimeError('需求分析报告未找到（本地+Issue评论均无），请先运行 req-analysis')
 
+    review_md = read_file(env['issue_number'], '03-architecture-review.md')
+    if not review_md:
+        log_stage('arch-design', '本地文件缺失，尝试从 Issue 评论恢复 arch-review')
+        review_md = restore_phase_output(
+            env['issue_number'], 'arch-review',
+            env['owner'], env['repo'],
+        )
+
+    context = {
+        'requirements_analysis': requirements_md,
+        'issue': {
+            'number': issue.get('number', env['issue_number']),
+            'title': issue.get('title', ''),
+        },
+    }
+
+    if review_md:
+        log_stage('arch-design', f'包含评审反馈 ({len(review_md)} chars)，将针对评审意见修订')
+        context['review_feedback'] = review_md
+        instruction = '基于需求分析报告，针对架构评审的反馈意见修订架构设计。必须逐条回应 Blocking 问题，保留原有合理设计，仅修改评审指出的缺陷部分。仍然使用 4+1 视图模型。'
+    else:
+        instruction = '基于需求分析报告，产出完整的架构设计报告，必须使用 4+1 视图模型。'
+
     result = run_opencode(
         prompt_file=agent_prompt_file('architect'),
-        context={
-            'requirements_analysis': requirements_md,
-            'issue': {
-                'number': issue.get('number', env['issue_number']),
-                'title': issue.get('title', ''),
-            },
-        },
-        instruction='基于需求分析报告，产出完整的架构设计报告，必须使用 4+1 视图模型。',
+        context=context,
+        instruction=instruction,
         work_dir=work_dir,
         output_file=output_file,
         label='arch-design',
