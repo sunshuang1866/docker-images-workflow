@@ -150,10 +150,33 @@ def _find_command_in_body(body: str, commands: List[str]) -> Optional[str]:
     return None
 
 
+BOT_ACK_MARKER = '🤖 tech-design-team · 命令确认'
+
+
+def _post_command_ack(repo: str, issue_number: int, command: str, target: str,
+                      from_label: str, token: str):
+    owner, name = repo.split('/')
+    comment_url = f"https://api.github.com/repos/{owner}/{name}/issues/{issue_number}/comments"
+    body = f"{BOT_ACK_MARKER}\n\n> 命令 `{command}` 已处理: `{from_label}` → `{target}`"
+    requests.post(comment_url, headers=get_headers(token), json={'body': body}, timeout=30)
+
+
+def _find_last_ack_timestamp(comments: List[Dict[str, Any]]) -> Optional[str]:
+    for comment in reversed(comments):
+        body = (comment.get('body') or '')
+        if BOT_ACK_MARKER in body:
+            return comment.get('created_at', '')
+    return None
+
+
 def parse_command_from_comments(comments: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    ack_ts = _find_last_ack_timestamp(comments)
     for comment in sorted(comments, key=lambda c: c.get('created_at', ''), reverse=True):
         body = (comment.get('body') or '').strip()
         if not body:
+            continue
+        comment_ts = comment.get('created_at', '')
+        if ack_ts and comment_ts and comment_ts <= ack_ts:
             continue
         cmd = _find_command_in_body(body, ALL_COMMANDS)
         if cmd:
@@ -161,7 +184,7 @@ def parse_command_from_comments(comments: List[Dict[str, Any]]) -> Optional[Dict
                 'command': cmd,
                 'comment_id': str(comment['id']),
                 'comment_user': comment.get('user', {}).get('login', ''),
-                'created_at': comment.get('created_at', ''),
+                'created_at': comment_ts,
             }
     return None
 
@@ -415,6 +438,7 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
             owner, name = repo.split('/')
             new_label = build_label(DESIGN_DONE_PHASE, 'done')
             set_label_on_issue(owner, name, issue_number, new_label, watch_token)
+            _post_command_ack(repo, issue_number, command_info['command'], target, label_state.label, watch_token)
             continue
 
         issue_data = {
@@ -423,6 +447,7 @@ def _check_commands_on_tracked_issues(repo: str, issues: List[Dict[str, Any]],
             'body': issue.get('body') or '',
         }
         dispatch_phase(repo, issue_data, target, dispatch_token)
+        _post_command_ack(repo, issue_number, command_info['command'], target, label_state.label, watch_token)
 
 
 if __name__ == '__main__':
