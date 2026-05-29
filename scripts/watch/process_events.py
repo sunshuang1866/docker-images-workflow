@@ -145,7 +145,7 @@ def _find_command_in_body(body: str, commands: List[str]) -> Optional[str]:
     for line in body.split('\n'):
         stripped = line.strip()
         for cmd in commands:
-            if stripped.startswith(cmd):
+            if stripped == cmd or stripped.startswith(cmd + ' ') or stripped.startswith(cmd + '\t'):
                 return cmd
     return None
 

@@ -196,6 +196,8 @@ def should_apply_command(command: str, label_state: Optional[PhaseState]) -> Opt
     if command == '/retry':
         if status == 'fail':
             return current
+        if current == 'arch-review' and status == 'done':
+            return 'arch-design'
         return None
 
     if command == '/skip':
