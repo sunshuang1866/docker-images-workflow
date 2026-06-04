@@ -23,7 +23,7 @@ env:
   OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }}
   DASHSCOPE_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
 
-  # ── Claude Code 配置（AI_RUNNER=claude-code 时生效）───────────────
+  # ── Claude Code 配置（AI_RUNNER=claude-code / claude-code-account 时生效）──
   CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-sonnet-4-6' }}
   CLAUDE_EXTRA_ARGS: ${{ vars.CLAUDE_EXTRA_ARGS || '--dangerously-skip-permissions' }}
   CLAUDE_TIMEOUT_MS: ${{ vars.CLAUDE_TIMEOUT_MS || '600000' }}
@@ -70,9 +70,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Setup Claude Code account credentials
+        if: env.AI_RUNNER == 'claude-code-account'
+        env:
+          CLAUDE_CREDENTIALS_JSON: ${{ secrets.CLAUDE_CREDENTIALS_JSON }}
+        run: |
+          mkdir -p ~/.claude
+          echo "$CLAUDE_CREDENTIALS_JSON" > ~/.claude/.credentials.json
+          chmod 600 ~/.claude/.credentials.json
+
       - name: Install AI Agent
         run: |
-          if [ "$AI_RUNNER" = "claude-code" ]; then
+          if [ "$AI_RUNNER" = "claude-code" ] || [ "$AI_RUNNER" = "claude-code-account" ]; then
             npm install -g @anthropic-ai/claude-code
             claude --version
           else
@@ -159,9 +168,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Setup Claude Code account credentials
+        if: env.AI_RUNNER == 'claude-code-account'
+        env:
+          CLAUDE_CREDENTIALS_JSON: ${{ secrets.CLAUDE_CREDENTIALS_JSON }}
+        run: |
+          mkdir -p ~/.claude
+          echo "$CLAUDE_CREDENTIALS_JSON" > ~/.claude/.credentials.json
+          chmod 600 ~/.claude/.credentials.json
+
       - name: Install AI Agent
         run: |
-          if [ "$AI_RUNNER" = "claude-code" ]; then
+          if [ "$AI_RUNNER" = "claude-code" ] || [ "$AI_RUNNER" = "claude-code-account" ]; then
             npm install -g @anthropic-ai/claude-code
             claude --version
           else

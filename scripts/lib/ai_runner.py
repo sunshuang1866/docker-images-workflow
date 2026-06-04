@@ -3,8 +3,9 @@
 AI Agent 调用统一入口
 
 根据 AI_RUNNER 环境变量选择后端：
-  opencode    → opencode_run.run_opencode（默认）
-  claude-code → claude_code_run.run_claude_code
+  opencode             → opencode_run.run_opencode（默认）
+  claude-code          → claude_code_run.run_claude_code（Anthropic API Key）
+  claude-code-account  → claude_code_run.run_claude_code（Claude.ai 账号 OAuth）
 """
 
 import os
@@ -38,7 +39,7 @@ def run_agent(
     if timeout_ms is not None:
         kwargs['timeout_ms'] = timeout_ms
 
-    if runner == 'claude-code':
+    if runner in ('claude-code', 'claude-code-account'):
         from scripts.lib.claude_code_run import run_claude_code
         return run_claude_code(**kwargs)
     else:

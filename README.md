@@ -93,6 +93,7 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 |--------|------|---------|
 | `OPENAI_API_KEY` | OpenCode 模型 API Key（`AI_RUNNER=opencode`） | — |
 | `ANTHROPIC_API_KEY` | Anthropic API Key（`AI_RUNNER=claude-code`） | — |
+| `CLAUDE_CREDENTIALS_JSON` | Claude.ai 账号 OAuth 凭证（`AI_RUNNER=claude-code-account`） | — |
 | `WATCH_TOKEN` | 读取目标仓库 PR / CI 日志 | `contents:read`, `actions:read` |
 | `DISPATCH_TOKEN` | 触发 repository_dispatch | `repo`, `workflow` |
 | `WRITE_TOKEN` | 向目标仓库推送代码 + 创建 PR | `contents:write`, `pull-requests:write` |
@@ -103,7 +104,7 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `AI_RUNNER` | AI 后端选择：`opencode` 或 `claude-code` | `opencode` |
+| `AI_RUNNER` | AI 后端选择：`opencode` / `claude-code` / `claude-code-account` | `opencode` |
 
 **OpenCode（`AI_RUNNER=opencode`）**
 
@@ -158,7 +159,7 @@ OpenCode 兼容 OpenAI 接口，支持阿里通义、GLM 等国内模型。
 | 智谱 AI | https://open.bigmodel.cn/ | `alibaba-cn/glm-5.1` |
 | OpenAI | https://platform.openai.com/api-keys | `openai/gpt-4o` |
 
-### 使用 Claude Code
+### 使用 Claude Code（API Key 模式）
 
 Claude Code 使用 Anthropic 原生 API，无需兼容层。
 
@@ -173,3 +174,29 @@ Claude Code 使用 Anthropic 原生 API，无需兼容层。
 | `claude-haiku-4-5-20251001` | 最快，适合简单 lint / 格式修复 |
 
 > **提示**：获取 Anthropic API Key 请访问 https://console.anthropic.com/settings/keys
+
+### 使用 Claude Code（账号模式，无需 API Key）
+
+适合已有 Claude Pro / Max 订阅的用户，使用 OAuth 凭证而非 API Key，不产生额外 API 费用。
+
+**切换方式**：将 Variable `AI_RUNNER` 设为 `claude-code-account`
+
+**获取凭证（一次性操作，在本地机器执行）**：
+
+```bash
+# 1. 在本机登录 Claude Code
+claude
+
+# 首次运行时会引导完成 OAuth 登录（浏览器跳转）
+# 登录成功后凭证保存在 ~/.claude/.credentials.json
+
+# 2. 查看凭证内容，复制备用
+cat ~/.claude/.credentials.json
+```
+
+**配置 GitHub Secret**：
+
+将上述 `~/.claude/.credentials.json` 的完整 JSON 内容存入仓库 Secret `CLAUDE_CREDENTIALS_JSON`。
+
+> ⚠️ **注意**：OAuth Token 会过期（通常数周至数月），过期后需重新在本机登录并更新 Secret。
+> `CLAUDE_MODEL` / `CLAUDE_EXTRA_ARGS` / `CLAUDE_TIMEOUT_MS` 变量与 API Key 模式相同。
