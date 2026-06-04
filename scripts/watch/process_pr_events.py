@@ -25,7 +25,6 @@ sys.path.insert(0, PROJECT_ROOT)
 from scripts.lib.ci_api import detect_platform, normalize_repo, get_api
 
 WATCHLIST_FILE = os.path.join(PROJECT_ROOT, 'config', 'watchlist.json')
-CI_FAILED_LABEL = 'ci-failed'
 MAX_RETRIES = 3
 
 
@@ -86,6 +85,7 @@ def process_all():
         platform = detect_platform(raw_repo)
         repo = normalize_repo(raw_repo, platform)
         api = get_api(platform)
+        ci_failed_label = (repo_config.get('trigger_labels') or ['ci_failed'])[0]
 
         # GitCode token 优先用 GITCODE_WATCH_TOKEN，fallback WATCH_TOKEN
         token = watch_token
@@ -93,15 +93,15 @@ def process_all():
             token = os.getenv('GITCODE_WATCH_TOKEN') or watch_token
 
         log(f"\n{'='*60}")
-        log(f"📦 {repo} [{platform}]")
+        log(f"📦 {repo} [{platform}] label={ci_failed_label}")
 
         try:
-            prs = api.fetch_prs_with_label(repo, CI_FAILED_LABEL, token)
+            prs = api.fetch_prs_with_label(repo, ci_failed_label, token)
         except Exception as e:
             log(f"  ❌ Failed to fetch PRs: {e}")
             continue
 
-        log(f"  Found {len(prs)} PR(s) with '{CI_FAILED_LABEL}' label")
+        log(f"  Found {len(prs)} PR(s) with '{ci_failed_label}' label")
 
         for pr in prs:
             pr_number = pr['number']
@@ -118,7 +118,7 @@ def process_all():
 
             elif fix_pr['state'] == 'open':
                 fix_labels = [l['name'] for l in fix_pr.get('labels', [])]
-                if CI_FAILED_LABEL in fix_labels:
+                if ci_failed_label in fix_labels:
                     count = api.get_branch_commit_count(repo, fix_branch, pr_base, token)
                     log(f"    → Fix PR #{fix_pr['number']} ci-failed, commits={count}")
                     if count >= MAX_RETRIES:
