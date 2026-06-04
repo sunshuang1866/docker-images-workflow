@@ -37,6 +37,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug GitCode API
+        env:
+          GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN }}
+        run: |
+          python - <<'EOF'
+          import os, requests, json
+          token = os.getenv('GITCODE_WATCH_TOKEN', '')
+          print(f"GITCODE_WATCH_TOKEN: {'set (' + str(len(token)) + ' chars)' if token else 'NOT SET'}")
+          url = "https://gitcode.com/api/v5/repos/openeuler/openeuler-docker-images/pulls"
+          params = {'state': 'open', 'per_page': 20}
+          if token:
+              params['access_token'] = token
+          r = requests.get(url, params=params, timeout=15)
+          print(f"API status: {r.status_code}")
+          prs = r.json() if r.ok else []
+          print(f"Open PRs returned: {len(prs)}")
+          for pr in prs:
+              labels = [l.get('name') for l in (pr.get('labels') or [])]
+              print(f"  PR #{pr.get('number')}: labels={labels}")
+          EOF
+
       - name: Process PR events
         env:
           WATCH_TOKEN: ${{ secrets.WATCH_TOKEN }}
