@@ -1,11 +1,11 @@
 {
   "watched_repos": [
     {
-      "repo": "opensourceways/community-health",
-      "trigger_labels": ["feature", "bug"],
+      "repo": "https://gitcode.com/openeuler/openeuler-docker-images",
+      "trigger_labels": ["ci-failed"],
       "trigger_mode": "command",
       "enabled": true,
-      "description": "community-health 项目"
+      "description": "Dockerfiles for openEuler official container images, include openEuler basic image and application images."
     }
   ],
   "settings": {

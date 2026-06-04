@@ -1,12 +1,7 @@
-# 事件流监听工作流
-# 在 dev-workflow 仓库中运行，定时检查所有监控仓库的 Issue 事件
-# 源仓库无需任何配置，只需创建 Issue 并打标签
-
-name: "Watch: Monitor Issues"
+name: "Watch: Monitor PRs for CI Failures"
 
 on:
   schedule:
-    # 每 5 分钟执行一次（可根据需要调整）
     - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
@@ -16,7 +11,6 @@ on:
         type: string
 
 permissions:
-  issues: read
   contents: read
 
 jobs:
@@ -25,7 +19,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout dev-workflow code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -40,16 +34,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Process events
+      - name: Process PR events
         env:
           WATCH_TOKEN: ${{ secrets.WATCH_TOKEN }}
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-          TEST_REPO: ${{ github.event.inputs.test_repo || '' }}
         run: |
-          python scripts/watch/process_events.py
+          python scripts/watch/process_pr_events.py
 
       - name: Report status
         if: always()
-        run: |
-          echo "✅ Monitoring cycle completed"
-          echo "Check logs for any issues"
+        run: echo "✅ PR monitoring cycle completed"

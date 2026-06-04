@@ -1,0 +1,205 @@
+name: "ci-fix-team: PR CI 修复链路"
+
+on:
+  repository_dispatch:
+    types: [run-ci-fix-phase]
+
+# 同一个 PR 的修复串行执行，避免并发冲突
+concurrency:
+  group: ci-fix-${{ github.event.client_payload.source_repo }}-${{ github.event.client_payload.pr_number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
+  AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
+  AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
+  OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }}
+  DASHSCOPE_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+
+jobs:
+
+  # ── 阶段 1: CI 日志分析 ──────────────────────────────────────────
+  ci-log-analysis:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.action == 'run-ci-fix-phase' &&
+      github.event.client_payload.phase == 'ci-log-analysis'
+    env:
+      SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+      PR_TITLE: ${{ github.event.client_payload.pr_title }}
+      HEAD_SHA: ${{ github.event.client_payload.head_sha }}
+      FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
+      PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
+      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+
+    steps:
+      - name: Checkout docker-images-workflow
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.source_repo }}
+          token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          fetch-depth: 1
+          path: source-repo
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
+      - name: Load conventions
+        run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
+
+      - name: Run CI 日志分析
+        run: python scripts/stages/ci-log-analysis.py
+
+      - name: Mark failed
+        if: failure()
+        env:
+          WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+        run: |
+          python - <<'EOF'
+          import os, sys
+          sys.path.insert(0, '.')
+          from scripts.lib.ci_github_api import add_pr_comment
+          repo = os.environ['SOURCE_REPO']
+          pr = int(os.environ['PR_NUMBER'])
+          token = os.environ['WATCH_TOKEN']
+          add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
+          EOF
+
+  # ── 阶段 2: 代码修复 ────────────────────────────────────────────
+  code-fix:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.action == 'run-ci-fix-phase' &&
+      github.event.client_payload.phase == 'code-fix'
+    env:
+      SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+      PR_TITLE: ${{ github.event.client_payload.pr_title }}
+      PR_HEAD_SHA: ${{ github.event.client_payload.pr_head_sha }}
+      FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
+      PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
+      ANALYSIS: ${{ github.event.client_payload.analysis }}
+      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+
+    steps:
+      - name: Checkout docker-images-workflow
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.source_repo }}
+          token: ${{ secrets.WRITE_TOKEN }}
+          fetch-depth: 0
+          path: source-repo
+
+      - name: Setup fix branch
+        run: |
+          cd source-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 拉取原始 PR 的 head
+          git fetch origin pull/${{ env.PR_NUMBER }}/head
+
+          # 如果 fix 分支已存在于远端，则切换过去；否则从原始 PR head 新建
+          if git ls-remote --exit-code --heads origin ${{ env.FIX_BRANCH }}; then
+            git fetch origin ${{ env.FIX_BRANCH }}
+            git checkout -b ${{ env.FIX_BRANCH }} origin/${{ env.FIX_BRANCH }}
+          else
+            git checkout FETCH_HEAD
+            git checkout -b ${{ env.FIX_BRANCH }}
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai
+          opencode --version
+
+      - name: Load conventions
+        run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
+
+      - name: Run 代码修复
+        run: python scripts/stages/code-fix.py
+
+      - name: Push fix branch
+        run: |
+          cd source-repo
+          git remote set-url origin https://x-access-token:${{ secrets.WRITE_TOKEN }}@github.com/${{ env.SOURCE_REPO }}.git
+          git push origin ${{ env.FIX_BRANCH }}
+
+      - name: Create fix PR if not exists
+        env:
+          GH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          PR_EXISTS=$(gh pr list \
+            --repo ${{ env.SOURCE_REPO }} \
+            --head ${{ env.FIX_BRANCH }} \
+            --state open \
+            --json number \
+            -q '.[0].number' 2>/dev/null || echo "")
+
+          if [ -z "$PR_EXISTS" ]; then
+            gh pr create \
+              --repo ${{ env.SOURCE_REPO }} \
+              --title "fix: AI-generated CI fix for PR #${{ env.PR_NUMBER }}" \
+              --body "Automated fix for CI failures in PR #${{ env.PR_NUMBER }}
+
+          **Original PR**: #${{ env.PR_NUMBER }} — ${{ env.PR_TITLE }}
+
+          ---
+          🤖 Generated by ci-fix-team" \
+              --head ${{ env.FIX_BRANCH }} \
+              --base ${{ env.PR_BASE_BRANCH }}
+            echo "✅ Fix PR created"
+          else
+            echo "✅ Fix PR #$PR_EXISTS already exists, new commit pushed"
+          fi
+
+      - name: Mark failed
+        if: failure()
+        env:
+          WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+        run: |
+          python - <<'EOF'
+          import os, sys
+          sys.path.insert(0, '.')
+          from scripts.lib.ci_github_api import add_pr_comment
+          repo = os.environ['SOURCE_REPO']
+          pr = int(os.environ['PR_NUMBER'])
+          token = os.environ['WATCH_TOKEN']
+          add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
+          EOF
