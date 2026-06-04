@@ -16,7 +16,7 @@ from pathlib import Path
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 sys.path.insert(0, PROJECT_ROOT)
 
-from scripts.lib.opencode_run import run_opencode
+from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
 from scripts.lib.ci_github_api import (
     get_pr_diff,
@@ -120,7 +120,7 @@ def main():
         },
     }
 
-    run_opencode(
+    run_agent(
         prompt_file=agent_prompt_file('ci-failure-analyst'),
         context=context,
         instruction='根据 CI 日志和 PR diff，产出完整的 CI 失败分析报告。',

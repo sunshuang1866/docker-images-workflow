@@ -15,7 +15,7 @@ from pathlib import Path
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 sys.path.insert(0, PROJECT_ROOT)
 
-from scripts.lib.opencode_run import run_opencode
+from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
 from scripts.lib.ci_github_api import add_pr_comment
 
@@ -77,8 +77,8 @@ def main():
         'fix_branch': env['fix_branch'],
     }
 
-    # OpenCode 在源码仓库目录中运行，直接读写源文件
-    run_opencode(
+    # AI Agent 在源码仓库目录中运行，直接读写源文件
+    run_agent(
         prompt_file=agent_prompt_file('code-fixer'),
         context=context,
         instruction=(

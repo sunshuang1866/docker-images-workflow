@@ -13,11 +13,21 @@ permissions:
   contents: read
 
 env:
+  # ── 通用 ──────────────────────────────────────────────────────────
+  AI_RUNNER: ${{ vars.AI_RUNNER || 'opencode' }}
+
+  # ── OpenCode 配置（AI_RUNNER=opencode 时生效）─────────────────────
   AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
   AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
   AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
   OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }}
   DASHSCOPE_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+
+  # ── Claude Code 配置（AI_RUNNER=claude-code 时生效）───────────────
+  CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-sonnet-4-6' }}
+  CLAUDE_EXTRA_ARGS: ${{ vars.CLAUDE_EXTRA_ARGS || '--dangerously-skip-permissions' }}
+  CLAUDE_TIMEOUT_MS: ${{ vars.CLAUDE_TIMEOUT_MS || '600000' }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
 
 jobs:
 
@@ -60,10 +70,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install OpenCode
+      - name: Install AI Agent
         run: |
-          npm install -g opencode-ai
-          opencode --version
+          if [ "$AI_RUNNER" = "claude-code" ]; then
+            npm install -g @anthropic-ai/claude-code
+            claude --version
+          else
+            npm install -g opencode-ai
+            opencode --version
+          fi
 
       - name: Load conventions
         run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
@@ -144,10 +159,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install OpenCode
+      - name: Install AI Agent
         run: |
-          npm install -g opencode-ai
-          opencode --version
+          if [ "$AI_RUNNER" = "claude-code" ]; then
+            npm install -g @anthropic-ai/claude-code
+            claude --version
+          else
+            npm install -g opencode-ai
+            opencode --version
+          fi
 
       - name: Load conventions
         run: python scripts/lib/discover_conventions.py source-repo source-conventions.md

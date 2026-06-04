@@ -48,8 +48,10 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 │   └── watchlist.json              # 监控仓库列表配置
 ├── scripts/
 │   ├── lib/
+│   │   ├── ai_runner.py            # AI Agent 统一入口（按 AI_RUNNER 分发）
+│   │   ├── opencode_run.py         # AI 调用封装 — OpenCode 后端
+│   │   ├── claude_code_run.py      # AI 调用封装 — Claude Code 后端
 │   │   ├── ci_github_api.py        # PR & CI 日志 GitHub API 封装
-│   │   ├── opencode_run.py         # AI 模型调用封装（OpenCode）
 │   │   ├── stage_common.py         # 阶段脚本公共工具
 │   │   └── discover_conventions.py # 自动读取源仓库项目规范
 │   ├── stages/
@@ -89,20 +91,37 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 
 | Secret | 用途 | 所需权限 |
 |--------|------|---------|
-| `OPENAI_API_KEY` | AI 模型 API Key | — |
+| `OPENAI_API_KEY` | OpenCode 模型 API Key（`AI_RUNNER=opencode`） | — |
+| `ANTHROPIC_API_KEY` | Anthropic API Key（`AI_RUNNER=claude-code`） | — |
 | `WATCH_TOKEN` | 读取目标仓库 PR / CI 日志 | `contents:read`, `actions:read` |
 | `DISPATCH_TOKEN` | 触发 repository_dispatch | `repo`, `workflow` |
 | `WRITE_TOKEN` | 向目标仓库推送代码 + 创建 PR | `contents:write`, `pull-requests:write` |
 
 ### 3. GitHub Variables（可选）
 
+**通用**
+
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `AI_MODEL` | AI 模型名称 | `alibaba-cn/glm-5.1` |
-| `AI_AGENT` | OpenCode Agent 类型 | `build` |
-| `AI_EXTRA_ARGS` | OpenCode 额外参数 | `--dangerously-skip-permissions` |
-| `OPENCODE_TIMEOUT_MS` | 单次 AI 调用超时（毫秒） | `600000`（10分钟）|
-| `OPENAI_BASE_URL` | 兼容 OpenAI 接口的自定义 API 地址 | 使用默认 |
+| `AI_RUNNER` | AI 后端选择：`opencode` 或 `claude-code` | `opencode` |
+
+**OpenCode（`AI_RUNNER=opencode`）**
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `AI_MODEL` | 模型名称 | `alibaba-cn/glm-5.1` |
+| `AI_AGENT` | Agent 类型 | `build` |
+| `AI_EXTRA_ARGS` | 额外参数 | `--dangerously-skip-permissions` |
+| `OPENCODE_TIMEOUT_MS` | 单次调用超时（毫秒） | `600000` |
+| `OPENAI_BASE_URL` | 自定义 API 地址（兼容 OpenAI 接口） | 使用默认 |
+
+**Claude Code（`AI_RUNNER=claude-code`）**
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `CLAUDE_MODEL` | 模型名称 | `claude-sonnet-4-6` |
+| `CLAUDE_EXTRA_ARGS` | 额外参数 | `--dangerously-skip-permissions` |
+| `CLAUDE_TIMEOUT_MS` | 单次调用超时（毫秒） | `600000` |
 
 ## 前置条件：目标仓库需打 `ci-failed` label
 
@@ -122,13 +141,35 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 
 - **GitHub Actions**：工作流编排 + cron 调度
 - **Python 3.11**：阶段脚本 + 工具库
-- **OpenCode**：AI 模型调用（兼容 OpenAI 接口，支持阿里通义、GLM 等）
+- **OpenCode / Claude Code**：AI 模型调用（可切换，见下方配置）
 - **GitHub API**：PR 读写、CI 日志获取、评论
 
-## AI 模型配置
+## AI 后端配置
 
-| 提供商 | 获取地址 | AI_MODEL 示例 |
-|--------|---------|--------------|
+### 使用 OpenCode（默认）
+
+OpenCode 兼容 OpenAI 接口，支持阿里通义、GLM 等国内模型。
+
+**Secrets**：将 API Key 填入 `OPENAI_API_KEY`
+
+| 提供商 | 获取地址 | `AI_MODEL` 示例 |
+|--------|---------|----------------|
 | 阿里通义 | https://bailian.console.aliyun.com/ | `alibaba-cn/qwen-plus` |
 | 智谱 AI | https://open.bigmodel.cn/ | `alibaba-cn/glm-5.1` |
 | OpenAI | https://platform.openai.com/api-keys | `openai/gpt-4o` |
+
+### 使用 Claude Code
+
+Claude Code 使用 Anthropic 原生 API，无需兼容层。
+
+**切换方式**：将 Variable `AI_RUNNER` 设为 `claude-code`
+
+**Secrets**：将 Anthropic API Key 填入 `ANTHROPIC_API_KEY`
+
+| `CLAUDE_MODEL` 示例 | 说明 |
+|--------------------|------|
+| `claude-sonnet-4-6` | 推荐，速度与质量均衡（默认） |
+| `claude-opus-4-8` | 最强推理，适合复杂修复场景 |
+| `claude-haiku-4-5-20251001` | 最快，适合简单 lint / 格式修复 |
+
+> **提示**：获取 Anthropic API Key 请访问 https://console.anthropic.com/settings/keys
