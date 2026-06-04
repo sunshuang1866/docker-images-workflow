@@ -94,9 +94,11 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 | `OPENAI_API_KEY` | OpenCode 模型 API Key（`AI_RUNNER=opencode`） | — |
 | `ANTHROPIC_API_KEY` | Anthropic API Key（`AI_RUNNER=claude-code`） | — |
 | `CLAUDE_CREDENTIALS_JSON` | Claude.ai 账号 OAuth 凭证（`AI_RUNNER=claude-code-account`） | — |
-| `WATCH_TOKEN` | 读取目标仓库 PR / CI 日志 | `contents:read`, `actions:read` |
-| `DISPATCH_TOKEN` | 触发 repository_dispatch | `repo`, `workflow` |
-| `WRITE_TOKEN` | 向目标仓库推送代码 + 创建 PR | `contents:write`, `pull-requests:write` |
+| `WATCH_TOKEN` | 读取 GitHub 目标仓库 PR / CI 日志 | `contents:read`, `actions:read` |
+| `DISPATCH_TOKEN` | 触发 repository_dispatch（GitHub） | `repo`, `workflow` |
+| `WRITE_TOKEN` | 向 GitHub 目标仓库推送代码 + 创建 PR | `contents:write`, `pull-requests:write` |
+| `GITCODE_WATCH_TOKEN` | 读取 GitCode 仓库 PR / CI 日志 | GitCode Personal Access Token |
+| `GITCODE_WRITE_TOKEN` | 向 GitCode 仓库推送代码 + 创建 PR | GitCode Personal Access Token（需 push 权限）|
 
 ### 3. GitHub Variables（可选）
 

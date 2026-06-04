@@ -17,7 +17,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
-from scripts.lib.ci_github_api import add_pr_comment
+from scripts.lib.ci_api import get_api
 
 WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
 SOURCE_REPO_DIR = os.path.join(PROJECT_ROOT, 'source-repo')
@@ -29,8 +29,13 @@ def parse_env() -> dict:
     if not source_repo or not pr_number:
         raise ValueError('SOURCE_REPO and PR_NUMBER are required')
     owner, repo = source_repo.split('/', 1)
+    platform = os.getenv('SOURCE_PLATFORM', 'github')
+    token = os.getenv('GITHUB_TOKEN', '')
+    if platform == 'gitcode':
+        token = os.getenv('GITCODE_WRITE_TOKEN') or token
     return {
         'source_repo': source_repo,
+        'source_platform': platform,
         'owner': owner,
         'repo': repo,
         'pr_number': pr_number,
@@ -39,7 +44,7 @@ def parse_env() -> dict:
         'fix_branch': os.getenv('FIX_BRANCH', f'fix/{pr_number}'),
         'pr_base_branch': os.getenv('PR_BASE_BRANCH', 'main'),
         'analysis': os.getenv('ANALYSIS', ''),
-        'token': os.getenv('GITHUB_TOKEN', ''),
+        'token': token,
     }
 
 
@@ -60,7 +65,7 @@ def main():
     # 摘要文件写在 work_dir（源码库之外），不会被 git commit 进去
     output_file = os.path.join(work_dir, 'code-fix-summary.md')
 
-    log_stage('code-fix', f"repo={env['source_repo']} pr=#{env['pr_number']}")
+    log_stage('code-fix', f"repo={env['source_repo']} [{env['source_platform']}] pr=#{env['pr_number']}")
 
     if not env['analysis']:
         raise RuntimeError('ANALYSIS env var is empty — ci-log-analysis must run first')
@@ -119,7 +124,8 @@ def main():
         f"{summary}"
     )
     try:
-        add_pr_comment(env['source_repo'], env['pr_number'], comment_body, env['token'])
+        api = get_api(env['source_platform'])
+        api.add_pr_comment(env['source_repo'], env['pr_number'], comment_body, env['token'])
     except Exception as e:
         log_stage('code-fix', f'⚠️ PR comment failed: {e}')
 

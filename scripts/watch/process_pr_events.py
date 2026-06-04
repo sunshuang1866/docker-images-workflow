@@ -22,13 +22,7 @@ from typing import Dict, Any, Optional
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 sys.path.insert(0, PROJECT_ROOT)
 
-from scripts.lib.ci_github_api import (
-    fetch_prs_with_label,
-    find_any_pr_by_head_branch,
-    get_branch_commit_count,
-    close_pull_request,
-    add_pr_comment,
-)
+from scripts.lib.ci_api import detect_platform, normalize_repo, get_api
 
 WATCHLIST_FILE = os.path.join(PROJECT_ROOT, 'config', 'watchlist.json')
 CI_FAILED_LABEL = 'ci-failed'
@@ -40,13 +34,14 @@ def log(msg: str):
     print(f"[{ts}] {msg}", flush=True)
 
 
-def dispatch_ci_fix(repo: str, pr: Dict, pr_base_branch: str,
+def dispatch_ci_fix(repo: str, platform: str, pr: Dict, pr_base_branch: str,
                     token: str, target_repo: str) -> bool:
     payload = {
         'event_type': 'run-ci-fix-phase',
         'client_payload': {
             'phase': 'ci-log-analysis',
             'source_repo': repo,
+            'source_platform': platform,
             'pr_number': pr['number'],
             'pr_title': pr.get('title', ''),
             'head_sha': pr['head']['sha'],
@@ -87,12 +82,21 @@ def process_all():
         if not repo_config.get('enabled', True):
             continue
 
-        repo = repo_config['repo']
+        raw_repo = repo_config['repo']
+        platform = detect_platform(raw_repo)
+        repo = normalize_repo(raw_repo, platform)
+        api = get_api(platform)
+
+        # GitCode token 优先用 GITCODE_WATCH_TOKEN，fallback WATCH_TOKEN
+        token = watch_token
+        if platform == 'gitcode':
+            token = os.getenv('GITCODE_WATCH_TOKEN') or watch_token
+
         log(f"\n{'='*60}")
-        log(f"📦 {repo}")
+        log(f"📦 {repo} [{platform}]")
 
         try:
-            prs = fetch_prs_with_label(repo, CI_FAILED_LABEL, watch_token)
+            prs = api.fetch_prs_with_label(repo, CI_FAILED_LABEL, token)
         except Exception as e:
             log(f"  ❌ Failed to fetch PRs: {e}")
             continue
@@ -106,39 +110,38 @@ def process_all():
 
             log(f"\n  🔎 PR #{pr_number}: {pr.get('title', '')[:60]}")
 
-            fix_pr = find_any_pr_by_head_branch(repo, fix_branch, watch_token)
+            fix_pr = api.find_any_pr_by_head_branch(repo, fix_branch, token)
 
             if fix_pr is None:
                 log(f"    → No fix PR, dispatching first attempt")
-                dispatch_ci_fix(repo, pr, pr_base, dispatch_token, target_repo)
+                dispatch_ci_fix(repo, platform, pr, pr_base, dispatch_token, target_repo)
 
             elif fix_pr['state'] == 'open':
                 fix_labels = [l['name'] for l in fix_pr.get('labels', [])]
                 if CI_FAILED_LABEL in fix_labels:
-                    count = get_branch_commit_count(repo, fix_branch, pr_base, watch_token)
+                    count = api.get_branch_commit_count(repo, fix_branch, pr_base, token)
                     log(f"    → Fix PR #{fix_pr['number']} ci-failed, commits={count}")
                     if count >= MAX_RETRIES:
                         log(f"    → Max retries ({MAX_RETRIES}) reached, closing fix PR")
-                        close_pull_request(repo, fix_pr['number'], watch_token)
-                        add_pr_comment(
+                        api.close_pull_request(repo, fix_pr['number'], token)
+                        api.add_pr_comment(
                             repo, fix_pr['number'],
                             f"🤖 AI 已尝试修复 {MAX_RETRIES} 次，仍未通过 CI，自动关闭。请人工处理。",
-                            watch_token,
+                            token,
                         )
-                        add_pr_comment(
+                        api.add_pr_comment(
                             repo, pr_number,
                             f"🤖 AI 修复 PR #{fix_pr['number']} 已尝试 {MAX_RETRIES} 次失败，已关闭，请人工介入。",
-                            watch_token,
+                            token,
                         )
                     else:
                         log(f"    → Dispatching retry (attempt #{count + 1})")
-                        # 重试时 head_sha 使用 fix PR 的 head（分析其 CI 失败）
                         retry_pr = {
                             'number': pr_number,
                             'title': pr.get('title', ''),
                             'head': fix_pr['head'],
                         }
-                        dispatch_ci_fix(repo, retry_pr, pr_base, dispatch_token, target_repo)
+                        dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo)
                 else:
                     log(f"    → Fix PR #{fix_pr['number']} CI running or pending, skipping")
 

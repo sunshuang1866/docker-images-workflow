@@ -18,12 +18,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
-from scripts.lib.ci_github_api import (
-    get_pr_diff,
-    get_latest_failed_run,
-    get_failed_job_logs,
-    add_pr_comment,
-)
+from scripts.lib.ci_api import get_api
 
 WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
 
@@ -34,8 +29,14 @@ def parse_env() -> dict:
     if not source_repo or not pr_number:
         raise ValueError('SOURCE_REPO and PR_NUMBER are required')
     owner, repo = source_repo.split('/', 1)
+    platform = os.getenv('SOURCE_PLATFORM', 'github')
+    # GitCode 优先用 GITCODE_WATCH_TOKEN，fallback GITHUB_TOKEN
+    token = os.getenv('GITHUB_TOKEN', '')
+    if platform == 'gitcode':
+        token = os.getenv('GITCODE_WATCH_TOKEN') or token
     return {
         'source_repo': source_repo,
+        'source_platform': platform,
         'owner': owner,
         'repo': repo,
         'pr_number': pr_number,
@@ -43,7 +44,7 @@ def parse_env() -> dict:
         'head_sha': os.getenv('HEAD_SHA', ''),
         'fix_branch': os.getenv('FIX_BRANCH', f'fix/{pr_number}'),
         'pr_base_branch': os.getenv('PR_BASE_BRANCH', 'main'),
-        'token': os.getenv('GITHUB_TOKEN', ''),
+        'token': token,
         'dispatch_token': os.getenv('GITHUB_TOKEN', ''),
     }
 
@@ -55,6 +56,7 @@ def dispatch_code_fix(env: dict, analysis: str):
         'client_payload': {
             'phase': 'code-fix',
             'source_repo': env['source_repo'],
+            'source_platform': env['source_platform'],
             'pr_number': env['pr_number'],
             'pr_title': env['pr_title'],
             'pr_head_sha': env['head_sha'],
@@ -81,13 +83,15 @@ def main():
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     output_file = os.path.join(work_dir, 'ci-analysis.md')
 
-    log_stage('ci-log-analysis', f"repo={env['source_repo']} pr=#{env['pr_number']}")
+    log_stage('ci-log-analysis', f"repo={env['source_repo']} [{env['source_platform']}] pr=#{env['pr_number']}")
+
+    api = get_api(env['source_platform'])
 
     # 获取 PR diff
     log_stage('ci-log-analysis', 'fetching PR diff...')
     pr_diff = ''
     try:
-        pr_diff = get_pr_diff(env['source_repo'], env['pr_number'], env['token'])
+        pr_diff = api.get_pr_diff(env['source_repo'], env['pr_number'], env['token'])
         log_stage('ci-log-analysis', f'PR diff: {len(pr_diff)} chars')
     except Exception as e:
         log_stage('ci-log-analysis', f'⚠️ PR diff fetch failed: {e}')
@@ -97,14 +101,14 @@ def main():
     ci_logs = ''
     run_info = ''
     try:
-        run = get_latest_failed_run(env['source_repo'], env['head_sha'], env['token'])
+        run = api.get_latest_failed_run(env['source_repo'], env['head_sha'], env['token'])
         if run:
-            run_info = f"Workflow: {run.get('name', '')}, run_id={run['id']}"
+            run_info = f"Pipeline/Run: {run.get('name', run.get('id', ''))}, id={run['id']}"
             log_stage('ci-log-analysis', f'Found failed run: {run_info}')
-            ci_logs = get_failed_job_logs(env['source_repo'], run['id'], env['token'])
+            ci_logs = api.get_failed_job_logs(env['source_repo'], run['id'], env['token'])
             log_stage('ci-log-analysis', f'CI logs: {len(ci_logs)} chars')
         else:
-            log_stage('ci-log-analysis', '⚠️ No failed workflow run found for this SHA')
+            log_stage('ci-log-analysis', '⚠️ No failed CI run found for this SHA')
     except Exception as e:
         log_stage('ci-log-analysis', f'⚠️ CI log fetch failed: {e}')
 
@@ -139,7 +143,7 @@ def main():
         f"**PR**: #{env['pr_number']} — {env['pr_title']}\n\n---"
     )
     try:
-        add_pr_comment(
+        api.add_pr_comment(
             env['source_repo'], env['pr_number'],
             f"{heading}\n\n{analysis}",
             env['token'],

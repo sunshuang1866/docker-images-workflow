@@ -39,12 +39,14 @@ jobs:
       github.event.client_payload.phase == 'ci-log-analysis'
     env:
       SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      SOURCE_PLATFORM: ${{ github.event.client_payload.source_platform || 'github' }}
       PR_NUMBER: ${{ github.event.client_payload.pr_number }}
       PR_TITLE: ${{ github.event.client_payload.pr_title }}
       HEAD_SHA: ${{ github.event.client_payload.head_sha }}
       FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
       GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+      GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN || '' }}
 
     steps:
       - name: Checkout docker-images-workflow
@@ -52,13 +54,21 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Checkout source repo
+      - name: Checkout source repo (GitHub)
+        if: env.SOURCE_PLATFORM != 'gitcode'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.client_payload.source_repo }}
           token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
           fetch-depth: 1
           path: source-repo
+
+      - name: Checkout source repo (GitCode)
+        if: env.SOURCE_PLATFORM == 'gitcode'
+        run: |
+          git clone --depth=1 \
+            https://oauth2:${{ secrets.GITCODE_WATCH_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git \
+            source-repo
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -99,15 +109,18 @@ jobs:
         if: failure()
         env:
           WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN || '' }}
         run: |
           python - <<'EOF'
           import os, sys
           sys.path.insert(0, '.')
-          from scripts.lib.ci_github_api import add_pr_comment
+          from scripts.lib.ci_api import get_api
+          platform = os.environ.get('SOURCE_PLATFORM', 'github')
+          api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ['WATCH_TOKEN']
-          add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
+          token = os.environ.get('GITCODE_WATCH_TOKEN') or os.environ['WATCH_TOKEN']
+          api.add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
           EOF
 
   # ── 阶段 2: 代码修复 ────────────────────────────────────────────
@@ -118,6 +131,7 @@ jobs:
       github.event.client_payload.phase == 'code-fix'
     env:
       SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+      SOURCE_PLATFORM: ${{ github.event.client_payload.source_platform || 'github' }}
       PR_NUMBER: ${{ github.event.client_payload.pr_number }}
       PR_TITLE: ${{ github.event.client_payload.pr_title }}
       PR_HEAD_SHA: ${{ github.event.client_payload.pr_head_sha }}
@@ -125,6 +139,7 @@ jobs:
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
       ANALYSIS: ${{ github.event.client_payload.analysis }}
       GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+      GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
 
     steps:
       - name: Checkout docker-images-workflow
@@ -132,7 +147,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Checkout source repo
+      - name: Checkout source repo (GitHub)
+        if: env.SOURCE_PLATFORM != 'gitcode'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.client_payload.source_repo }}
@@ -140,21 +156,32 @@ jobs:
           fetch-depth: 0
           path: source-repo
 
+      - name: Checkout source repo (GitCode)
+        if: env.SOURCE_PLATFORM == 'gitcode'
+        run: |
+          git clone \
+            https://oauth2:${{ secrets.GITCODE_WRITE_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git \
+            source-repo
+
       - name: Setup fix branch
         run: |
           cd source-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 拉取原始 PR 的 head
-          git fetch origin pull/${{ env.PR_NUMBER }}/head
+          if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
+            # GitCode: 直接 fetch PR head ref
+            git fetch origin refs/merge-requests/${{ env.PR_NUMBER }}/head:pr-head 2>/dev/null || \
+              git fetch origin ${{ env.PR_HEAD_SHA }} 2>/dev/null || true
+          else
+            git fetch origin pull/${{ env.PR_NUMBER }}/head
+          fi
 
-          # 如果 fix 分支已存在于远端，则切换过去；否则从原始 PR head 新建
           if git ls-remote --exit-code --heads origin ${{ env.FIX_BRANCH }}; then
             git fetch origin ${{ env.FIX_BRANCH }}
             git checkout -b ${{ env.FIX_BRANCH }} origin/${{ env.FIX_BRANCH }}
           else
-            git checkout FETCH_HEAD
+            git checkout ${{ env.PR_HEAD_SHA }} 2>/dev/null || git checkout FETCH_HEAD
             git checkout -b ${{ env.FIX_BRANCH }}
           fi
 
@@ -196,48 +223,83 @@ jobs:
       - name: Push fix branch
         run: |
           cd source-repo
-          git remote set-url origin https://x-access-token:${{ secrets.WRITE_TOKEN }}@github.com/${{ env.SOURCE_REPO }}.git
+          if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
+            git remote set-url origin \
+              https://oauth2:${{ secrets.GITCODE_WRITE_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git
+          else
+            git remote set-url origin \
+              https://x-access-token:${{ secrets.WRITE_TOKEN }}@github.com/${{ env.SOURCE_REPO }}.git
+          fi
           git push origin ${{ env.FIX_BRANCH }}
 
       - name: Create fix PR if not exists
         env:
           GH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
         run: |
-          PR_EXISTS=$(gh pr list \
-            --repo ${{ env.SOURCE_REPO }} \
-            --head ${{ env.FIX_BRANCH }} \
-            --state open \
-            --json number \
-            -q '.[0].number' 2>/dev/null || echo "")
-
-          if [ -z "$PR_EXISTS" ]; then
-            gh pr create \
+          if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
+            python - <<'EOF'
+          import os, sys
+          sys.path.insert(0, '.')
+          from scripts.lib.ci_gitcode_api import find_any_pr_by_head_branch, create_pull_request
+          repo     = os.environ['SOURCE_REPO']
+          token    = os.environ['GITCODE_WRITE_TOKEN']
+          fix_br   = os.environ['FIX_BRANCH']
+          pr_num   = os.environ['PR_NUMBER']
+          pr_title = os.environ['PR_TITLE']
+          base_br  = os.environ['PR_BASE_BRANCH']
+          existing = find_any_pr_by_head_branch(repo, fix_br, token)
+          if not existing:
+              create_pull_request(
+                  repo, fix_br, base_br,
+                  f"fix: AI-generated CI fix for PR #{pr_num}",
+                  f"Automated fix for CI failures in PR #{pr_num}\n\n"
+                  f"**Original PR**: #{pr_num} — {pr_title}\n\n---\n🤖 Generated by ci-fix-team",
+                  token,
+              )
+              print("✅ Fix PR created on GitCode")
+          else:
+              print(f"✅ Fix PR already exists, new commit pushed")
+          EOF
+          else
+            PR_EXISTS=$(gh pr list \
               --repo ${{ env.SOURCE_REPO }} \
-              --title "fix: AI-generated CI fix for PR #${{ env.PR_NUMBER }}" \
-              --body "Automated fix for CI failures in PR #${{ env.PR_NUMBER }}
+              --head ${{ env.FIX_BRANCH }} \
+              --state open \
+              --json number \
+              -q '.[0].number' 2>/dev/null || echo "")
+            if [ -z "$PR_EXISTS" ]; then
+              gh pr create \
+                --repo ${{ env.SOURCE_REPO }} \
+                --title "fix: AI-generated CI fix for PR #${{ env.PR_NUMBER }}" \
+                --body "Automated fix for CI failures in PR #${{ env.PR_NUMBER }}
 
           **Original PR**: #${{ env.PR_NUMBER }} — ${{ env.PR_TITLE }}
 
           ---
           🤖 Generated by ci-fix-team" \
-              --head ${{ env.FIX_BRANCH }} \
-              --base ${{ env.PR_BASE_BRANCH }}
-            echo "✅ Fix PR created"
-          else
-            echo "✅ Fix PR #$PR_EXISTS already exists, new commit pushed"
+                --head ${{ env.FIX_BRANCH }} \
+                --base ${{ env.PR_BASE_BRANCH }}
+              echo "✅ Fix PR created on GitHub"
+            else
+              echo "✅ Fix PR #$PR_EXISTS already exists, new commit pushed"
+            fi
           fi
 
       - name: Mark failed
         if: failure()
         env:
           WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
         run: |
           python - <<'EOF'
           import os, sys
           sys.path.insert(0, '.')
-          from scripts.lib.ci_github_api import add_pr_comment
+          from scripts.lib.ci_api import get_api
+          platform = os.environ.get('SOURCE_PLATFORM', 'github')
+          api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ['WATCH_TOKEN']
-          add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
+          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['WATCH_TOKEN']
+          api.add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
           EOF
