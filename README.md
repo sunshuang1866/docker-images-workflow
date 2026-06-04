@@ -12,6 +12,7 @@
 - **智能重试**：Fix PR CI 再次失败时自动追加新 commit 继续修复，无需创建新 PR
 - **超限关闭**：超过最大重试次数（默认 3 次）自动关闭 Fix PR，通知人工介入
 - **跨仓库监控**：源仓库无需任何配置，由 docker-images-workflow 集中驱动所有修复
+- **多平台支持**：同时兼容 GitHub 和 GitCode 仓库，自动识别平台，无需手动切换
 
 ## 工作流程
 
@@ -51,7 +52,9 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 │   │   ├── ai_runner.py            # AI Agent 统一入口（按 AI_RUNNER 分发）
 │   │   ├── opencode_run.py         # AI 调用封装 — OpenCode 后端
 │   │   ├── claude_code_run.py      # AI 调用封装 — Claude Code 后端
-│   │   ├── ci_github_api.py        # PR & CI 日志 GitHub API 封装
+│   │   ├── ci_api.py               # 平台工厂（detect / normalize / get_api）
+│   │   ├── ci_github_api.py        # GitHub API 封装（PR、CI 日志）
+│   │   ├── ci_gitcode_api.py       # GitCode API 封装（v5 PR + v4 Pipeline）
 │   │   ├── stage_common.py         # 阶段脚本公共工具
 │   │   └── discover_conventions.py # 自动读取源仓库项目规范
 │   ├── stages/
@@ -75,7 +78,13 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
       "repo": "owner/repo-name",
       "trigger_labels": ["ci-failed"],
       "enabled": true,
-      "description": "项目描述"
+      "description": "GitHub 仓库示例（owner/repo 格式）"
+    },
+    {
+      "repo": "https://gitcode.com/owner/repo-name",
+      "trigger_labels": ["ci-failed"],
+      "enabled": true,
+      "description": "GitCode 仓库示例（完整 URL 格式，自动识别平台）"
     }
   ],
   "settings": {
@@ -84,6 +93,8 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
   }
 }
 ```
+
+平台识别规则：URL 中包含 `gitcode.com` 则使用 GitCode API，否则使用 GitHub API。
 
 ### 2. GitHub Secrets
 
@@ -128,10 +139,12 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
 
 ## 前置条件：目标仓库需打 `ci-failed` label
 
-目标仓库的 CI 需在失败时自动为 PR 打 `ci-failed` label。示例：
+目标仓库的 CI 需在失败时自动为 PR 打 `ci-failed` label。
+
+**GitHub 仓库示例**：
 
 ```yaml
-# .github/workflows/ci.yml（目标仓库，片段示例）
+# .github/workflows/ci.yml（目标仓库，片段）
 - name: Add ci-failed label on failure
   if: failure()
   uses: actions-ecosystem/action-add-labels@v1
@@ -140,12 +153,30 @@ Fix PR CI 失败（次数 ≥ 3）→ 关闭 Fix PR，通知人工介入 ⚠️
     github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+**GitCode 仓库示例**（GitLab CI）：
+
+```yaml
+# .gitlab-ci.yml（目标仓库，片段）
+label-ci-failed:
+  stage: .post
+  script:
+    - |
+      curl -X POST "https://gitcode.com/api/v5/repos/${CI_PROJECT_NAMESPACE}/${CI_PROJECT_NAME}/issues/${CI_MERGE_REQUEST_IID}/labels" \
+        -H "Content-Type: application/json" \
+        -d '{"labels": "ci-failed"}' \
+        -H "Authorization: token ${GITCODE_TOKEN}"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: on_failure
+```
+
 ## 技术栈
 
 - **GitHub Actions**：工作流编排 + cron 调度
 - **Python 3.11**：阶段脚本 + 工具库
 - **OpenCode / Claude Code**：AI 模型调用（可切换，见下方配置）
-- **GitHub API**：PR 读写、CI 日志获取、评论
+- **GitHub API**：GitHub 仓库 PR 读写、Actions CI 日志获取、评论
+- **GitCode API**：GitCode 仓库 PR 读写（Gitee-compatible v5）、Pipeline 日志获取（GitLab v4）
 
 ## AI 后端配置
 
@@ -202,3 +233,16 @@ cat ~/.claude/.credentials.json
 
 > ⚠️ **注意**：OAuth Token 会过期（通常数周至数月），过期后需重新在本机登录并更新 Secret。
 > `CLAUDE_MODEL` / `CLAUDE_EXTRA_ARGS` / `CLAUDE_TIMEOUT_MS` 变量与 API Key 模式相同。
+
+## GitCode Token 获取
+
+`GITCODE_WATCH_TOKEN` 和 `GITCODE_WRITE_TOKEN` 均为 GitCode Personal Access Token：
+
+1. 登录 [gitcode.com](https://gitcode.com)
+2. 进入 **个人设置 → Access Tokens**
+3. 创建两个 Token（或复用同一个）：
+
+| Token | 所需 Scope |
+|-------|-----------|
+| `GITCODE_WATCH_TOKEN` | `read_repository`、`read_api` |
+| `GITCODE_WRITE_TOKEN` | `read_repository`、`write_repository`、`read_api`、`write_api` |
