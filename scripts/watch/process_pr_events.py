@@ -112,8 +112,11 @@ def process_all():
 
             fix_pr = api.find_any_pr_by_head_branch(repo, fix_branch, token)
 
-            if fix_pr is None:
-                log(f"    → No fix PR, dispatching first attempt")
+            if fix_pr is None or fix_pr['state'] == 'closed':
+                if fix_pr and fix_pr['state'] == 'closed':
+                    log(f"    → Fix PR #{fix_pr['number']} was closed, re-dispatching")
+                else:
+                    log(f"    → No fix PR, dispatching first attempt")
                 dispatch_ci_fix(repo, platform, pr, pr_base, dispatch_token, target_repo)
 
             elif fix_pr['state'] == 'open':
