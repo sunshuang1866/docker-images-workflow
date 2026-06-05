@@ -279,10 +279,3 @@ def create_pull_request(repo: str, head_branch: str, base_branch: str,
     resp = requests.post(url, headers=_v5(token), json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
-
-
-def add_label_to_pr(repo: str, pr_number: int, labels: List[str], token: str):
-    owner, name, _ = parse_repo(repo)
-    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/issues/{pr_number}/labels"
-    resp = requests.post(url, headers=_v5(token), json={'labels': labels}, timeout=30)
-    resp.raise_for_status()
