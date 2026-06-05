@@ -231,7 +231,7 @@ jobs:
       - name: Remove AI artifacts from fix branch
         run: |
           cd source-repo
-          for pattern in ".claude" ".opencode" "__pycache__" ".aider"; do
+          for pattern in ".claude" ".opencode" "__pycache__" ".aider" ".agents"; do
             find . -name "$pattern" -not -path "./.git/*" | while read p; do
               git rm -rf --cached "$p" 2>/dev/null || true
               rm -rf "$p"

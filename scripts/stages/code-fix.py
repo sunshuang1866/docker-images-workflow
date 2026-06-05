@@ -70,8 +70,15 @@ def get_pr_file_list(cwd: str, pr_head_sha: str, base_branch: str) -> list:
     return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
 
 
-AI_ARTIFACT_DIRS = {'.claude', '.opencode', '__pycache__', '.aider'}
+AI_ARTIFACT_DIRS = {'.claude', '.opencode', '__pycache__', '.aider', '.agents'}
 AI_ARTIFACT_SUFFIXES = {'.pyc', '.pyo'}
+
+
+def _is_ai_artifact(filepath: str) -> bool:
+    """判断文件路径是否属于 AI 工具产物，应禁止提交。"""
+    parts = Path(filepath).parts
+    return any(part in AI_ARTIFACT_DIRS for part in parts) or \
+           any(filepath.endswith(s) for s in AI_ARTIFACT_SUFFIXES)
 
 
 def _cleanup_ai_artifacts(repo_dir: str):
@@ -136,10 +143,13 @@ def main():
     # 清理 AI 工具产生的文件，不应提交到源码仓库
     _cleanup_ai_artifacts(SOURCE_REPO_DIR)
 
-    # 只暂存原始 PR 涉及的文件，严禁提交无关文件
-    log_stage('code-fix', 'staging changes (PR files only)...')
+    # 只暂存原始 PR 涉及的文件，且排除 AI 工具产物
+    log_stage('code-fix', 'staging changes (PR files only, excluding AI artifacts)...')
     if pr_files:
         for f in pr_files:
+            if _is_ai_artifact(f):
+                log_stage('code-fix', f'skipping AI artifact: {f}')
+                continue
             git(['add', '--', f], cwd=SOURCE_REPO_DIR, check=False)
     else:
         log_stage('code-fix', '⚠️ PR file list empty, falling back to git add -A')
