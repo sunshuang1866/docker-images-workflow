@@ -8,44 +8,31 @@
 ## 根因分析
 
 ### 直接错误
-提供的 CI 日志中，父级触发 Job（trigger）本身执行成功（`Finished: SUCCESS`），但两个下游构建 Job 均以 FAILURE 结束：
+子任务构建日志缺失。日志中仅有父级 trigger job 的执行记录，显示两个下游构建任务均以 FAILURE 结束，但无任何子任务的错误输出：
 
 ```
 multiarch » openeuler » x86-64 » openeuler-docker-images #261 completed. Result was FAILURE
 multiarch » openeuler » aarch64 » openeuler-docker-images #258 completed. Result was FAILURE
 ```
 
-**关键问题：日志中不包含这两个下游 Job 的实际构建日志。** 我们只能看到上游 Jenkins Job 完成了代码拉取、许可证检查、SCA 扫描，然后等待下游构建完成。下游 Job 内部到底发生了什么错误，日志中完全没有记录。
+父级 trigger job 自身执行正常（cloning、license check、SCA check 均通过），最终以 `Finished: SUCCESS` 结束。
 
 ### 根因定位
-- 失败位置: 无法定位（缺少下游 Job `x86-64` 和 `aarch64` 的构建日志）
-- 失败原因: 证据不足以确定根因。从上下文推断，失败发生在 Docker 镜像构建阶段（`openeuler-docker-images` 的 x86-64 和 aarch64 两个架构的构建 Job），但无法得知是在依赖安装、Dockerfile 语法、网络下载、磁盘空间、超时还是其他环节。
+- 失败位置: 无法定位（x86-64 和 aarch64 子任务构建日志未包含在当前日志中）
+- 失败原因: 证据不足以确定根因。两个架构（x86-64 和 aarch64）的子构建任务均失败，但具体错误信息完全缺失，无法判断是 Docker 构建错误、网络问题、环境资源不足还是其他原因。
 
 ### 与 PR 变更的关联
+**极大概率与 PR 无关。** PR 的唯一变更是 `AI/cuda/README.md` 中将 "Start a cann instance" 修正为 "Start a cuda instance"（一个 README 文档中的拼写修复，+1 行 -1 行）。该变更不涉及任何 Dockerfile、构建脚本、测试代码或源代码，无法导致 Docker 镜像构建失败。
 
-PR 唯一变更是 `AI/cuda/README.md` 中的一行注释修正：
-
-```
-- Start a cann instance
-+ Start a cuda instance
-```
-
-- 这是一个文档注释的拼写/命名修正，**不涉及任何 Dockerfile、构建脚本、应用代码或配置文件**。
-- README 文件变更不太可能触发 Docker 镜像构建流程中的编译或运行错误。
-- 两种最可能的情况：
-  1. **CI 基础设施问题**（如网络不稳定、runner 资源耗尽、环境配置变更），与本次 PR 无关。
-  2. **该仓库在此之前主分支上的构建已经是失败的**（即这是一个预先存在的 flaky/损坏的构建），只是恰好本次 PR 触发了 CI 运行。
+此外，两个架构（x86-64 和 aarch64）同时失败，进一步表明这是环境/基础设施层面的系统性问题，而非特定于某个架构的代码问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-重新触发 CI 运行，观察是否是暂时性基础设施问题（网络抖动、runner 资源瓶颈等）。两个架构同时失败增加了这种可能性。
-
-### 方向 2（置信度: 低）
-检查下游构建 Job（`x86-64 #261` 和 `aarch64 #258`）的完整日志，定位 Docker 镜像构建中的实际错误。这需要在 Jenkins 中找到对应 Job 的运行记录。
+该失败极有可能为 CI 基础设施问题（网络下载超时、构建节点资源不足、Docker daemon 异常等）或项目中预先存在的构建缺陷。由于子任务日志缺失，建议重新触发 CI 运行确认是否为间歇性故障。若持续失败，需获取 x86-64 和 aarch64 子任务的完整构建日志后再行分析。
 
 ## 需要进一步确认的点
-
-1. **缺少下游构建日志**：这是最核心的问题。需要获取 `multiarch » openeuler » x86-64 » openeuler-docker-images #261` 和 `multiarch » openeuler » aarch64 » openeuler-docker-images #258` 的完整控制台输出。
-2. **查看同一分支的历史构建状态**：确认 master 分支上这两个架构的构建在本次 PR 之前是否已经失败，以判断是否为预存问题。
-3. **查看 CI 触发器逻辑**：确认 README 文件变更是否会触发全量镜像重建，还是当前 CI 有文件变更过滤机制。如果是全量重建，可能是某个与本次 PR 无关的 Dockerfile 构建失败。
+1. **关键缺失**：`multiarch » openeuler » x86-64 » openeuler-docker-images #261` 和 `multiarch » openeuler » aarch64 » openeuler-docker-images #258` 两个子任务的完整构建日志（包括 Docker build 输出）。
+2. 该 PR 之前，同一仓库的 x86-64 / aarch64 构建任务是否也持续失败（即是否为预先存在的问题）。
+3. 构建环境网络连通性（Docker build 过程中是否有外部依赖下载失败）。
+4. 构建节点的 Docker 服务状态及可用磁盘/内存资源。
