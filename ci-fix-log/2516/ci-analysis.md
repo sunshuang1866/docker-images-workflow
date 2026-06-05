@@ -2,53 +2,57 @@
 
 ## 基本信息
 - PR: #2516 — 【自动升级】vllm-cpu容器镜像升级至0.22.1版本
-- 失败类型: **无法确定** (CI 日志缺失)
-- 置信度: **低**
+- 失败类型: 无法确定（证据不足）
+- 置信度: 低
 
 ## 根因分析
 
 ### 直接错误
-**CI 日志未提供**（`ci.logs` 字段标注为 `not available`）。无法从运行输出中提取任何错误信息。
+CI 日志中**不包含**失败子任务的构建日志。触发 job（jenkins-from-comment）本身成功完成，但它触发的下游构建 `multiarch » openeuler » x86-64 » openeuler-docker-images #1361` 状态为 **FAILURE**，该构建的日志未在上下文中提供。
+
+唯一可供分析的信息是触发 job 中输出的许可证/版权检查结果：
+```
+check result: ACL=[{"name": "check_sca", "result": 0}, {"name": "check_package_license", "result": 1}]
+```
+以及版权声明缺失告警：
+```
+the copyright in repo is not pass, notice: openeuler-docker-images/AI/vllm-cpu/meta.yml、
+openeuler-docker-images/AI/vllm-cpu/README.md、
+openeuler-docker-images/AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile、
+openeuler-docker-images/AI/vllm-cpu/doc/image-info.yml文件缺失Copyright声明
+```
 
 ### 根因定位
-- 失败位置: 未知（无日志）
-- 失败原因: 无法从现有证据确定
+- 失败位置: 无法定位（缺少 `x86-64 » openeuler-docker-images #1361` 的构建日志）
+- 失败原因: 下游 x86-64 构建 job 失败，但其详细日志缺失，无法确定根因
 
 ### 与 PR 变更的关联
-本次 PR 新增了 4 处变更，均围绕 vllm-cpu 0.22.1 版本镜像的引入：
 
-1. **新增 Dockerfile** (`AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile`, +52 行)
-   - 基于 `openeuler/openeuler:24.03-lts-sp3` 构建
-   - 从 GitHub 克隆 vllm 源码并编译 wheel
-   - 使用 `--extra-index https://download.pytorch.org/whl/cpu/` 安装 CPU 版 PyTorch 依赖
-   - 通过 `VLLM_TARGET_DEVICE=cpu` 编译
+PR 新增了一个 vLLM 0.22.1 的 Dockerfile（`AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile`），并更新了 README、image-info.yml、meta.yml。该失败与 PR 变更**高概率相关**，理由如下：
 
-2. **README.md** (`AI/vllm-cpu/README.md`, +1 行) — 新增标签表条目
+1. **架构差异**：aarch64 构建成功，x86-64 构建失败。可能原因包括：
+   - Dockerfile 中 `pip install --extra-index https://download.pytorch.org/whl/cpu/ -r requirements/cpu.txt` 在 x86-64 上下载的 CPU-only PyTorch wheel 与 aarch64 不同，可能因版本不兼容或包不存在而失败
+   - `VLLM_TARGET_DEVICE=cpu python3 setup.py bdist_wheel` 编译 vllm 时可能在 x86-64 上遇到特定编译错误
+   - 网络/依赖下载环节在 x86-64 runner 上失败
 
-3. **image-info.yml** (`AI/vllm-cpu/doc/image-info.yml`, +1 行) — 新增标签表条目
+2. **版权声明缺失**：新增的 4 个文件均缺失 Copyright 声明头，触发了 `check_package_license` 的 result=1（告警/失败），虽然触发 job 本身未因此阻断，但可能是下游构建失败的原因之一。
 
-4. **meta.yml** (`AI/vllm-cpu/meta.yml`, +3/-1 行) — 新增 0.22.1 版本路径映射
+3. **历史模式匹配**：历史记录 PR #2512（同为 2026-06-05）与本案例高度相似——同样是 Dockerfile 新增导致的下游构建失败、同样缺少子任务构建日志、同样是 x86-64 架构失败而 aarch64 成功。该历史案例的根因是 Dockerfile 中 git 操作逻辑缺陷（浅克隆与 checkout 不兼容），本次 PR 的 Dockerfile 使用了 `git clone -b ${VERSION}` 而非直接指定 commit，逻辑上更安全，但仍可能存在类似的构建命令缺陷。
 
-## 基于 PR diff 的静态风险分析
+## 修复方向
 
-由于 CI 日志缺失，以下为从 diff 中识别的**潜在风险点**，不能确认是否为实际失败原因：
+### 方向 1（置信度: 低）
+检查 Dockerfile 中 `pip install --extra-index https://download.pytorch.org/whl/cpu/ -r requirements/cpu.txt` 或 `VLLM_TARGET_DEVICE=cpu python3 setup.py bdist_wheel` 在 x86-64 上的执行结果，确认是否有依赖缺失、版本冲突或编译错误。
 
-### 潜在风险 1（置信度: 低）— 依赖安装失败
-Dockerfile 中 `pip install --extra-index https://download.pytorch.org/whl/cpu/ -r requirements/cpu.txt` 依赖 PyTorch 外部索引。若 PyTorch CPU wheel 版本与 requirements/cpu.txt 中指定的版本不兼容、或索引 URL 不可达，会导致构建失败。
+### 方向 2（置信度: 低）
+检查 x86-64 构建节点的网络连通性，确认 `git clone` 和 `pip install` 在 x86-64 runner 上是否能正常下载外部资源。
 
-### 潜在风险 2（置信度: 低）— 源码编译失败
-`VLLM_TARGET_DEVICE=cpu python3 setup.py bdist_wheel` 编译 vllm 的 CPU 版本。vllm 0.22.1 可能存在与 openEuler 24.03 中 gcc/python-devel 版本的兼容性问题。编译过程中若缺少系统库或 numactl 头文件，会因编译错误而失败。
-
-### 潜在风险 3（置信度: 低）— CI 基础设施问题
-流水线名为 `jenkins-from-comment`，若 Jenkins 节点资源不足（磁盘空间不够拉取基础镜像、编译过程中的 OOM）、网络问题（无法访问 GitHub 或 PyTorch CDN），则属于 infra-error，与代码变更无关。
-
-### 潜在风险 4（置信度: 低）— 仓库规范检查失败
-meta.yml 中新增条目继承了原文件末尾无换行符的问题（`\n\\ No newline at end of file`）。部分 YAML 校验工具或 CI lint 步骤可能将缺少末尾换行视为格式错误。
+### 方向 3（置信度: 低）
+为新增文件添加 Copyright 声明头（Dockerfile、README.md、meta.yml、image-info.yml），排除 license 检查导致下游构建失败的可能性。
 
 ## 需要进一步确认的点
 
-1. **获取 CI 原始日志**：这是最关键的缺失信息。需要找到 Jenkins 实际运行输出，包括 `docker build` 的完整 stdout/stderr。
-2. **确认 CI 流水线的检查项目**：该仓库 CI 是否包含 Dockerfile lint（如 hadolint）、YAML 格式校验、docker build 试构建、或镜像扫描？
-3. **确认 `image-list.yml` 是否需要同步更新**：根据项目规范，每个场景目录需维护 `image-list.yml`。PR diff 中未见对该文件的修改，需确认新增镜像是否需要在 `AI/vllm-cpu/` 层级的 image-list 中注册。
-4. **确认 vllm 0.22.1 的 `requirements/cpu.txt` 和 `requirements/build/cpu.txt` 内容**：需检查该版本新增的依赖项是否在 openEuler 24.03 上可用。
-5. **确认 Jenkins 节点的硬件配置**：若构建节点为 arm64，需确认 `--extra-index https://download.pytorch.org/whl/cpu/` 对 aarch64 架构的 wheel 可用性。
+1. **获取 x86-64 构建日志**：这是最关键的一步。需要从 `multiarch » openeuler » x86-64 » openeuler-docker-images #1361` 获取完整构建日志，定位具体在哪一个 `RUN` 命令失败。
+2. **对比 aarch64 日志**：aarch64 构建成功，对比两个架构的日志可快速定位差异点。
+3. **验证 CPU-only PyTorch wheel 可用性**：确认 `https://download.pytorch.org/whl/cpu/` 上是否存在适配 vllm 0.22.1 所需 Python 版本和 x86-64 架构的 wheel。
+4. **确认 `check_package_license` result=1 的语义**：该结果为告警还是硬性阻断？是否需要在下游构建中重新检查？
