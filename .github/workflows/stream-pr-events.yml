@@ -62,7 +62,6 @@ jobs:
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
           python scripts/watch/process_pr_events.py
 
