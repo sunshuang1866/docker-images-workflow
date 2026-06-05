@@ -22,3 +22,26 @@
 **涉及文件**:
 - `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 在第 23-24 行，将 `git checkout ${VERSION} 2>/dev/null || true` 替换为 `git fetch origin ${VERSION}` + `git checkout ${VERSION}`（移除错误静默掩盖）。
 
+
+---
+
+## openeuler/openeuler-docker-images PR #2516 · 2026-06-05
+
+| 字段 | 内容 |
+|------|------|
+| 失败类型 | `无法确定（证据不足）` |
+| 置信度 | 低 |
+
+**根因**:
+- 失败位置: 无法定位（缺少 `x86-64 » openeuler-docker-images #1361` 的构建日志）
+- 失败原因: 下游 x86-64 构建 job 失败，但其详细日志缺失，无法确定根因
+
+**修复方法**:
+为 CI `check_package_license` 检查未通过的 4 个新增文件添加 Copyright 声明头（缺失Copyright声明）。
+
+**涉及文件**:
+- `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile`: 添加 Copyright + SPDX 头
+- `AI/vllm-cpu/README.md`: 添加 Copyright + SPDX 头（HTML注释格式）
+- `AI/vllm-cpu/doc/image-info.yml`: 添加 Copyright + SPDX 头
+- `AI/vllm-cpu/meta.yml`: 添加 Copyright + SPDX 头
+
