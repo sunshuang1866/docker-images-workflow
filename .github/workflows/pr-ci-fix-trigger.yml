@@ -171,8 +171,8 @@ jobs:
       - name: Setup fix branch
         run: |
           cd source-repo
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "${{ vars.GIT_COMMIT_NAME || 'github-actions[bot]' }}"
+          git config user.email "${{ vars.GIT_COMMIT_EMAIL || 'github-actions[bot]@users.noreply.github.com' }}"
 
           if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
             # GitCode: 直接 fetch PR head ref
