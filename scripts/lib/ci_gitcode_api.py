@@ -48,13 +48,13 @@ def fetch_prs_with_label(repo: str, label: str, token: str, max_prs: int = 50) -
     return [pr for pr in prs if label in [l.get('name') for l in (pr.get('labels') or [])]]
 
 
-def find_any_pr_by_head_branch(repo: str, head_branch: str, token: str) -> Optional[Dict]:
+def find_any_pr_by_head_branch(repo: str, head_branch: str, token: str,
+                               open_only: bool = False) -> Optional[Dict]:
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls"
-    # GitCode v5 不支持按 head 过滤，拉 all 状态后本地过滤
-    # head_branch 可能是 "fix/2512" 或跨仓库格式 "fork_owner:fix/2512"
     branch_name = head_branch.split(':')[-1]
-    for state in ('open', 'closed', 'merged'):
+    states = ('open',) if open_only else ('open', 'closed', 'merged')
+    for state in states:
         params = {'state': state, 'per_page': 50, 'access_token': token}
         resp = requests.get(url, params=params, timeout=30)
         if not resp.ok:

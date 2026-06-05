@@ -271,7 +271,7 @@ jobs:
           meta      = build(int(os.environ['PR_NUMBER']), os.environ['PR_TITLE'])
 
           head = f"{fork_repo.split('/')[0]}:{fix_br}" if fork_repo != repo else fix_br
-          existing = find_any_pr_by_head_branch(repo, fix_br, token)
+          existing = find_any_pr_by_head_branch(repo, fix_br, token, open_only=True)
           if not existing:
               try:
                   create_pull_request(repo, head, base_br, meta['title'], meta['body'], token)
