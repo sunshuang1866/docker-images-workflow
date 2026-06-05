@@ -46,7 +46,7 @@ def build(pr_num: int, pr_title: str) -> dict:
     fix_files  = extract_section(fix_summary, '修改的文件')
     fail_type  = extract_field(analysis, '失败类型')
 
-    title = f"Fix {pr_title} (fix #{pr_num})"
+    title = f"Fix: {pr_title}"
     body  = f"""## Fix for #{pr_num}
 
 **Root cause**:
