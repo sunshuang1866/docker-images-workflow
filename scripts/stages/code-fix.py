@@ -157,17 +157,26 @@ def main():
     # 清理 AI 工具产生的文件，不应提交到源码仓库
     _cleanup_ai_artifacts(SOURCE_REPO_DIR)
 
-    # 只暂存原始 PR 涉及的文件，且排除 AI 工具产物
-    log_stage('code-fix', 'staging changes (PR files only, excluding AI artifacts)...')
-    if pr_files:
-        for f in pr_files:
-            if _is_ai_artifact(f):
-                log_stage('code-fix', f'skipping AI artifact: {f}')
-                continue
-            git(['add', '--', f], cwd=SOURCE_REPO_DIR, check=False)
-    else:
-        log_stage('code-fix', '⚠️ PR file list empty, falling back to git add -A')
-        git(['add', '-A'], cwd=SOURCE_REPO_DIR)
+    # 只暂存原始 PR 涉及的文件，严禁暂存任何其他文件
+    if not pr_files:
+        raise RuntimeError(
+            'PR file list is empty — cannot determine safe files to stage. '
+            'Refusing to fall back to git add -A.'
+        )
+
+    log_stage('code-fix', 'staging PR files only...')
+    pr_files_set = set(pr_files)
+    for f in pr_files:
+        git(['add', '--', f], cwd=SOURCE_REPO_DIR, check=False)
+
+    # 兜底校验：暂存区里绝对不能有 pr_files 以外的文件
+    staged_result = git(['diff', '--cached', '--name-only'], cwd=SOURCE_REPO_DIR)
+    staged_files = [f for f in staged_result.stdout.strip().splitlines() if f.strip()]
+    extra = [f for f in staged_files if f not in pr_files_set]
+    if extra:
+        log_stage('code-fix', f'⚠️ unstaging {len(extra)} unexpected file(s): {extra}')
+        for f in extra:
+            git(['restore', '--staged', '--', f], cwd=SOURCE_REPO_DIR, check=False)
 
     if not has_changes(SOURCE_REPO_DIR):
         raise RuntimeError('code-fixer made no changes — cannot commit empty diff')

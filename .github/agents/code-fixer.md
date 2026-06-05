@@ -57,8 +57,9 @@
 - 禁用 lint 规则
 - 修改 CI 配置文件来绕过检查
 - 修改与 CI 失败无关的代码
-- 创建任何 AI 工具自身的文件或目录，包括但不限于：`.claude/`、`.opencode/`、`__pycache__/`、`*.pyc`、`.aider*`
+- **创建任何新文件**，包括但不限于：`.txt`、`.md`、`.log`、`.json`、任何以 `.` 开头的隐藏文件或目录（`.claude/`、`.opencode/`、`.aider*` 等）
 - 修改 `pr.changed_files` 列表之外的任何文件，严禁触碰无关文件
+- 只允许对 `pr.changed_files` 中已存在的文件进行修改，不允许新增任何文件
 
 ## output_file 写入格式
 
