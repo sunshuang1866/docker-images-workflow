@@ -3,10 +3,10 @@
 ci-data 分支读写工具
 
 存储结构：
-  ci-fix 分支（per-PR 记录）：
-    ci-fix/{pr_number}/ci-analysis.md       — CI 失败分析报告
-    ci-fix/{pr_number}/code-fix-summary.md  — 修复摘要
-    ci-fix/{pr_number}/fix-notified         — 已通知标记
+  ci-fix-log 分支（per-PR 记录）：
+    ci-fix-log/{pr_number}/ci-analysis.md       — CI 失败分析报告
+    ci-fix-log/{pr_number}/code-fix-summary.md  — 修复摘要
+    ci-fix-log/{pr_number}/fix-notified         — 已通知标记
 
   main 分支（共享知识库）：
     docs/ci-failure-patterns.md             — 积累的失败模式知识库
@@ -19,7 +19,7 @@ import requests
 from datetime import datetime
 
 GITHUB_API   = "https://api.github.com"
-CI_FIX_BRANCH = "ci-fix"
+CI_FIX_BRANCH = "ci-fix-log"
 MAIN_BRANCH   = "main"
 
 
@@ -39,7 +39,7 @@ def _headers() -> dict:
 
 
 def _ensure_ci_fix_branch() -> None:
-    """ci-fix 分支不存在时从 main 创建。"""
+    """ci-fix-log 分支不存在时从 main 创建。"""
     url = f"{GITHUB_API}/repos/{_repo()}/git/refs/heads/{CI_FIX_BRANCH}"
     if requests.get(url, headers=_headers(), timeout=15).ok:
         return
@@ -89,18 +89,18 @@ def write_file(path: str, content: str, message: str, branch: str = CI_FIX_BRANC
     requests.put(url, headers=_headers(), json=payload, timeout=30).raise_for_status()
 
 
-# ── per-PR 路径（ci-fix 分支）────────────────────────────────────────────
+# ── per-PR 路径（ci-fix-log 分支）───────────────────────────────────────
 
 def analysis_path(pr_number: int) -> str:
-    return f"ci-fix/{pr_number}/ci-analysis.md"
+    return f"ci-fix-log/{pr_number}/ci-analysis.md"
 
 
 def fix_summary_path(pr_number: int) -> str:
-    return f"ci-fix/{pr_number}/code-fix-summary.md"
+    return f"ci-fix-log/{pr_number}/code-fix-summary.md"
 
 
 def fix_notified_path(pr_number: int) -> str:
-    return f"ci-fix/{pr_number}/fix-notified"
+    return f"ci-fix-log/{pr_number}/fix-notified"
 
 
 def is_fix_notified(pr_number: int) -> bool:
