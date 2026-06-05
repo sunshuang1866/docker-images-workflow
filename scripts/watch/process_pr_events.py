@@ -2,13 +2,16 @@
 """
 PR 监控 — CI 失败自动修复触发器
 
-轮询 watchlist 中的仓库，检测带有 ci-failed label 的 PR，
+轮询 watchlist 中的仓库，检测带有 ci_failed label 的 PR，
 根据 fix/<pr-number> PR 的存在状态决定动作：
 
-  fix PR 不存在           → dispatch ci-log-analysis（首次修复）
-  fix PR open + ci-failed → 检查 commit 次数，未超限则 dispatch，超限则关闭 fix PR
-  fix PR open             → CI 运行中，跳过
-  fix PR closed/merged    → 已完成或放弃，跳过
+  fix PR 不存在                    → dispatch ci-log-analysis（首次修复）
+  fix PR open + ci_successful      → 通知原始 PR fix 已通过 CI（一次性，加 fix_notified 标记）
+  fix PR open + ci_processing      → CI 运行中，跳过
+  fix PR open + ci_failed          → 检查 commit 次数，未超限则 dispatch，超限则关闭 fix PR
+  fix PR open + 无状态 label        → CI 尚未开始，跳过
+  fix PR closed                    → 重新 dispatch
+  fix PR merged                    → 已合并，跳过
 """
 
 import os
@@ -119,10 +122,12 @@ def process_all():
         api = get_api(platform)
         ci_failed_label = (repo_config.get('trigger_labels') or ['ci_failed'])[0]
 
-        # GitCode token 优先用 GITCODE_WATCH_TOKEN，fallback WATCH_TOKEN
+        # GitCode: 读操作用 WATCH_TOKEN，写操作（评论/标签）用 WRITE_TOKEN
         token = watch_token
+        write_token = watch_token
         if platform == 'gitcode':
             token = os.getenv('GITCODE_WATCH_TOKEN') or watch_token
+            write_token = os.getenv('GITCODE_WRITE_TOKEN') or token
 
         log(f"\n{'='*60}")
         log(f"📦 {repo} [{platform}] label={ci_failed_label}")
@@ -162,22 +167,45 @@ def process_all():
 
             elif fix_pr['state'] == 'open':
                 fix_labels = [l['name'] for l in fix_pr.get('labels', [])]
-                if ci_failed_label in fix_labels:
+                fix_pr_url = fix_pr.get('html_url') or f"https://gitcode.com/{repo}/pull/{fix_pr['number']}"
+
+                if 'ci_successful' in fix_labels:
+                    if 'fix_notified' not in fix_labels:
+                        log(f"    → Fix PR #{fix_pr['number']} passed CI! Notifying original PR #{pr_number}")
+                        try:
+                            api.add_pr_comment(
+                                repo, pr_number,
+                                f"🎉 AI 修复 PR [#{fix_pr['number']}]({fix_pr_url}) 已通过 CI，请 review 并合并。",
+                                write_token,
+                            )
+                            api.add_label_to_pr(repo, fix_pr['number'], ['fix_notified'], write_token)
+                        except Exception as e:
+                            log(f"    ⚠️  Notification failed: {e}")
+                    else:
+                        log(f"    → Fix PR #{fix_pr['number']} CI passed, already notified, skipping")
+
+                elif 'ci_processing' in fix_labels:
+                    log(f"    → Fix PR #{fix_pr['number']} CI running (ci_processing), skipping")
+
+                elif ci_failed_label in fix_labels:
                     count = api.get_branch_commit_count(repo, fix_branch, pr_base, token)
-                    log(f"    → Fix PR #{fix_pr['number']} ci-failed, commits={count}")
+                    log(f"    → Fix PR #{fix_pr['number']} ci_failed, commits={count}")
                     if count >= MAX_RETRIES:
                         log(f"    → Max retries ({MAX_RETRIES}) reached, closing fix PR")
-                        api.close_pull_request(repo, fix_pr['number'], token)
-                        api.add_pr_comment(
-                            repo, fix_pr['number'],
-                            f"🤖 AI 已尝试修复 {MAX_RETRIES} 次，仍未通过 CI，自动关闭。请人工处理。",
-                            token,
-                        )
-                        api.add_pr_comment(
-                            repo, pr_number,
-                            f"🤖 AI 修复 PR #{fix_pr['number']} 已尝试 {MAX_RETRIES} 次失败，已关闭，请人工介入。",
-                            token,
-                        )
+                        try:
+                            api.close_pull_request(repo, fix_pr['number'], write_token)
+                            api.add_pr_comment(
+                                repo, fix_pr['number'],
+                                f"🤖 AI 已尝试修复 {MAX_RETRIES} 次，仍未通过 CI，自动关闭。请人工处理。",
+                                write_token,
+                            )
+                            api.add_pr_comment(
+                                repo, pr_number,
+                                f"🤖 AI 修复 PR #{fix_pr['number']} 已尝试 {MAX_RETRIES} 次失败，已关闭，请人工介入。",
+                                write_token,
+                            )
+                        except Exception as e:
+                            log(f"    ⚠️  Close/comment failed: {e}")
                     else:
                         log(f"    → Dispatching retry (attempt #{count + 1})")
                         retry_pr = {
@@ -187,8 +215,9 @@ def process_all():
                         }
                         if dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo):
                             total_dispatched += 1
+
                 else:
-                    log(f"    → Fix PR #{fix_pr['number']} CI running or pending, skipping")
+                    log(f"    → Fix PR #{fix_pr['number']} CI pending (no status label), skipping")
 
             else:
                 log(f"    → Fix PR #{fix_pr['number']} state={fix_pr['state']}, skipping")
