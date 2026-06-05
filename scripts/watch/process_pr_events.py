@@ -98,12 +98,12 @@ def process_all():
     if lookback_minutes > 0:
         lookback_cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
 
-    watch_token = os.getenv('WATCH_TOKEN') or os.getenv('DISPATCH_TOKEN', '')
-    dispatch_token = os.getenv('DISPATCH_TOKEN') or watch_token
+    watch_token = os.getenv('DISPATCH_TOKEN', '')
+    dispatch_token = watch_token
     target_repo = os.getenv('GITHUB_REPOSITORY', 'sunshuang1866/docker-images-workflow')
 
     if not watch_token:
-        log("❌ WATCH_TOKEN not set")
+        log("❌ DISPATCH_TOKEN not set")
         sys.exit(1)
 
     log("🔍 Starting PR monitoring cycle")
@@ -122,7 +122,7 @@ def process_all():
         api = get_api(platform)
         ci_failed_label = (repo_config.get('trigger_labels') or ['ci_failed'])[0]
 
-        # GitCode: 读操作用 WATCH_TOKEN，写操作（评论/标签）用 WRITE_TOKEN
+        # GitCode: 读操作用 GITCODE_WATCH_TOKEN，写操作（评论/标签）用 GITCODE_WRITE_TOKEN
         token = watch_token
         write_token = watch_token
         if platform == 'gitcode':

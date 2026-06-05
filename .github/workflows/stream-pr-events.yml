@@ -60,9 +60,9 @@ jobs:
 
       - name: Process PR events
         env:
-          WATCH_TOKEN: ${{ secrets.WATCH_TOKEN }}
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN }}
+          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN }}
         run: |
           python scripts/watch/process_pr_events.py
 

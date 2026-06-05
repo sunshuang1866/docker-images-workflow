@@ -15,24 +15,15 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-  # ── 通用 ──────────────────────────────────────────────────────────
   AI_RUNNER: ${{ vars.AI_RUNNER || 'opencode' }}
   GITCODE_FORK_REPO: ${{ vars.GITCODE_FORK_REPO || '' }}
-
-  # ── OpenCode 配置（AI_RUNNER=opencode 时生效）─────────────────────
-  AI_MODEL: ${{ vars.AI_MODEL || 'alibaba-cn/glm-5.1' }}
-  AI_AGENT: ${{ vars.AI_AGENT || 'build' }}
-  AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
-  OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }}
+  # AI_MODEL: opencode 时填模型名如 deepseek/deepseek-v4-pro；
+  #           claude-code-account 时填 claude-sonnet-4-6
+  AI_MODEL: ${{ vars.AI_MODEL || 'deepseek/deepseek-v4-pro' }}
+  AI_TIMEOUT_MS: ${{ vars.AI_TIMEOUT_MS || '1800000' }}
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
   DEEPSEEK_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
   OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || '' }}
-
-  # ── Claude Code 配置（AI_RUNNER=claude-code / claude-code-account 时生效）──
-  CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-sonnet-4-6' }}
-  CLAUDE_EXTRA_ARGS: ${{ vars.CLAUDE_EXTRA_ARGS || '--dangerously-skip-permissions' }}
-  CLAUDE_TIMEOUT_MS: ${{ vars.CLAUDE_TIMEOUT_MS || '600000' }}
-  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
 
 jobs:
 
@@ -50,7 +41,7 @@ jobs:
       HEAD_SHA: ${{ github.event.client_payload.head_sha }}
       FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
-      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN || '' }}
 
@@ -65,7 +56,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.client_payload.source_repo }}
-          token: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          token: ${{ secrets.DISPATCH_TOKEN }}
           fetch-depth: 1
           path: source-repo
 
@@ -114,7 +105,7 @@ jobs:
       - name: Mark failed
         if: failure()
         env:
-          WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
         run: |
           python - <<'EOF'
@@ -125,7 +116,7 @@ jobs:
           api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['WATCH_TOKEN']
+          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['DISPATCH_TOKEN']
           try:
               api.add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
           except Exception as e:
@@ -146,7 +137,7 @@ jobs:
       PR_HEAD_SHA: ${{ github.event.client_payload.pr_head_sha }}
       FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
-      GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
 
@@ -424,7 +415,7 @@ jobs:
       - name: Mark failed
         if: failure()
         env:
-          WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
         run: |
           python - <<'EOF'
@@ -435,7 +426,7 @@ jobs:
           api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['WATCH_TOKEN']
+          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['DISPATCH_TOKEN']
           try:
               api.add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
           except Exception as e:
