@@ -102,7 +102,10 @@ def main():
     ci_logs = ''
     run_info = ''
     try:
-        run = api.get_latest_failed_run(env['source_repo'], env['head_sha'], env['token'])
+        run = api.get_latest_failed_run(
+            env['source_repo'], env['head_sha'], env['token'],
+            pr_number=env['pr_number'],
+        )
         if run:
             run_info = f"Pipeline/Run: {run.get('name', run.get('id', ''))}, id={run['id']}"
             log_stage('ci-log-analysis', f'Found failed run: {run_info}')

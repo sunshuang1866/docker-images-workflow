@@ -60,7 +60,8 @@ def get_branch_commit_count(repo: str, branch: str, base_branch: str, token: str
 
 # ── CI 日志获取 ──
 
-def get_latest_failed_run(repo: str, head_sha: str, token: str) -> Optional[Dict]:
+def get_latest_failed_run(repo: str, head_sha: str, token: str,
+                          pr_number: int = 0) -> Optional[Dict]:
     url = f"https://api.github.com/repos/{repo}/actions/runs"
     # 先查 failure 状态
     resp = requests.get(url, headers=_headers(token),

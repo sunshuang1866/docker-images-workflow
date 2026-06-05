@@ -7,12 +7,16 @@ v4 API (GitLab-compatible): Pipeline / Job 日志
 """
 
 import os
+import re
 import requests
 from typing import Dict, List, Any, Optional
 
 GITCODE_BASE = "https://gitcode.com"
 MAX_LOG_CHARS = 50_000
 MAX_DIFF_CHARS = 30_000
+
+# 匹配 openEuler Jenkins CI URL
+_JENKINS_URL_RE = re.compile(r'https?://ci\.openeuler\.openatom\.cn/job/\S+')
 
 
 def parse_repo(repo: str):
@@ -98,6 +102,36 @@ def get_branch_commit_count(repo: str, branch: str, base_branch: str, token: str
 
 # ── CI 日志获取（GitLab v4 Pipeline API + 外部 CI 兜底）──
 
+def _get_pr_comments(repo: str, pr_number: int, token: str) -> List[Dict]:
+    """获取 PR 的所有评论（v5 API）。"""
+    owner, name, _ = parse_repo(repo)
+    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/issues/{pr_number}/comments"
+    try:
+        resp = requests.get(url, params={'access_token': token, 'per_page': 100}, timeout=30)
+        if resp.ok and isinstance(resp.json(), list):
+            return resp.json()
+    except Exception:
+        pass
+    return []
+
+
+def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
+    """从 PR 评论中提取最新的 Jenkins 构建 URL，优先失败相关的评论。"""
+    failed_urls: List[str] = []
+    other_urls: List[str] = []
+    for comment in reversed(comments):  # 最新评论优先
+        body = comment.get('body', '')
+        matches = _JENKINS_URL_RE.findall(body)
+        if not matches:
+            continue
+        url = matches[0].rstrip('.,;)')
+        if any(k in body.lower() for k in ['fail', 'error', 'failed', '失败']):
+            failed_urls.append(url)
+        else:
+            other_urls.append(url)
+    return (failed_urls or other_urls or [''])[0]
+
+
 def _get_commit_statuses(repo: str, sha: str, token: str) -> List[Dict]:
     """获取 commit 的外部 CI 状态（用于 Jenkins 等非 GitCode Pipeline CI）。"""
     owner, name, _ = parse_repo(repo)
@@ -132,7 +166,8 @@ def _fetch_external_ci_log(target_url: str) -> str:
     return ''
 
 
-def get_latest_failed_run(repo: str, head_sha: str, token: str) -> Optional[Dict]:
+def get_latest_failed_run(repo: str, head_sha: str, token: str,
+                          pr_number: int = 0) -> Optional[Dict]:
     # 1. 优先查 GitCode 内置 Pipeline（GitLab v4 API）
     _, _, path_enc = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v4/projects/{path_enc}/pipelines"
@@ -147,7 +182,7 @@ def get_latest_failed_run(repo: str, head_sha: str, token: str) -> Optional[Dict
     except Exception:
         pass
 
-    # 2. 兜底：查 commit status（外部 CI，如 Jenkins，通过 status API 上报）
+    # 2. 查 commit status API（外部 CI 若通过 status API 上报）
     statuses = _get_commit_statuses(repo, head_sha, token)
     failed = [s for s in statuses if s.get('state') in ('failure', 'error', 'failed')]
     if failed:
@@ -157,6 +192,18 @@ def get_latest_failed_run(repo: str, head_sha: str, token: str) -> Optional[Dict
             'name': s.get('context', 'external-ci'),
             'target_url': s.get('target_url', ''),
         }
+
+    # 3. 从 PR 评论中提取 Jenkins URL（Jenkins bot 通常以评论形式上报构建链接）
+    if pr_number:
+        comments = _get_pr_comments(repo, pr_number, token)
+        jenkins_url = _find_jenkins_url_in_comments(comments)
+        if jenkins_url:
+            return {
+                'id': 0,
+                'name': 'jenkins-from-comment',
+                'target_url': jenkins_url,
+            }
+
     return None
 
 
