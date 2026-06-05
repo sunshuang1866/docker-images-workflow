@@ -51,6 +51,7 @@ jobs:
       FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
       GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+      DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN || '' }}
 
     steps:
@@ -145,8 +146,8 @@ jobs:
       PR_HEAD_SHA: ${{ github.event.client_payload.pr_head_sha }}
       FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
-      ANALYSIS: ${{ github.event.client_payload.analysis }}
       GITHUB_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
+      DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
 
     steps:

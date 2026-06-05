@@ -19,6 +19,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
 from scripts.lib.ci_api import get_api
+from scripts.lib import ci_data
 
 WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
 SOURCE_REPO_DIR = os.path.join(PROJECT_ROOT, 'source-repo')
@@ -106,8 +107,21 @@ def main():
 
     log_stage('code-fix', f"repo={env['source_repo']} [{env['source_platform']}] pr=#{env['pr_number']}")
 
-    if not env['analysis']:
-        raise RuntimeError('ANALYSIS env var is empty — ci-log-analysis must run first')
+    # 从 ci-data 分支读取完整分析报告（优先），fallback 到 env var
+    analysis = ''
+    try:
+        analysis = ci_data.read_file(ci_data.analysis_path(env['pr_number']))
+        if analysis:
+            log_stage('code-fix', f'analysis loaded from ci-data ({len(analysis)} chars)')
+    except Exception as e:
+        log_stage('code-fix', f'⚠️ ci-data read failed: {e}')
+
+    if not analysis:
+        analysis = env['analysis']
+        log_stage('code-fix', f'analysis fallback to env var ({len(analysis)} chars)')
+
+    if not analysis:
+        raise RuntimeError('analysis is empty — ci-log-analysis must run first')
 
     if not os.path.isdir(SOURCE_REPO_DIR):
         raise RuntimeError(f'source-repo directory not found: {SOURCE_REPO_DIR}')
@@ -121,7 +135,7 @@ def main():
             'title': env['pr_title'],
             'changed_files': pr_files,
         },
-        'ci_analysis': env['analysis'],
+        'ci_analysis': analysis,
         'fix_branch': env['fix_branch'],
     }
 
@@ -170,6 +184,18 @@ def main():
 
     git(['commit', '-m', commit_msg], cwd=SOURCE_REPO_DIR)
     log_stage('code-fix', '✅ committed')
+
+    # 写入修复摘要到 ci-data 分支，并更新知识库
+    try:
+        ci_data.write_file(
+            ci_data.fix_summary_path(env['pr_number']),
+            summary,
+            f"code-fix: {env['source_repo']} PR #{env['pr_number']}",
+        )
+        ci_data.append_pattern(env['pr_number'], env['source_repo'], analysis, summary)
+        log_stage('code-fix', '✅ knowledge base updated')
+    except Exception as e:
+        log_stage('code-fix', f'⚠️ ci-data write failed (non-fatal): {e}')
 
     # 评论到原始 PR
     comment_body = (

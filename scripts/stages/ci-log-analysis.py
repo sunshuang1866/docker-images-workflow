@@ -19,6 +19,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
 from scripts.lib.ci_api import get_api
+from scripts.lib import ci_data
 
 WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
 
@@ -49,7 +50,7 @@ def parse_env() -> dict:
     }
 
 
-def dispatch_code_fix(env: dict, analysis: str):
+def dispatch_code_fix(env: dict):
     target_repo = os.getenv('GITHUB_REPOSITORY', 'sunshuang1866/docker-images-workflow')
     payload = {
         'event_type': 'run-ci-fix-phase',
@@ -62,7 +63,7 @@ def dispatch_code_fix(env: dict, analysis: str):
             'pr_head_sha': env['head_sha'],
             'fix_branch': env['fix_branch'],
             'pr_base_branch': env['pr_base_branch'],
-            'analysis': analysis[:8000],
+            # analysis 已写入 ci-data 分支，不再通过 payload 传递
         }
     }
     url = f"https://api.github.com/repos/{target_repo}/dispatches"
@@ -112,6 +113,17 @@ def main():
     except Exception as e:
         log_stage('ci-log-analysis', f'⚠️ CI log fetch failed: {e}')
 
+    # 读取历史失败模式知识库
+    knowledge = ''
+    try:
+        knowledge = ci_data.read_knowledge()
+        if knowledge:
+            log_stage('ci-log-analysis', f'knowledge base: {len(knowledge)} chars')
+        else:
+            log_stage('ci-log-analysis', 'knowledge base: empty (first run)')
+    except Exception as e:
+        log_stage('ci-log-analysis', f'⚠️ knowledge base read failed: {e}')
+
     context = {
         'pr': {
             'number': env['pr_number'],
@@ -122,6 +134,7 @@ def main():
             'run_info': run_info or '(not available)',
             'logs': ci_logs or '(not available — analyze based on PR diff only)',
         },
+        'historical_patterns': knowledge or '(暂无历史记录)',
     }
 
     run_agent(
@@ -137,6 +150,17 @@ def main():
     with open(output_file, 'r', encoding='utf-8') as f:
         analysis = f.read()
 
+    # 写入 ci-data 分支（完整内容，不截断）
+    try:
+        ci_data.write_file(
+            ci_data.analysis_path(env['pr_number']),
+            analysis,
+            f"ci-analysis: {env['source_repo']} PR #{env['pr_number']}",
+        )
+        log_stage('ci-log-analysis', '✅ analysis written to ci-data branch')
+    except Exception as e:
+        log_stage('ci-log-analysis', f'⚠️ ci-data write failed: {e}')
+
     # 评论到原始 PR
     heading = (
         f"## 🔍 CI 失败分析 (ci-log-analysis)\n\n"
@@ -151,8 +175,8 @@ def main():
     except Exception as e:
         log_stage('ci-log-analysis', f'⚠️ PR comment failed: {e}')
 
-    # 自动推进到 code-fix 阶段
-    dispatch_code_fix(env, analysis)
+    # 自动推进到 code-fix 阶段（analysis 已在 ci-data 分支，不再通过 payload 传递）
+    dispatch_code_fix(env)
     log_stage('ci-log-analysis', '✅ done')
 
 
