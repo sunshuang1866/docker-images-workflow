@@ -225,6 +225,23 @@ jobs:
       - name: Run 代码修复
         run: python scripts/stages/code-fix.py
 
+      - name: Remove AI artifacts from fix branch
+        run: |
+          cd source-repo
+          for pattern in ".claude" ".opencode" "__pycache__" ".aider"; do
+            find . -name "$pattern" -not -path "./.git/*" | while read p; do
+              git rm -rf --cached "$p" 2>/dev/null || true
+              rm -rf "$p"
+            done
+          done
+          find . -name "*.pyc" -o -name "*.pyo" | grep -v ".git" | while read p; do
+            git rm -f --cached "$p" 2>/dev/null || true
+            rm -f "$p"
+          done
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: remove AI-generated artifacts"
+          fi
+
       - name: Push fix branch
         run: |
           cd source-repo
