@@ -253,7 +253,7 @@ jobs:
             git remote set-url origin \
               https://x-access-token:${{ secrets.WRITE_TOKEN }}@github.com/${{ env.SOURCE_REPO }}.git
           fi
-          git push origin ${{ env.FIX_BRANCH }}
+          git push --force-with-lease origin ${{ env.FIX_BRANCH }}
 
       - name: Create fix PR if not exists
         env:
