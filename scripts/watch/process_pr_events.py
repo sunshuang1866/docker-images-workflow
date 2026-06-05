@@ -26,6 +26,7 @@ PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.lib.ci_api import detect_platform, normalize_repo, get_api
+from scripts.lib import ci_data
 
 WATCHLIST_FILE = os.path.join(PROJECT_ROOT, 'config', 'watchlist.json')
 MAX_RETRIES = 3
@@ -170,7 +171,7 @@ def process_all():
                 fix_pr_url = fix_pr.get('html_url') or f"https://gitcode.com/{repo}/pull/{fix_pr['number']}"
 
                 if 'ci_successful' in fix_labels:
-                    if 'fix_notified' not in fix_labels:
+                    if not ci_data.is_fix_notified(pr_number):
                         log(f"    → Fix PR #{fix_pr['number']} passed CI! Notifying original PR #{pr_number}")
                         try:
                             api.add_pr_comment(
@@ -178,7 +179,7 @@ def process_all():
                                 f"🎉 AI 修复 PR [#{fix_pr['number']}]({fix_pr_url}) 已通过 CI，请 review 并合并。",
                                 write_token,
                             )
-                            api.add_label_to_pr(repo, fix_pr['number'], ['fix_notified'], write_token)
+                            ci_data.mark_fix_notified(pr_number)
                         except Exception as e:
                             log(f"    ⚠️  Notification failed: {e}")
                     else:

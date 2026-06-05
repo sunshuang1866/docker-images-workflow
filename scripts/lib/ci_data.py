@@ -93,6 +93,18 @@ def fix_summary_path(pr_number: int) -> str:
     return f"ci-fix/{pr_number}/code-fix-summary.md"
 
 
+def fix_notified_path(pr_number: int) -> str:
+    return f"ci-fix/{pr_number}/fix-notified"
+
+
+def is_fix_notified(pr_number: int) -> bool:
+    return bool(read_file(fix_notified_path(pr_number)))
+
+
+def mark_fix_notified(pr_number: int) -> None:
+    write_file(fix_notified_path(pr_number), "notified", f"fix-notified: PR #{pr_number}")
+
+
 KNOWLEDGE_PATH = "knowledge/ci-failure-patterns.md"
 
 KNOWLEDGE_HEADER = """\

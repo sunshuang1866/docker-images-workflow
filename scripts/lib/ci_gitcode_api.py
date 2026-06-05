@@ -105,7 +105,7 @@ def get_branch_commit_count(repo: str, branch: str, base_branch: str, token: str
 def _get_pr_comments(repo: str, pr_number: int, token: str) -> List[Dict]:
     """获取 PR 的所有评论（v5 API）。"""
     owner, name, _ = parse_repo(repo)
-    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/issues/{pr_number}/comments"
+    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls/{pr_number}/comments"
     try:
         resp = requests.get(url, params={'access_token': token, 'per_page': 100}, timeout=30)
         if resp.ok and isinstance(resp.json(), list):
@@ -260,14 +260,14 @@ def get_failed_job_logs(repo: str, pipeline_id: int, token: str,
 def close_pull_request(repo: str, pr_number: int, token: str):
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls/{pr_number}"
-    resp = requests.patch(url, headers=_v5(token), json={'state': 'closed'}, timeout=30)
+    resp = requests.patch(url, params={'access_token': token}, json={'state': 'closed'}, timeout=30)
     resp.raise_for_status()
 
 
 def add_pr_comment(repo: str, pr_number: int, body: str, token: str):
     owner, name, _ = parse_repo(repo)
-    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/issues/{pr_number}/comments"
-    resp = requests.post(url, headers=_v5(token), json={'body': body}, timeout=30)
+    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls/{pr_number}/comments"
+    resp = requests.post(url, params={'access_token': token}, json={'body': body}, timeout=30)
     resp.raise_for_status()
 
 
