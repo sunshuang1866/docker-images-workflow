@@ -119,7 +119,8 @@ KNOWLEDGE_PATH = "docs/ci-failure-patterns.md"
 KNOWLEDGE_HEADER = """\
 # CI 失败模式知识库
 
-本文件由 ci-fix-team 自动维护，记录历史 CI 失败的根因与修复模式，供 AI 分析时参考。
+> **按失败模式分类**，每个模式包含：典型报错、根因分析、修复方法、历史案例。
+> 处理新失败 PR 时，**用报错关键词搜索对应章节**，直接找到修复方法。
 
 """
 
@@ -135,7 +136,7 @@ def _extract_field(text: str, field: str) -> str:
             val = line.split(':', 1)[-1].strip().lstrip('*').strip()
             if val:
                 return val
-    return '(未知)'
+    return ''
 
 
 def _extract_section(text: str, heading: str) -> str:
@@ -153,43 +154,132 @@ def _extract_section(text: str, heading: str) -> str:
     return '\n'.join(result).strip()[:300]
 
 
-def append_pattern(pr_number: int, repo: str, analysis: str, fix_summary: str) -> None:
-    """从分析报告和修复摘要中提取失败模式，追加到 main 分支知识库。"""
-    failure_type = _extract_field(analysis, '失败类型')
-    confidence   = _extract_field(analysis, '置信度')
-    root_cause   = _extract_section(analysis, '根因定位')
-    fix_desc     = _extract_section(fix_summary, '修复的问题')
-    changed_files = _extract_section(fix_summary, '修改的文件')
-    date = datetime.now().strftime('%Y-%m-%d')
+def _build_case_line(pr_number: int, changed_files: str, fix_desc: str) -> str:
+    """构造一条历史案例行，如：- PR #2266: `AI/mlflow/3.12.0` — 添加 shadow 依赖"""
+    # 取第一个反引号包裹的路径，或第一行去掉前缀
+    file_match = re.search(r'`([^`]+)`', changed_files)
+    if file_match:
+        file_path = file_match.group(1)
+    else:
+        first = changed_files.split('\n')[0].lstrip('- ').strip()
+        file_path = first.split(':')[0].strip() if ':' in first else first
+    short_desc = (fix_desc.split('\n')[0].strip())[:60]
+    return f'- PR #{pr_number}: `{file_path}` — {short_desc}'
 
-    entry = f"""
+
+def _count_patterns(content: str) -> int:
+    return len(re.findall(r'^## 模式\d+[：:]', content, re.MULTILINE))
+
+
+def _insert_case_into_pattern(content: str, pattern_num: int, case_line: str) -> str | None:
+    """
+    在指定模式章节的"历史案例"列表末尾插入 case_line。
+    找不到该模式章节时返回 None。
+    """
+    pattern_id = f'{pattern_num:02d}'
+    lines = content.splitlines(keepends=True)
+
+    # 定位模式章节起止行
+    section_start = None
+    for i, line in enumerate(lines):
+        if re.match(rf'^## 模式{pattern_id}[：:]', line):
+            section_start = i
+            break
+    if section_start is None:
+        return None
+
+    section_end = len(lines)
+    for i in range(section_start + 1, len(lines)):
+        if re.match(r'^## ', lines[i]):
+            section_end = i
+            break
+
+    # 在章节内找 **历史案例**: 后的最后一条列表项
+    cases_heading_idx = None
+    last_case_idx = None
+    for i in range(section_start, section_end):
+        stripped = lines[i].rstrip()
+        if '**历史案例**' in stripped:
+            cases_heading_idx = i
+        elif cases_heading_idx is not None and stripped.strip().startswith('- '):
+            last_case_idx = i
+
+    insert_after = last_case_idx if last_case_idx is not None else cases_heading_idx
+    if insert_after is None:
+        return None
+
+    lines.insert(insert_after + 1, case_line + '\n')
+    return ''.join(lines)
+
+
+def _append_new_pattern(content: str, pr_number: int, title: str, keywords: str,
+                        root_cause: str, fix_desc: str, case_line: str) -> str:
+    """在知识库末尾追加一个全新的模式章节。"""
+    next_num = _count_patterns(content) + 1
+    pattern_id = f'{next_num:02d}'
+    keywords = keywords or '(待补充)'
+    root_cause = root_cause or '(待补充)'
+    fix_desc = fix_desc or '(待补充)'
+
+    section = f"""
 ---
 
-## {repo} PR #{pr_number} · {date}
+## 模式{pattern_id}：{title}
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `{failure_type}` |
-| 置信度 | {confidence} |
+**症状关键词**: {keywords}
 
-**根因**:
-{root_cause}
+**根因**: {root_cause}
 
-**修复方法**:
-{fix_desc}
+**修复方法**: {fix_desc}
 
-**涉及文件**:
-{changed_files}
-
+**历史案例**:
+{case_line}
 """
+    return content.rstrip('\n') + '\n' + section
+
+
+def append_pattern(pr_number: int, repo: str, analysis: str, fix_summary: str) -> None:
+    """
+    将新 PR 的失败模式写入 main 分支知识库：
+    - 若分析报告标注匹配已有模式，向该模式的"历史案例"追加一行；
+    - 若标注为新模式，在文件末尾新建模式章节。
+    """
+    # 从分析报告提取归类字段
+    match_field = _extract_field(analysis, '知识库匹配')   # e.g. '模式05' or '新模式'
+    new_title    = _extract_field(analysis, '新模式标题')
+    new_keywords = _extract_field(analysis, '新模式症状关键词')
+    root_cause   = _extract_section(analysis, '根因定位')
+
+    # 从修复摘要提取
+    fix_desc      = _extract_section(fix_summary, '修复的问题')
+    changed_files = _extract_section(fix_summary, '修改的文件')
+
+    case_line = _build_case_line(pr_number, changed_files, fix_desc)
 
     existing = read_knowledge()
     if not existing:
         existing = KNOWLEDGE_HEADER
 
+    updated = None
+
+    # 尝试匹配已有模式
+    num_match = re.search(r'(\d+)', match_field) if match_field else None
+    if num_match and '新模式' not in match_field:
+        pattern_num = int(num_match.group(1))
+        updated = _insert_case_into_pattern(existing, pattern_num, case_line)
+        if updated is None:
+            # 模式章节在文件中找不到，退化为新建
+            pass
+
+    # 新模式或插入失败时，新建章节
+    if updated is None:
+        title = new_title or _extract_field(analysis, '失败类型') or '未分类失败'
+        updated = _append_new_pattern(existing, pr_number, title, new_keywords,
+                                      root_cause, fix_desc, case_line)
+
     write_file(
         KNOWLEDGE_PATH,
-        existing + entry,
+        updated,
         f'knowledge: add pattern from {repo} PR #{pr_number}',
         branch=MAIN_BRANCH,
     )
