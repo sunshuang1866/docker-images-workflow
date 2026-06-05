@@ -153,6 +153,7 @@ def _fetch_external_ci_log(target_url: str) -> str:
     for url in [text_url, base]:
         try:
             resp = requests.get(url, timeout=60, allow_redirects=True)
+            print(f"[ci-log] GET {url} → HTTP {resp.status_code}", flush=True)
             if resp.status_code == 200:
                 lines = resp.text.split('\n')
                 error_lines = [l for l in lines if any(
@@ -161,7 +162,8 @@ def _fetch_external_ci_log(target_url: str) -> str:
                 tail = lines[-300:]
                 combined = error_lines[:150] + (['---'] if error_lines else []) + tail
                 return '\n'.join(combined)[:MAX_LOG_CHARS]
-        except Exception:
+        except Exception as e:
+            print(f"[ci-log] GET {url} → exception: {e}", flush=True)
             continue
     return ''
 
@@ -184,25 +186,25 @@ def get_latest_failed_run(repo: str, head_sha: str, token: str,
 
     # 2. 查 commit status API（外部 CI 若通过 status API 上报）
     statuses = _get_commit_statuses(repo, head_sha, token)
+    print(f"[ci-log] commit statuses: {len(statuses)} total", flush=True)
     failed = [s for s in statuses if s.get('state') in ('failure', 'error', 'failed')]
+    for s in failed:
+        print(f"[ci-log]   failed status: context={s.get('context')} target_url={s.get('target_url','')[:80]}", flush=True)
     if failed:
         s = failed[0]
-        return {
-            'id': s.get('id', 0),
-            'name': s.get('context', 'external-ci'),
-            'target_url': s.get('target_url', ''),
-        }
+        target = s.get('target_url', '')
+        if target:
+            return {'id': s.get('id', 0), 'name': s.get('context', 'external-ci'), 'target_url': target}
+        # status 存在但无 target_url，继续尝试 PR 评论
 
     # 3. 从 PR 评论中提取 Jenkins URL（Jenkins bot 通常以评论形式上报构建链接）
     if pr_number:
         comments = _get_pr_comments(repo, pr_number, token)
+        print(f"[ci-log] PR #{pr_number} comments: {len(comments)} total", flush=True)
         jenkins_url = _find_jenkins_url_in_comments(comments)
+        print(f"[ci-log] Jenkins URL from comments: {jenkins_url or '(not found)'}", flush=True)
         if jenkins_url:
-            return {
-                'id': 0,
-                'name': 'jenkins-from-comment',
-                'target_url': jenkins_url,
-            }
+            return {'id': 0, 'name': 'jenkins-from-comment', 'target_url': jenkins_url}
 
     return None
 
@@ -214,6 +216,10 @@ def get_failed_job_logs(repo: str, pipeline_id: int, token: str,
         log = _fetch_external_ci_log(target_url)
         if log:
             return log
+
+    # pipeline_id == 0 说明来自外部 CI（Jenkins），无内置 Pipeline 可查
+    if not pipeline_id:
+        return ''
 
     # GitCode 内置 Pipeline：通过 GitLab v4 Jobs API 拉日志
     _, _, path_enc = parse_repo(repo)
