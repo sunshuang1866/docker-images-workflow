@@ -43,3 +43,23 @@
 **涉及文件**:
 - `AI/vllm-cpu/meta.yml`: 在文件末尾补上换行符
 
+
+---
+
+## openeuler/openeuler-docker-images PR #2512 · 2026-06-05
+
+| 字段 | 内容 |
+|------|------|
+| 失败类型 | `infra-error` |
+| 置信度 | 低 |
+
+**根因**:
+- 失败位置: N/A（CI 基础设施不可用）
+- 失败原因: GitCode API 返回 HTTP 418 错误，无法获取 pipeline jobs 日志。pipeline ID 为 `0` 也是异常值，表明 pipeline 可能未被正常触发或 API 端点配置有误。
+
+**修复方法**:
+**无需代码修改。** 本次 CI 失败属于 `infra-error`（CI 基础设施问题），GitCode API 返回 HTTP 418 错误，pipeline ID 为异常值 `0`，表明 CI pipeline 未正常触发或 API 端点配置有误。此问题与 PR 代码变更无直接关联，无法通过修改源代码修复。
+
+**涉及文件**:
+无（CI 基础设施故障，不涉及代码层面修改）
+
