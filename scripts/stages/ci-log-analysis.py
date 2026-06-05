@@ -21,7 +21,7 @@ from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventio
 from scripts.lib.ci_api import get_api
 from scripts.lib import ci_data
 
-WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
+WORK_BASE = os.path.join(PROJECT_ROOT, 'ci-fix-log')
 
 
 def parse_env() -> dict:

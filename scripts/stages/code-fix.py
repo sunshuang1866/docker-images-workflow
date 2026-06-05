@@ -20,7 +20,7 @@ from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
 from scripts.lib import ci_data
 
-WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
+WORK_BASE = os.path.join(PROJECT_ROOT, 'ci-fix-log')
 SOURCE_REPO_DIR = os.path.join(PROJECT_ROOT, 'source-repo')
 
 
