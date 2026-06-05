@@ -276,6 +276,6 @@ def create_pull_request(repo: str, head_branch: str, base_branch: str,
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls"
     payload = {'title': title, 'body': body, 'head': head_branch, 'base': base_branch}
-    resp = requests.post(url, headers=_v5(token), json=payload, timeout=30)
+    resp = requests.post(url, params={'access_token': token}, json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
