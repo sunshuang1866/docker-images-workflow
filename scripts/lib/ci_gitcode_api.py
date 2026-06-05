@@ -96,26 +96,79 @@ def get_branch_commit_count(repo: str, branch: str, base_branch: str, token: str
     return len(data.get('commits', []))
 
 
-# ── CI 日志获取（GitLab v4 Pipeline API）──
+# ── CI 日志获取（GitLab v4 Pipeline API + 外部 CI 兜底）──
+
+def _get_commit_statuses(repo: str, sha: str, token: str) -> List[Dict]:
+    """获取 commit 的外部 CI 状态（用于 Jenkins 等非 GitCode Pipeline CI）。"""
+    owner, name, _ = parse_repo(repo)
+    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/commits/{sha}/statuses"
+    try:
+        resp = requests.get(url, params={'access_token': token, 'per_page': 20}, timeout=30)
+        if resp.ok and isinstance(resp.json(), list):
+            return resp.json()
+    except Exception:
+        pass
+    return []
+
+
+def _fetch_external_ci_log(target_url: str) -> str:
+    """从外部 CI URL（如 Jenkins）拉取控制台日志。"""
+    base = target_url.rstrip('/')
+    # Jenkins: /console 是 HTML，/consoleText 是纯文本
+    text_url = (base[:-8] + '/consoleText') if base.endswith('/console') else (base + '/consoleText')
+    for url in [text_url, base]:
+        try:
+            resp = requests.get(url, timeout=60, allow_redirects=True)
+            if resp.status_code == 200:
+                lines = resp.text.split('\n')
+                error_lines = [l for l in lines if any(
+                    k in l.lower() for k in ['error', 'fail', 'exception', 'traceback', 'fatal']
+                )]
+                tail = lines[-300:]
+                combined = error_lines[:150] + (['---'] if error_lines else []) + tail
+                return '\n'.join(combined)[:MAX_LOG_CHARS]
+        except Exception:
+            continue
+    return ''
+
 
 def get_latest_failed_run(repo: str, head_sha: str, token: str) -> Optional[Dict]:
+    # 1. 优先查 GitCode 内置 Pipeline（GitLab v4 API）
     _, _, path_enc = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v4/projects/{path_enc}/pipelines"
     params = {'sha': head_sha, 'status': 'failed', 'per_page': 5}
     try:
         resp = requests.get(url, headers=_v4(token), params=params, timeout=30)
-        if resp.status_code in (404, 403):
-            return None
-        resp.raise_for_status()
-        pipelines = resp.json()
-        if isinstance(pipelines, list) and pipelines:
-            return pipelines[0]
+        if resp.status_code not in (404, 403):
+            resp.raise_for_status()
+            pipelines = resp.json()
+            if isinstance(pipelines, list) and pipelines:
+                return pipelines[0]
     except Exception:
         pass
+
+    # 2. 兜底：查 commit status（外部 CI，如 Jenkins，通过 status API 上报）
+    statuses = _get_commit_statuses(repo, head_sha, token)
+    failed = [s for s in statuses if s.get('state') in ('failure', 'error', 'failed')]
+    if failed:
+        s = failed[0]
+        return {
+            'id': s.get('id', 0),
+            'name': s.get('context', 'external-ci'),
+            'target_url': s.get('target_url', ''),
+        }
     return None
 
 
-def get_failed_job_logs(repo: str, pipeline_id: int, token: str) -> str:
+def get_failed_job_logs(repo: str, pipeline_id: int, token: str,
+                        target_url: str = '') -> str:
+    # 外部 CI（如 Jenkins）：直接从 target_url 拉日志
+    if target_url:
+        log = _fetch_external_ci_log(target_url)
+        if log:
+            return log
+
+    # GitCode 内置 Pipeline：通过 GitLab v4 Jobs API 拉日志
     _, _, path_enc = parse_repo(repo)
     jobs_url = f"{GITCODE_BASE}/api/v4/projects/{path_enc}/pipelines/{pipeline_id}/jobs"
     try:

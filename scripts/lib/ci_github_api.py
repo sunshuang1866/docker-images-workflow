@@ -72,7 +72,7 @@ def get_latest_failed_run(repo: str, head_sha: str, token: str) -> Optional[Dict
     return sorted(runs, key=lambda r: r.get('updated_at', ''), reverse=True)[0]
 
 
-def get_failed_job_logs(repo: str, run_id: int, token: str) -> str:
+def get_failed_job_logs(repo: str, run_id: int, token: str, target_url: str = '') -> str:
     jobs_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs"
     resp = requests.get(jobs_url, headers=_headers(token), timeout=30)
     resp.raise_for_status()

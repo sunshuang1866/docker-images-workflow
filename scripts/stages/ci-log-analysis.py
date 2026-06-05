@@ -106,7 +106,10 @@ def main():
         if run:
             run_info = f"Pipeline/Run: {run.get('name', run.get('id', ''))}, id={run['id']}"
             log_stage('ci-log-analysis', f'Found failed run: {run_info}')
-            ci_logs = api.get_failed_job_logs(env['source_repo'], run['id'], env['token'])
+            ci_logs = api.get_failed_job_logs(
+                env['source_repo'], run['id'], env['token'],
+                target_url=run.get('target_url', ''),
+            )
             log_stage('ci-log-analysis', f'CI logs: {len(ci_logs)} chars')
         else:
             log_stage('ci-log-analysis', '⚠️ No failed CI run found for this SHA')
