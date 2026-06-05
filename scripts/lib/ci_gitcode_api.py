@@ -260,14 +260,14 @@ def get_failed_job_logs(repo: str, pipeline_id: int, token: str,
 def close_pull_request(repo: str, pr_number: int, token: str):
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls/{pr_number}"
-    resp = requests.patch(url, params={'access_token': token}, json={'state': 'closed'}, timeout=30)
+    resp = requests.patch(url, headers=_v5(token), json={'state': 'closed'}, timeout=30)
     resp.raise_for_status()
 
 
 def add_pr_comment(repo: str, pr_number: int, body: str, token: str):
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/issues/{pr_number}/comments"
-    resp = requests.post(url, params={'access_token': token}, json={'body': body}, timeout=30)
+    resp = requests.post(url, headers=_v5(token), json={'body': body}, timeout=30)
     resp.raise_for_status()
 
 
@@ -276,7 +276,7 @@ def create_pull_request(repo: str, head_branch: str, base_branch: str,
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls"
     payload = {'title': title, 'body': body, 'head': head_branch, 'base': base_branch}
-    resp = requests.post(url, params={'access_token': token}, json=payload, timeout=30)
+    resp = requests.post(url, headers=_v5(token), json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -284,5 +284,5 @@ def create_pull_request(repo: str, head_branch: str, base_branch: str,
 def add_label_to_pr(repo: str, pr_number: int, labels: List[str], token: str):
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/issues/{pr_number}/labels"
-    resp = requests.post(url, params={'access_token': token}, json={'labels': labels}, timeout=30)
+    resp = requests.post(url, headers=_v5(token), json={'labels': labels}, timeout=30)
     resp.raise_for_status()
