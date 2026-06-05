@@ -15,8 +15,8 @@ GITCODE_BASE = "https://gitcode.com"
 MAX_LOG_CHARS = 50_000
 MAX_DIFF_CHARS = 30_000
 
-# 匹配 openEuler Jenkins CI URL
-_JENKINS_URL_RE = re.compile(r'https?://ci\.openeuler\.openatom\.cn/job/\S+')
+# 匹配 openEuler Jenkins CI URL，停止于空白或 HTML/Markdown 分隔符
+_JENKINS_URL_RE = re.compile(r'https?://ci\.openeuler\.openatom\.cn/job/[^\s<>"\')\]\|]+')
 
 
 def parse_repo(repo: str):
@@ -124,7 +124,7 @@ def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
         matches = _JENKINS_URL_RE.findall(body)
         if not matches:
             continue
-        url = matches[0].rstrip('.,;)')
+        url = matches[0].rstrip('.,;)>]')
         if any(k in body.lower() for k in ['fail', 'error', 'failed', '失败']):
             failed_urls.append(url)
         else:
