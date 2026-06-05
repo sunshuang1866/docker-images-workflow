@@ -52,13 +52,16 @@ def find_any_pr_by_head_branch(repo: str, head_branch: str, token: str) -> Optio
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls"
     # GitCode v5 不支持按 head 过滤，拉 all 状态后本地过滤
+    # head_branch 可能是 "fix/2512" 或跨仓库格式 "fork_owner:fix/2512"
+    branch_name = head_branch.split(':')[-1]
     for state in ('open', 'closed', 'merged'):
         params = {'state': state, 'per_page': 50, 'access_token': token}
         resp = requests.get(url, params=params, timeout=30)
         if not resp.ok:
             continue
         for pr in resp.json() or []:
-            if pr.get('head', {}).get('ref') == head_branch:
+            ref = pr.get('head', {}).get('ref', '')
+            if ref == head_branch or ref == branch_name or ref.split(':')[-1] == branch_name:
                 return pr
     return None
 
