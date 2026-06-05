@@ -59,6 +59,17 @@ def has_changes(cwd: str) -> bool:
     return result.returncode != 0
 
 
+def get_pr_file_list(cwd: str, pr_head_sha: str, base_branch: str) -> list:
+    """返回原始 PR diff 中涉及的文件列表。"""
+    result = git(
+        ['diff', '--name-only', f'origin/{base_branch}...{pr_head_sha}'],
+        cwd=cwd, check=False
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+    return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
+
+
 AI_ARTIFACT_DIRS = {'.claude', '.opencode', '__pycache__', '.aider'}
 AI_ARTIFACT_SUFFIXES = {'.pyc', '.pyo'}
 
@@ -94,10 +105,14 @@ def main():
     if not os.path.isdir(SOURCE_REPO_DIR):
         raise RuntimeError(f'source-repo directory not found: {SOURCE_REPO_DIR}')
 
+    pr_files = get_pr_file_list(SOURCE_REPO_DIR, env['pr_head_sha'], env['pr_base_branch'])
+    log_stage('code-fix', f'PR touched {len(pr_files)} file(s): {pr_files}')
+
     context = {
         'pr': {
             'number': env['pr_number'],
             'title': env['pr_title'],
+            'changed_files': pr_files,
         },
         'ci_analysis': env['analysis'],
         'fix_branch': env['fix_branch'],
@@ -109,6 +124,7 @@ def main():
         context=context,
         instruction=(
             '根据 CI 失败分析报告，对源代码进行最小化修复。'
+            f'只允许修改以下文件（原始 PR 涉及的文件）：{pr_files}。'
             '修复完成后，将修复摘要写入 output_file（不要写入源码仓库内部）。'
         ),
         work_dir=SOURCE_REPO_DIR,
@@ -120,9 +136,14 @@ def main():
     # 清理 AI 工具产生的文件，不应提交到源码仓库
     _cleanup_ai_artifacts(SOURCE_REPO_DIR)
 
-    # git add + commit（push 由 workflow 负责）
-    log_stage('code-fix', 'staging changes...')
-    git(['add', '-A'], cwd=SOURCE_REPO_DIR)
+    # 只暂存原始 PR 涉及的文件，严禁提交无关文件
+    log_stage('code-fix', 'staging changes (PR files only)...')
+    if pr_files:
+        for f in pr_files:
+            git(['add', '--', f], cwd=SOURCE_REPO_DIR, check=False)
+    else:
+        log_stage('code-fix', '⚠️ PR file list empty, falling back to git add -A')
+        git(['add', '-A'], cwd=SOURCE_REPO_DIR)
 
     if not has_changes(SOURCE_REPO_DIR):
         raise RuntimeError('code-fixer made no changes — cannot commit empty diff')

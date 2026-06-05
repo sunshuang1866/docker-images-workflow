@@ -26,6 +26,7 @@
 上下文 JSON 包含：
 - `pr.number` — 原始 PR 编号（供参考）
 - `pr.title` — 原始 PR 标题
+- `pr.changed_files` — 原始 PR 修改过的文件列表（**只允许修改这些文件**）
 - `ci_analysis` — CI 失败分析报告全文（来自 CI Failure Analyst Agent）
 - `fix_branch` — 当前所在的 fix 分支名称
 
@@ -57,7 +58,7 @@
 - 修改 CI 配置文件来绕过检查
 - 修改与 CI 失败无关的代码
 - 创建任何 AI 工具自身的文件或目录，包括但不限于：`.claude/`、`.opencode/`、`__pycache__/`、`*.pyc`、`.aider*`
-- 提交与原始 PR 改动无关的文件
+- 修改 `pr.changed_files` 列表之外的任何文件，严禁触碰无关文件
 
 ## output_file 写入格式
 
