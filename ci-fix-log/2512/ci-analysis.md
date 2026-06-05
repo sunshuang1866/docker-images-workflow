@@ -2,51 +2,61 @@
 
 ## 基本信息
 - PR: #2512 — Add 3FS Image
-- 失败类型: lint-error / build-error（基于 diff 推测，CI 日志不可用）
+- 失败类型: 无法确定（证据不足）
 - 置信度: 低
 
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用，无法提供直接错误信息。以下分析完全基于 PR diff 推断潜在失败点。
+CI 日志中未包含任何构建错误信息。日志仅展示了触发/调度节点（trigger pipeline）的输出，其中关键行如下：
+
+```
+multiarch » openeuler » x86-64 » openeuler-docker-images #1357 completed. Result was FAILURE
+multiarch » openeuler » aarch64 » openeuler-docker-images #1332 completed. Result was FAILURE
+trigger "multiarch » openeuler » comment » openeuler-docker-images"
+Finished: SUCCESS
+```
+
+触发流水线本身成功（`Finished: SUCCESS`），但两个实际执行 Docker 镜像构建的子任务（x86-64 #1357 和 aarch64 #1332）均返回 FAILURE，而我未获得这些子任务的构建日志。
+
+唯一的警告信息为版权声明缺失，但不阻塞构建：
+```
+[WARNING] : the copyright in repo is not pass, notice: 缺少项目级Copyright声明文件
+[WARNING] : check copyright_in_repo warning
+check result: ACL=[{"name": "check_sca", "result": 0}, {"name": "check_package_license", "result": 1}]
+```
 
 ### 根因定位
-
-**⚠️ 重要声明**：`ci.logs` 字段标注为 `"(not available — analyze based on PR diff only)"`，因此以下所有分析均为基于 diff 的推测，**无法确认 CI 实际失败原因**。
-
-基于 diff 分析，存在以下 **3 个高概率导致 CI 失败的候选根因**：
-
-| 优先级 | 候选根因 | 影响文件 | 问题描述 |
-|--------|----------|----------|----------|
-| **P0** | 二进制缓存文件被提交 | `.claude/__pycache__/run_workflow.cpython-313.pyc` | `__pycache__/` 目录下的 `.pyc` 字节码文件被包含在 commit 中（`new_file: True, mode: 100644`）。这类文件不应进入版本控制，CI 通常有检查规则拒绝此类提交。 |
-| **P1** | Dockerfile hadolint 违规 | `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile:17` | `RUN bash -c "curl ... | sh -s -- ..."` 这种管道组合会触发 hadolint 规则 **DL4006**（`Set the SHELL option -o pipefail before RUN with a pipe in`），且 `curl | sh` 模式也存在安全隐患。 |
-| **P2** | `category` 字段大小写不匹配 | `Storage/3fs/doc/image-info.yml:2` | `category: storage` 使用了全小写，但项目规范中场景分类名为 `Storage`。如果 CI 校验 `image-info.yml` 的 category 字段需匹配目录名 `Storage`（首字母大写），则可能失败。 |
+- 失败位置: 无法定位（缺少子任务构建日志）
+- 失败原因: 证据不足以确定根因。从上下文推断，失败最可能发生在以下环节之一：Dockerfile 的 RUN 命令执行过程中（编译错误、网络下载失败、命令语法错误），或是 CI 构建环境资源不足（超时、内存溢出）。
 
 ### 与 PR 变更的关联
+该 PR 的核心变更是新增文件 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`，其内容存在**一个已知的 Docker 构建逻辑缺陷**：
 
-本 PR 的改动分两部分：
+```dockerfile
+RUN git config --global http.postBuffer 524288000 && \
+    git clone --recurse-submodules --depth 1 --shallow-submodules \
+      https://github.com/deepseek-ai/3fs /tmp/3fs && \
+    git -C /tmp/3fs checkout ${VERSION} 2>/dev/null || true && \
+```
 
-1. **目录重命名**（`.agents/` → `.claude/`）：涉及 10+ 个文件的移动/重命名，包括在 `.claude/__pycache__/` 下误提交了 `.pyc` 文件。这是本 PR **直接引入**的问题。
+此处 `git clone --depth 1` 仅克隆了默认分支的最新提交（浅克隆），但随后试图 `git checkout ${VERSION}`（即 `22fca04`，默认分支的某个特定 commit hash）。由于浅克隆不包含该 commit 的完整历史，且该 commit 很可能并非默认分支 `HEAD`，`checkout` 命令将失败——但该行末尾的 `2>/dev/null || true` 掩盖了错误，导致仓库仍停留在默认分支最新代码而非预期版本，可能引发后续 cmake 编译不匹配。
 
-2. **新增 3FS 镜像**（`Storage/3fs/`）：新增 Dockerfile、README、image-info.yml、meta.yml、logo.png 等文件，`Storage/image-list.yml` 新增 `3fs: 3fs` 条目。其中 Dockerfile 的 `curl | sh` 管道写法是 **P0 候选根因**，属于本 PR 新引入。
-
-三项候选根因**均与本次 PR 变更直接相关**，非历史遗留问题。
+此外，Dockerfile 中的构建步骤（编译 fuse3、安装 Rust 工具链、cmake 构建 3FS C++ 项目）高度依赖网络访问，在离线或受限的 CI 环境中极易失败。两个架构同时失败也暗示问题与底层构建环境或 Dockerfile 本身的跨架构兼容性有关，而非特定架构问题。
 
 ## 修复方向
 
-### 方向 1 — 移除二进制 `.pyc` 文件（置信度: 高）
-从版本控制中删除 `.claude/__pycache__/run_workflow.cpython-313.pyc` 文件，并在 `.gitignore` 中添加 `__pycache__/` 规则。如果已有 `.gitignore`，检查其是否覆盖 `.claude/` 子目录。
+### 方向 1（置信度: 中）
+**浅克隆与 checkout 指定 commit 不兼容**。`--depth 1` 的浅克隆只包含一个 commit，`git checkout <任意非 HEAD commit>` 必然失败。修复方向：取消 `--depth 1`，或在 `git clone` 后使用 `git fetch --depth 1 origin <commit>` 再 checkout。
 
-### 方向 2 — 修复 Dockerfile hadolint 违规（置信度: 中）
-将 `RUN bash -c "curl ... | sh -s -- ..."` 改写为符合 hadolint 规范的写法：先 `curl` 下载脚本到文件，验证后再执行，或使用 `SHELL ["/bin/bash", "-o", "pipefail", "-c"]` 指令。
+### 方向 2（置信度: 中）
+**网络依赖导致的构建失败**。PR 只增补了 `--retry-connrefused --tries=5` 给 `wget`，但 `curl`（安装 Rust）、`git clone`（克隆 3FS 源码）、`yum`（安装依赖包）均未配置重试或容错。修复方向：为核心网络命令（git clone、yum install）增加重试机制，或验证 CI 环境能正常访问 github.com、crates.io 等外部服务。
 
-### 方向 3 — 统一 category 字段大小写（置信度: 低）
-如果 CI 校验 `image-info.yml` 中的 `category` 字段需与目录名严格一致（`Storage` vs `storage`），则将 `category: storage` 改为 `category: Storage`。需确认 CI 的实际校验规则。
+### 方向 3（置信度: 低）
+**aarch64 架构兼容性**。某些依赖包（如 `gperftools-devel`、`gflags-devel`）在 openEuler aarch64 源中可能存在版本缺失。两个架构均失败降低了此方向的可能性，但不能完全排除。
 
 ## 需要进一步确认的点
-
-1. **CI 实际日志缺失**：当前分析完全基于 diff 推测。需要获取 Jenkins job `jenkins-from-comment` 的实际失败日志才能确认真正根因。
-2. **CI 检查规则集**：需确认该仓库的 CI 流水线具体执行哪些检查（如 hadolint、yamllint、文件类型检查、目录结构校验等），以判断哪个候选根因实际触发了失败。
-3. **`.gitignore` 现状**：确认仓库根目录的 `.gitignore` 是否已配置 `__pycache__/` 规则，以及该规则是否能覆盖 `.claude/__pycache__/` 路径。
-4. **`category` 字段校验规则**：确认 CI 是否校验 `image-info.yml` 中的 `category` 值需与场景目录名完全一致（大小写敏感），并参考其他已有镜像（如 `kudu`、`daos`、`alluxio`）在该字段的写法。
-5. **`submit_pr.py` 中残留 `.agents` 引用**：`submit_pr.py:82-83` 的注释仍写 `# Unstage .agents if it got staged`，如果后续代码逻辑也引用了 `.agents` 而非 `.claude`，则可能在后续 CI 步骤中引发运行时错误——但 diff 截断未展示完整上下文，需查阅完整文件确认。
+1. **获取 x86-64 和 aarch64 的实际构建日志**——这是最关键的缺失信息。当前分析仅基于调度日志推断，需查看子任务中的 docker build 输出（如 `docker build` 的 stdout/stderr）才能确定具体失败在哪一步。
+2. 确认 CI 构建环境是否有外网访问权限（github.com、crates.io、hub.docker.com 等）。
+3. 确认 `openeuler/openeuler:24.03-lts-sp3` 基础镜像在 CI 环境中的可用性及架构支持。
+4. 确认 `22fca04` 这个 commit 在 `deepseek-ai/3fs` 仓库中是否存在且可通过 `git checkout` 到达。
