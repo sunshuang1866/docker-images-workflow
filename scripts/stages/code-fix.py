@@ -178,11 +178,37 @@ def main():
         for f in extra:
             git(['restore', '--staged', '--', f], cwd=SOURCE_REPO_DIR, check=False)
 
-    if not has_changes(SOURCE_REPO_DIR):
-        raise RuntimeError('code-fixer made no changes — cannot commit empty diff')
-
     with open(output_file, 'r', encoding='utf-8') as f:
         summary = f.read().strip()
+
+    if not has_changes(SOURCE_REPO_DIR):
+        # AI 判断无需代码修改（如 infra-error），正常结束，评论原始 PR 说明原因
+        log_stage('code-fix', 'ℹ️ no code changes — AI determined fix not needed')
+        try:
+            ci_data.write_file(
+                ci_data.fix_summary_path(env['pr_number']),
+                summary,
+                f"code-fix: {env['source_repo']} PR #{env['pr_number']} (no changes)",
+            )
+        except Exception as e:
+            log_stage('code-fix', f'⚠️ ci-data write failed (non-fatal): {e}')
+        try:
+            api = get_api(env['source_platform'])
+            api.add_pr_comment(
+                env['source_repo'], env['pr_number'],
+                f"## ℹ️ 无需代码修复 (code-fix)\n\n"
+                f"AI 判断此次 CI 失败无需修改代码（可能是基础设施问题或临时错误），建议重试 CI。\n\n---\n\n{summary}",
+                env['token'],
+            )
+        except Exception as e:
+            log_stage('code-fix', f'⚠️ PR comment failed (non-fatal): {e}')
+        # 通知 workflow 后续步骤（push / create PR）无需执行
+        gh_output = os.environ.get('GITHUB_OUTPUT', '')
+        if gh_output:
+            with open(gh_output, 'a') as _f:
+                _f.write('no_changes=true\n')
+        log_stage('code-fix', '✅ done (no commit)')
+        return
 
     first_line = summary.split('\n')[0].lstrip('#').strip()[:72]
     commit_msg = (

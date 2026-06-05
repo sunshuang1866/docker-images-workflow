@@ -216,9 +216,11 @@ jobs:
         run: python scripts/lib/discover_conventions.py source-repo source-conventions.md
 
       - name: Run 代码修复
+        id: code_fix
         run: python scripts/stages/code-fix.py
 
       - name: Remove AI artifacts from fix branch
+        if: steps.code_fix.outputs.no_changes != 'true'
         run: |
           cd source-repo
           for pattern in ".claude" ".opencode" "__pycache__" ".aider" ".agents"; do
@@ -236,6 +238,7 @@ jobs:
           fi
 
       - name: Push fix branch
+        if: steps.code_fix.outputs.no_changes != 'true'
         run: |
           cd source-repo
           if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
@@ -249,6 +252,7 @@ jobs:
           git push origin "+refs/heads/${{ env.FIX_BRANCH }}:refs/heads/${{ env.FIX_BRANCH }}"
 
       - name: Create fix PR if not exists
+        if: steps.code_fix.outputs.no_changes != 'true'
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
         run: |
