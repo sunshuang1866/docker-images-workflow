@@ -26,7 +26,7 @@ jobs:
           python-version: '3.11'
 
       - name: Sync cron schedule
-        run: python scripts/sync_poll_interval.py
+        run: python scripts/watch/sync_poll_interval.py
 
       - name: Commit if changed
         run: |
