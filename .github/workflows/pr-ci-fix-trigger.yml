@@ -24,6 +24,7 @@ env:
   AI_EXTRA_ARGS: ${{ vars.AI_EXTRA_ARGS || '--dangerously-skip-permissions' }}
   OPENCODE_TIMEOUT_MS: ${{ vars.OPENCODE_TIMEOUT_MS || '600000' }}
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+  DEEPSEEK_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
   OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || '' }}
 
   # ── Claude Code 配置（AI_RUNNER=claude-code / claude-code-account 时生效）──
