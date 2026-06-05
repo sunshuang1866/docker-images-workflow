@@ -2,10 +2,14 @@
 """
 ci-data 分支读写工具
 
-ci-data 分支结构：
-  ci-fix/{pr_number}/ci-analysis.md       — CI 失败分析报告（完整，无截断）
-  ci-fix/{pr_number}/code-fix-summary.md  — 修复摘要
-  knowledge/ci-failure-patterns.md        — 积累的失败模式知识库
+存储结构：
+  ci-fix 分支（per-PR 记录）：
+    ci-fix/{pr_number}/ci-analysis.md       — CI 失败分析报告
+    ci-fix/{pr_number}/code-fix-summary.md  — 修复摘要
+    ci-fix/{pr_number}/fix-notified         — 已通知标记
+
+  main 分支（共享知识库）：
+    docs/ci-failure-patterns.md             — 积累的失败模式知识库
 """
 
 import os
@@ -14,8 +18,9 @@ import base64
 import requests
 from datetime import datetime
 
-GITHUB_API = "https://api.github.com"
-CI_DATA_BRANCH = "ci-data"
+GITHUB_API   = "https://api.github.com"
+CI_FIX_BRANCH = "ci-fix"
+MAIN_BRANCH   = "main"
 
 
 def _repo() -> str:
@@ -33,9 +38,9 @@ def _headers() -> dict:
     }
 
 
-def _ensure_branch() -> None:
-    """ci-data 分支不存在时从 main 创建。"""
-    url = f"{GITHUB_API}/repos/{_repo()}/git/refs/heads/{CI_DATA_BRANCH}"
+def _ensure_ci_fix_branch() -> None:
+    """ci-fix 分支不存在时从 main 创建。"""
+    url = f"{GITHUB_API}/repos/{_repo()}/git/refs/heads/{CI_FIX_BRANCH}"
     if requests.get(url, headers=_headers(), timeout=15).ok:
         return
     resp = requests.get(
@@ -47,35 +52,36 @@ def _ensure_branch() -> None:
     requests.post(
         f"{GITHUB_API}/repos/{_repo()}/git/refs",
         headers=_headers(),
-        json={'ref': f'refs/heads/{CI_DATA_BRANCH}', 'sha': sha},
+        json={'ref': f'refs/heads/{CI_FIX_BRANCH}', 'sha': sha},
         timeout=15,
     ).raise_for_status()
 
 
-def read_file(path: str) -> str:
-    """从 ci-data 分支读取文件，不存在返回空字符串。"""
+def read_file(path: str, branch: str = CI_FIX_BRANCH) -> str:
+    """从指定分支读取文件，不存在返回空字符串。"""
     url = f"{GITHUB_API}/repos/{_repo()}/contents/{path}"
-    resp = requests.get(url, headers=_headers(), params={'ref': CI_DATA_BRANCH}, timeout=30)
+    resp = requests.get(url, headers=_headers(), params={'ref': branch}, timeout=30)
     if resp.status_code == 404:
         return ''
     resp.raise_for_status()
     return base64.b64decode(resp.json()['content']).decode('utf-8')
 
 
-def write_file(path: str, content: str, message: str) -> None:
-    """向 ci-data 分支写入文件（自动处理创建/更新）。"""
-    _ensure_branch()
+def write_file(path: str, content: str, message: str, branch: str = CI_FIX_BRANCH) -> None:
+    """向指定分支写入文件（自动处理创建/更新）。"""
+    if branch == CI_FIX_BRANCH:
+        _ensure_ci_fix_branch()
     url = f"{GITHUB_API}/repos/{_repo()}/contents/{path}"
 
     sha = None
-    resp = requests.get(url, headers=_headers(), params={'ref': CI_DATA_BRANCH}, timeout=30)
+    resp = requests.get(url, headers=_headers(), params={'ref': branch}, timeout=30)
     if resp.ok:
         sha = resp.json().get('sha')
 
     payload: dict = {
         'message': message,
         'content': base64.b64encode(content.encode('utf-8')).decode('ascii'),
-        'branch': CI_DATA_BRANCH,
+        'branch': branch,
     }
     if sha:
         payload['sha'] = sha
@@ -83,7 +89,7 @@ def write_file(path: str, content: str, message: str) -> None:
     requests.put(url, headers=_headers(), json=payload, timeout=30).raise_for_status()
 
 
-# ── 便捷路径 ─────────────────────────────────────────────────────────────
+# ── per-PR 路径（ci-fix 分支）────────────────────────────────────────────
 
 def analysis_path(pr_number: int) -> str:
     return f"ci-fix/{pr_number}/ci-analysis.md"
@@ -98,14 +104,17 @@ def fix_notified_path(pr_number: int) -> str:
 
 
 def is_fix_notified(pr_number: int) -> bool:
-    return bool(read_file(fix_notified_path(pr_number)))
+    return bool(read_file(fix_notified_path(pr_number), branch=CI_FIX_BRANCH))
 
 
 def mark_fix_notified(pr_number: int) -> None:
-    write_file(fix_notified_path(pr_number), "notified", f"fix-notified: PR #{pr_number}")
+    write_file(fix_notified_path(pr_number), "notified",
+               f"fix-notified: PR #{pr_number}", branch=CI_FIX_BRANCH)
 
 
-KNOWLEDGE_PATH = "knowledge/ci-failure-patterns.md"
+# ── 共享知识库（main 分支）───────────────────────────────────────────────
+
+KNOWLEDGE_PATH = "docs/ci-failure-patterns.md"
 
 KNOWLEDGE_HEADER = """\
 # CI 失败模式知识库
@@ -116,12 +125,11 @@ KNOWLEDGE_HEADER = """\
 
 
 def read_knowledge() -> str:
-    """读取知识库，不存在时返回空字符串。"""
-    return read_file(KNOWLEDGE_PATH)
+    """从 main 分支读取知识库。"""
+    return read_file(KNOWLEDGE_PATH, branch=MAIN_BRANCH)
 
 
 def _extract_field(text: str, field: str) -> str:
-    """从 Markdown 中提取 '- field: value' 或 '**field**: value' 格式的值。"""
     for line in text.splitlines():
         if field in line and ':' in line:
             val = line.split(':', 1)[-1].strip().lstrip('*').strip()
@@ -131,7 +139,6 @@ def _extract_field(text: str, field: str) -> str:
 
 
 def _extract_section(text: str, heading: str) -> str:
-    """提取某个 ## 节的内容（前 300 字符）。"""
     lines = text.splitlines()
     capturing = False
     result = []
@@ -147,11 +154,11 @@ def _extract_section(text: str, heading: str) -> str:
 
 
 def append_pattern(pr_number: int, repo: str, analysis: str, fix_summary: str) -> None:
-    """从分析报告和修复摘要中提取失败模式，追加到知识库。"""
+    """从分析报告和修复摘要中提取失败模式，追加到 main 分支知识库。"""
     failure_type = _extract_field(analysis, '失败类型')
-    confidence = _extract_field(analysis, '置信度')
-    root_cause = _extract_section(analysis, '根因定位')
-    fix_desc = _extract_section(fix_summary, '修复的问题')
+    confidence   = _extract_field(analysis, '置信度')
+    root_cause   = _extract_section(analysis, '根因定位')
+    fix_desc     = _extract_section(fix_summary, '修复的问题')
     changed_files = _extract_section(fix_summary, '修改的文件')
     date = datetime.now().strftime('%Y-%m-%d')
 
@@ -184,4 +191,5 @@ def append_pattern(pr_number: int, repo: str, analysis: str, fix_summary: str) -
         KNOWLEDGE_PATH,
         existing + entry,
         f'knowledge: add pattern from {repo} PR #{pr_number}',
+        branch=MAIN_BRANCH,
     )
