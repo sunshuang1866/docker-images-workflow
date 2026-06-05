@@ -15,7 +15,7 @@ import os
 import sys
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -62,9 +62,38 @@ def dispatch_ci_fix(repo: str, platform: str, pr: Dict, pr_base_branch: str,
         return False
 
 
+def _parse_time(ts: str) -> Optional[datetime]:
+    """解析 ISO 8601 时间字符串为 UTC datetime，解析失败返回 None。"""
+    if not ts:
+        return None
+    try:
+        # 兼容 '2026-06-05T10:00:00+00:00' 和 '2026-06-05T10:00:00Z'
+        ts = ts.replace('Z', '+00:00')
+        return datetime.fromisoformat(ts)
+    except Exception:
+        return None
+
+
+def _within_lookback(pr: Dict, cutoff: datetime) -> bool:
+    """判断 PR 是否在 lookback 窗口内（以 updated_at 为准）。"""
+    updated_at = _parse_time(pr.get('updated_at', ''))
+    if updated_at is None:
+        return True  # 解析失败时默认处理
+    return updated_at >= cutoff
+
+
 def process_all():
     with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f:
         watchlist = json.load(f)
+
+    settings = watchlist.get('settings', {})
+    poll_interval = settings.get('poll_interval_minutes', 5)
+    max_events = settings.get('max_events_per_run', 50)
+    lookback_minutes = settings.get('lookback_minutes', 0)
+
+    lookback_cutoff = None
+    if lookback_minutes > 0:
+        lookback_cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
 
     watch_token = os.getenv('WATCH_TOKEN') or os.getenv('DISPATCH_TOKEN', '')
     dispatch_token = os.getenv('DISPATCH_TOKEN') or watch_token
@@ -75,7 +104,10 @@ def process_all():
         sys.exit(1)
 
     log("🔍 Starting PR monitoring cycle")
-    log(f"   target_repo: {target_repo}")
+    log(f"   target_repo:  {target_repo}")
+    log(f"   poll_interval: {poll_interval}m  max_events: {max_events}  lookback: {lookback_minutes}m")
+
+    total_dispatched = 0
 
     for repo_config in watchlist.get('watched_repos', []):
         if not repo_config.get('enabled', True):
@@ -104,6 +136,10 @@ def process_all():
         log(f"  Found {len(prs)} PR(s) with '{ci_failed_label}' label")
 
         for pr in prs:
+            if total_dispatched >= max_events:
+                log(f"\n  ⚠️ max_events_per_run ({max_events}) reached, stopping")
+                break
+
             pr_number = pr['number']
             pr_base = pr['base']['ref']
             fix_branch = f'fix/{pr_number}'
@@ -113,11 +149,16 @@ def process_all():
             fix_pr = api.find_any_pr_by_head_branch(repo, fix_branch, token)
 
             if fix_pr is None or fix_pr['state'] == 'closed':
+                # lookback 过滤：首次 dispatch 时检查 PR 是否在时间窗口内
+                if lookback_cutoff and not _within_lookback(pr, lookback_cutoff):
+                    log(f"    → Skipping: updated_at outside lookback window ({lookback_minutes}m)")
+                    continue
                 if fix_pr and fix_pr['state'] == 'closed':
                     log(f"    → Fix PR #{fix_pr['number']} was closed, re-dispatching")
                 else:
                     log(f"    → No fix PR, dispatching first attempt")
-                dispatch_ci_fix(repo, platform, pr, pr_base, dispatch_token, target_repo)
+                if dispatch_ci_fix(repo, platform, pr, pr_base, dispatch_token, target_repo):
+                    total_dispatched += 1
 
             elif fix_pr['state'] == 'open':
                 fix_labels = [l['name'] for l in fix_pr.get('labels', [])]
@@ -144,14 +185,15 @@ def process_all():
                             'title': pr.get('title', ''),
                             'head': fix_pr['head'],
                         }
-                        dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo)
+                        if dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo):
+                            total_dispatched += 1
                 else:
                     log(f"    → Fix PR #{fix_pr['number']} CI running or pending, skipping")
 
             else:
                 log(f"    → Fix PR #{fix_pr['number']} state={fix_pr['state']}, skipping")
 
-    log(f"\n✅ PR monitoring cycle complete.")
+    log(f"\n✅ PR monitoring cycle complete. dispatched={total_dispatched}/{max_events}")
 
 
 if __name__ == '__main__':
