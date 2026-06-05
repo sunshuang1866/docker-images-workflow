@@ -9,6 +9,7 @@ Stage 2: 代码修复
 
 import os
 import sys
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -58,6 +59,26 @@ def has_changes(cwd: str) -> bool:
     return result.returncode != 0
 
 
+AI_ARTIFACT_DIRS = {'.claude', '.opencode', '__pycache__', '.aider'}
+AI_ARTIFACT_SUFFIXES = {'.pyc', '.pyo'}
+
+
+def _cleanup_ai_artifacts(repo_dir: str):
+    root = Path(repo_dir)
+    for name in AI_ARTIFACT_DIRS:
+        for p in root.rglob(name):
+            if p.is_dir():
+                shutil.rmtree(p)
+                log_stage('code-fix', f'removed dir: {p.relative_to(root)}')
+            elif p.is_file():
+                p.unlink()
+                log_stage('code-fix', f'removed file: {p.relative_to(root)}')
+    for suffix in AI_ARTIFACT_SUFFIXES:
+        for p in root.rglob(f'*{suffix}'):
+            p.unlink()
+            log_stage('code-fix', f'removed file: {p.relative_to(root)}')
+
+
 def main():
     env = parse_env()
     work_dir = os.path.join(WORK_BASE, str(env['pr_number']))
@@ -95,6 +116,9 @@ def main():
         label='code-fix',
         conventions_file=get_conventions_file(),
     )
+
+    # 清理 AI 工具产生的文件，不应提交到源码仓库
+    _cleanup_ai_artifacts(SOURCE_REPO_DIR)
 
     # git add + commit（push 由 workflow 负责）
     log_stage('code-fix', 'staging changes...')
