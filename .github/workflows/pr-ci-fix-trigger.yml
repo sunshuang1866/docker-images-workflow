@@ -114,7 +114,7 @@ jobs:
         if: failure()
         env:
           WATCH_TOKEN: ${{ secrets.WATCH_TOKEN || secrets.DISPATCH_TOKEN }}
-          GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN || '' }}
+          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
         run: |
           python - <<'EOF'
           import os, sys
@@ -124,8 +124,11 @@ jobs:
           api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_WATCH_TOKEN') or os.environ['WATCH_TOKEN']
-          api.add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
+          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['WATCH_TOKEN']
+          try:
+              api.add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
+          except Exception as e:
+              print(f"⚠️ PR comment failed (non-fatal): {e}")
           EOF
 
   # ── 阶段 2: 代码修复 ────────────────────────────────────────────
@@ -337,5 +340,8 @@ jobs:
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
           token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['WATCH_TOKEN']
-          api.add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
+          try:
+              api.add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
+          except Exception as e:
+              print(f"⚠️ PR comment failed (non-fatal): {e}")
           EOF
