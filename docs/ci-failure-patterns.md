@@ -1,238 +1,17 @@
 # CI 失败模式知识库
 
-本文件由 ci-fix-team 自动维护，记录历史 CI 失败的根因与修复模式，供 AI 分析时参考。
-
-
----
-
-## openeuler/openeuler-docker-images PR #2512 · 2026-06-05
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `无法确定（证据不足）` |
-| 置信度 | 低 |
-
-**根因**:
-- 失败位置: 无法定位（缺少子任务构建日志）
-- 失败原因: 证据不足以确定根因。从上下文推断，失败最可能发生在以下环节之一：Dockerfile 的 RUN 命令执行过程中（编译错误、网络下载失败、命令语法错误），或是 CI 构建环境资源不足（超时、内存溢出）。
-
-**修复方法**:
-修复 Dockerfile 中浅克隆（`--depth 1`）与 `git checkout` 指定 commit hash 不兼容的构建逻辑缺陷。
-
-**涉及文件**:
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 在第 23-24 行，将 `git checkout ${VERSION} 2>/dev/null || true` 替换为 `git fetch origin ${VERSION}` + `git checkout ${VERSION}`（移除错误静默掩盖）。
-
+> **按失败模式分类**，每个模式包含：典型报错、根因分析、修复方法、历史案例。  
+> 处理新失败 PR 时，**用报错关键词搜索对应章节**，直接找到修复方法。
 
 ---
 
-## openeuler/openeuler-docker-images PR #2516 · 2026-06-05
+## 模式01：Apache CDN Maven 版本 404
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `无法确定（证据不足）` |
-| 置信度 | 低 |
+**症状关键词**: `dlcdn.apache.org` `404 Not Found` `maven`
 
-**根因**:
-- 失败位置: 无法定位（缺少 `x86-64 » openeuler-docker-images #1361` 的构建日志）
-- 失败原因: 下游 x86-64 构建 job 失败，但其详细日志缺失，无法确定根因
+**根因**: `dlcdn.apache.org` 只托管当前最新版 Maven，旧版本下架后返回 404。
 
-**修复方法**:
-为 CI `check_package_license` 检查未通过的 4 个新增文件添加 Copyright 声明头（缺失Copyright声明）。
-
-**涉及文件**:
-- `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile`: 添加 Copyright + SPDX 头
-- `AI/vllm-cpu/README.md`: 添加 Copyright + SPDX 头（HTML注释格式）
-- `AI/vllm-cpu/doc/image-info.yml`: 添加 Copyright + SPDX 头
-- `AI/vllm-cpu/meta.yml`: 添加 Copyright + SPDX 头
-
----
-
-## openeuler/openeuler-docker-images PR #2489 · 2026-06-02
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Dockerfile构建错误/变量引用错误` |
-| 置信度 | 中 |
-
-**根因**:
-- 失败位置: `AI/diskann/0.52.0/24.03-lts-sp3/Dockerfile`
-- 失败原因: Dockerfile 中 VERSION 变量的引用方式有误，导致构建时版本无法正确传递（推断为 `v${VERSION}` 前缀处理或 ARG/ENV 引用不一致）
-
-**原始报错**（如能获取）:
-```
-无法获取日志，基于 diff 推断（+2/-5 行修改量）
-```
-
-**修复方法**:
-修改 Dockerfile 中 VERSION 变量的引用方式（修正变量名引用或前缀处理逻辑），使构建时版本号能正确传递。
-
-**涉及文件**:
-- `AI/diskann/0.52.0/24.03-lts-sp3/Dockerfile`: 修正 VERSION 变量引用方式（+2/-5）
-
----
-
-## openeuler/openeuler-docker-images PR #2308 · 2026-05-19
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `文档更新（非CI构建失败）` |
-| 置信度 | 中 |
-
-**根因**:
-- 失败位置: `AI/diskann/README.md`
-- 失败原因: README 文档内容有误或过时，CI 的文档检查（如格式校验）可能未通过；也可能是纯文档勘误
-
-**原始报错**（如能获取）:
-```
-无法获取日志，此 PR 为纯文档修正（+3/-3 行）
-```
-
-**修复方法**:
-修正 `AI/diskann/README.md` 中的文档内容（3 处文本修改）。
-
-**涉及文件**:
-- `AI/diskann/README.md`: 文档内容修正（+3/-3）
-
----
-
-## openeuler/openeuler-docker-images PR #2270 · 2026-05-18
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `元数据YAML字段名错误` |
-| 置信度 | 中 |
-
-**根因**:
-- 失败位置: `AI/diskann/doc/image-info.yml`
-- 失败原因: CI 检查 image-info.yml 元数据格式时，字段名使用了 `version_suffix` 但应为 `version_prefix`，导致校验失败
-
-**原始报错**（如能获取）:
-```
-无法获取日志，基于 PR 描述推断
-```
-
-**修复方法**:
-将 `AI/diskann/doc/image-info.yml` 中的 `version_suffix` 字段名改为 `version_prefix`。
-
-**涉及文件**:
-- `AI/diskann/doc/image-info.yml`: 字段名 version_suffix → version_prefix（+1/-1）
-
----
-
-## openeuler/openeuler-docker-images PR #2269 · 2026-05-16
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `元数据版本列表包含不可用版本` |
-| 置信度 | 中 |
-
-**根因**:
-- 失败位置: `Database/milvus/doc/image-info.yml`
-- 失败原因: image-info.yml 中包含了 milvus 的 beta 版本（3.0-beta），CI 构建时该版本不可用或校验失败
-
-**原始报错**（如能获取）:
-```
-无法获取日志，基于 PR 描述推断：Fix: add "beta" to version filter
-```
-
-**修复方法**:
-从 `Database/milvus/doc/image-info.yml` 中移除 3.0-beta 版本条目，防止 CI 尝试构建不稳定的 beta 版本。
-
-**涉及文件**:
-- `Database/milvus/doc/image-info.yml`: 移除 3.0-beta 版本条目（+1/-1）
-
----
-
-## openeuler/openeuler-docker-images PR #2268 · 2026-05-16
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `YAML格式错误/元数据文件格式问题` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/fastjson/meta.yml` 的 CI 预检阶段
-- 失败原因: meta.yml 文件存在 YAML 格式错误，导致 CI check_package_license 或构建预检解析失败
-
-**原始报错**（如能获取）:
-```
-yaml.parser.ParserError: expected '<document start>', but found '<block mapping start>'
-  in "Others/fastjson/meta.yml", line 6, column 1
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
-```
-
-**修复方法**:
-修正 `Others/fastjson/meta.yml` 中的 YAML 格式错误（block mapping 缩进或分隔符问题），同时为 fastjson 2.0.62 提供正确格式的 Dockerfile。
-
-**涉及文件**:
-- `Others/fastjson/2.0.62/24.03-lts-sp3/Dockerfile`: 新增 fastjson 2.0.62 Dockerfile（修复 meta.yml 格式后重新提交）
-
----
-
-## openeuler/openeuler-docker-images PR #2267 · 2026-05-16
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 404/版本路径硬编码错误` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/haproxy/3.3.0/24.03-lts-sp3/Dockerfile` RUN wget 步骤
-- 失败原因: haproxy 下载 URL 中的版本目录路径硬编码为 `3.2`，但实际版本为 3.3.0，导致 404 Not Found
-
-**原始报错**（如能获取）:
-```
-> [4/6] RUN wget https://www.haproxy.org/download/3.2/src/haproxy-3.3.0.tar.gz
-0.069 --2026-05-11 01:59:16--  https://www.haproxy.org/download/3.2/src/haproxy-3.3.0.tar.gz
-404 Not Found
-1.240 2026-05-11 01:59:17 ERROR 404: Not Found.
-```
-
-**修复方法**:
-使用环境变量动态构建下载 URL，从 VERSION 中提取主次版本号（如 `3.3`）构造正确路径，替代硬编码的 `3.2`。
-
-**涉及文件**:
-- `Others/haproxy/3.3.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，使用变量动态生成版本路径（+21）
-
----
-
-## openeuler/openeuler-docker-images PR #2266 · 2026-05-15
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少系统工具/shadow-utils未安装` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `AI/mlflow/3.12.0/24.03-lts-sp3/Dockerfile` RUN groupadd 步骤
-- 失败原因: openeuler:24.03-lts-sp3 基础镜像默认不包含 shadow-utils，`groupadd` 命令不存在
-
-**原始报错**（如能获取）:
-```
-49.71 /bin/sh: line 1: groupadd: command not found
-```
-
-**修复方法**:
-在 Dockerfile 的 dnf install 步骤中添加 `shadow` 包，使 groupadd/useradd 命令可用。
-
-**涉及文件**:
-- `AI/mlflow/3.12.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 shadow 依赖（+19）
-
----
-
-## openeuler/openeuler-docker-images PR #2265 · 2026-05-15
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 404/Maven版本不在Apache CDN` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/netty/4.2.13/24.03-lts-sp3/Dockerfile` RUN wget Maven 步骤
-- 失败原因: Apache CDN (`dlcdn.apache.org`) 只保留最新版本，Maven 3.9.14 已被更新版本替换，导致 404
-
-**原始报错**（如能获取）:
+**典型报错**:
 ```
 > [3/7] RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz
 0.110 --2026-05-11 02:46:31--  https://dlcdn.apache.org/maven/maven-3/3.9.14/binaries/...
@@ -242,77 +21,68 @@ Finished: FAILURE
 Dockerfile:12
 ```
 
-**修复方法**:
-将 Maven 下载源从 `dlcdn.apache.org` 改为 `repo.huaweicloud.com/apache/maven/maven-3/`，该镜像站保留历史版本。
+**修复方法**（两种，按情况选择）:
+1. **换镜像站**：将下载源改为 `repo.huaweicloud.com/apache/maven/maven-3/` 或 `archive.apache.org/dist/maven/`，保留历史版本
+2. **升级版本**：将 `MAVEN_VERSION` 升为 Apache CDN 当前可用版本（如 3.9.14、3.9.12）
 
-**涉及文件**:
-- `Others/netty/4.2.13/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，使用华为云镜像站下载 Maven（+28）
-
----
-
-## openeuler/openeuler-docker-images PR #2264 · 2026-05-15
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少必需的二进制文件/COPY文件不存在` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Bigdata/logstash/9.4.0/24.03-lts-sp3/Dockerfile` COPY env2yaml 步骤
-- 失败原因: Dockerfile 中 `COPY env2yaml/env2yaml-amd64 /usr/local/bin/env2yaml` 引用的二进制文件未包含在仓库中
-
-**原始报错**（如能获取）:
-```
-#15 [11/13] COPY env2yaml/env2yaml-amd64 /usr/local/bin/env2yaml
-#15 ERROR: failed to calculate checksum of ref kzw8fcgm9psa1a0kbi7cp9fx0::...: "/env2yaml/env2yaml-amd64": not found
-```
-
-**修复方法**:
-在仓库中添加 `env2yaml/env2yaml-amd64` 和 `env2yaml/env2yaml-arm64` 二进制文件（随 Dockerfile 一同提交）。
-
-**涉及文件**:
-- `Bigdata/logstash/9.4.0/24.03-lts-sp3/env2yaml/env2yaml-amd64`: 新增二进制文件
-- `Bigdata/logstash/9.4.0/24.03-lts-sp3/env2yaml/env2yaml-arm64`: 新增二进制文件
-- `Bigdata/logstash/9.4.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile
+**历史案例**:
+- PR #2265: `Others/netty/4.2.13` — Maven 3.9.14 在 CDN 404 → 换华为云镜像站
+- PR #2100: `Others/netty/4.2.12` — Maven 3.9.12 在 CDN 404 → 升级到 3.9.14
+- PR #1884: `Others/netty/4.2.10` — Maven 3.9.11 在 CDN 404 → 升级到 3.9.12，文件名改用变量
 
 ---
 
-## openeuler/openeuler-docker-images PR #2262 · 2026-05-15
+## 模式02：下载 URL 硬编码版本路径错误 / 软件包版本不存在
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `CI元数据缺失/image-list.yml条目遗漏` |
-| 置信度 | 中 |
+**症状关键词**: `404 Not Found` `wget` `does not exist`
 
-**根因**:
-- 失败位置: `Bigdata/image-list.yml` CI 校验步骤
-- 失败原因: 新增的 Bigdata 镜像未在 image-list.yml 中注册，CI 的镜像清单一致性检查失败
+**根因**: URL 中版本目录路径硬编码（如目录写 `3.2` 但下载 `3.3.0`），或上游已停止对该平台版本提供制品。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
-无法获取日志，基于 PR 描述推断（Bigdata/image-list.yml +7/-0）
+> [4/6] RUN wget https://www.haproxy.org/download/3.2/src/haproxy-3.3.0.tar.gz
+0.069 --2026-05-11 01:59:16--  https://www.haproxy.org/download/3.2/src/haproxy-3.3.0.tar.gz
+404 Not Found
+1.240 2026-05-11 01:59:17 ERROR 404: Not Found.
 ```
 
 **修复方法**:
-向 `Bigdata/image-list.yml` 补充缺失的镜像条目（+7 行），使 CI 清单校验通过。
+1. **动态生成 URL**：从 `VERSION` 变量中提取主次版本号（如 `${VERSION%.*}`）构造正确路径，替代硬编码
+2. **换归档源 + 修正组合**：Phoenix 类问题需同时换用 `archive.apache.org/dist` 并修正平台标识（如 hbase-2.4 → hbase-2.5）
 
-**涉及文件**:
-- `Bigdata/image-list.yml`: 补充 7 条缺失的镜像条目
+**历史案例**:
+- PR #2267: `Others/haproxy/3.3.0` — URL 目录写 `3.2`，应为动态生成
+- PR #1932: `Database/phoenix/5.3.0` — `phoenix-hbase-2.4-5.3.0-bin.tar.gz` 不存在（Phoenix 5.3.0 已弃 HBase 2.4） → 换 `archive.apache.org` + `hbase-2.5`
 
 ---
 
-## openeuler/openeuler-docker-images PR #2212 · 2026-05-08
+## 模式03：JDK / 二进制包版本在镜像站不存在（404）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 403/镜像站访问被拒绝` |
-| 置信度 | 高 |
+**症状关键词**: `Adoptium` `OpenJDK` `404 Not Found` `mirrors.tuna`
 
-**根因**:
-- 失败位置: `Others/gcc/16.1.0/24.03-lts-sp3/Dockerfile` RUN wget gcc 源码步骤
-- 失败原因: 下载源 `mirrors.ustc.edu.cn` 返回 403 Forbidden，GCC 源码无法下载
+**根因**: Dockerfile 中硬编码了 JDK 的具体 build 号（如 `11.0.28_6`），但镜像站只保留当前 build，旧 build 被覆盖后 404。
 
-**原始报错**（如能获取）:
+**典型报错**:
+```
+#10 0.087 --2026-04-06 01:14:48--  https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/x64/linux/OpenJDK11U-jre_x64_linux_hotspot_11.0.28_6.tar.gz
+#10 0.317 Connecting to mirrors.tuna.tsinghua.edu.cn|101.6.15.130|:443... connected.
+#10 0.503 HTTP request sent, awaiting response... 404 Not Found
+```
+
+**修复方法**: 将 JDK 版本升级为 Adoptium/镜像站当前实际可用的 build（查询镜像站目录确认版本号后再提交）。
+
+**历史案例**:
+- PR #2105: `Bigdata/kyuubi/1.11.1` — JDK 11.0.28_6 404 → 升级到 11.0.30_7
+
+---
+
+## 模式04：镜像站 403（访问被拒）
+
+**症状关键词**: `403 Forbidden` `mirrors.ustc.edu.cn`
+
+**根因**: 部分镜像站（如 USTC）对 CI 构建环境的请求触发防爬限制，返回 403。
+
+**典型报错**:
 ```
 wget https://mirrors.ustc.edu.cn/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.gz
 --2026-04-24 14:21:05--  https://mirrors.ustc.edu.cn/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.gz
@@ -321,81 +91,87 @@ HTTP request sent, awaiting response... 403 Forbidden
 2026-04-24 14:21:06 ERROR 403: Forbidden.
 ```
 
-**修复方法**:
-将下载源从 `mirrors.ustc.edu.cn` 替换为 `mirrors.tuna.tsinghua.edu.cn`。
+**修复方法**: 将下载源从 `mirrors.ustc.edu.cn` 替换为 `mirrors.tuna.tsinghua.edu.cn`（清华镜像站对 CI 环境兼容性更好）。
 
-**涉及文件**:
-- `Others/gcc/16.1.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，使用清华镜像站下载 GCC 源码（+43）
-
----
-
-## openeuler/openeuler-docker-images PR #2211 · 2026-05-08
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `BuildKit预定义变量冲突/BUILDARCH变量覆盖` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/spring-cloud/5.0.1/24.03-lts-sp3/Dockerfile` RUN wget JDK 步骤
-- 失败原因: `BUILDARCH` 是 BuildKit 预定义的全局 ARG（值为 `amd64`/`arm64`），在 RUN 中将其赋值为自定义值（如 `x64`/`aarch64`）后失效，导致使用了 BuildKit 内置值构造错误的下载 URL，产生 404
-
-**原始报错**（如能获取）:
-```
-> [4/5] RUN if [ "amd64" = "amd64" ]; then BUILDARCH="x64"; ...
-0.285 HTTP request sent, awaiting response... 404 Not Found
-0.353 2026-05-04 00:12:49 ERROR 404: Not Found.
-```
-
-**修复方法**:
-将变量名从 `BUILDARCH` 改为其他自定义名称（如 `MY_ARCH` 或 `JAVA_ARCH`），避免与 BuildKit 预定义变量冲突。
-
-**涉及文件**:
-- `Others/spring-cloud/5.0.1/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，使用非冲突的变量名（+31）
+**历史案例**:
+- PR #2212: `Others/gcc/16.1.0` — USTC 403 → 清华镜像站
 
 ---
 
-## openeuler/openeuler-docker-images PR #2210 · 2026-05-08
+## 模式05：groupadd / useradd: command not found（缺 shadow-utils）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少构建依赖/libxml2-devel未安装` |
-| 置信度 | 高 |
+**症状关键词**: `groupadd: command not found` `useradd: command not found`
 
-**根因**:
-- 失败位置: `Others/wireshark/4.6.5/24.03-lts-sp3/Dockerfile` cmake 构建步骤
-- 失败原因: cmake 找不到 LibXml2 库，wireshark 构建需要 libxml2-devel 但未在 Dockerfile 中安装
+**根因**: `openeuler:24.03-lts-sp3` 基础镜像默认**不包含** `shadow-utils`，导致 `groupadd`/`useradd` 命令不存在。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
-12.43 CMake Error at .../FindPackageHandleStandardArgs.cmake:230 (message):
-12.43   Could NOT find LibXml2 (missing: LIBXML2_LIBRARY LIBXML2_INCLUDE_DIR)
-12.43   (Required is at least version "2.9.7")
-12.43   cmake/modules/FindLibXml2.cmake:110 (FIND_PACKAGE_HANDLE_STANDARD_ARGS)
-12.43   CMakeLists.txt:1344 (find_package)
-12.43 -- Configuring incomplete, errors occurred!
+49.71 /bin/sh: line 1: groupadd: command not found
 ```
 
-**修复方法**:
-在 Dockerfile 的 dnf install 步骤中添加 `libxml2-devel` 包。
+**修复方法**: 在 Dockerfile 的第一个 `dnf install` 步骤中添加 `shadow` 包（openEuler 中 shadow-utils 的包名为 `shadow`）。
 
-**涉及文件**:
-- `Others/wireshark/4.6.5/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 libxml2-devel 依赖（+32）
+```dockerfile
+RUN dnf install -y shadow python3-pip ...
+```
+
+**历史案例**:
+- PR #2266: `AI/mlflow/3.12.0`
+- PR #2164: `AI/mlflow/3.11.1`
+- PR #1858: `AI/mlflow/3.9.0` — 同类问题，两架构均失败
 
 ---
 
-## openeuler/openeuler-docker-images PR #2209 · 2026-05-08
+## 模式06：COPY 目标文件不存在（env2yaml 二进制未提交到仓库）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Patch应用失败/上游代码变更导致补丁冲突` |
-| 置信度 | 高 |
+**症状关键词**: `failed to calculate checksum` `not found` `env2yaml`
 
-**根因**:
-- 失败位置: `Database/tdengine/3.4.1.7/24.03-lts-sp3/Dockerfile` patch 应用步骤
-- 失败原因: `cmake_curl.patch` 的第2个 hunk 应用失败（上游 cmake/external.cmake 文件已更新，偏移量不匹配）
+**根因**: Dockerfile 中 `COPY env2yaml/env2yaml-amd64 /usr/local/bin/env2yaml` 引用的二进制文件**未随 Dockerfile 一起提交**到仓库。
 
-**原始报错**（如能获取）:
+**典型报错**:
+```
+#15 [11/13] COPY env2yaml/env2yaml-amd64 /usr/local/bin/env2yaml
+#15 ERROR: failed to calculate checksum of ref kzw8fcgm9psa1a0kbi7cp9fx0::...: "/env2yaml/env2yaml-amd64": not found
+```
+
+**修复方法**: 在同一目录下补充提交 `env2yaml/env2yaml-amd64` 和 `env2yaml/env2yaml-arm64` 两个架构的二进制文件。
+
+**历史案例**:
+- PR #2264: `Bigdata/logstash/9.4.0`
+- PR #2206: `Bigdata/logstash/9.3.4`
+- PR #2163: `Bigdata/logstash/9.3.3`
+
+---
+
+## 模式07：Maven 版本不满足项目 enforcer 约束
+
+**症状关键词**: `RequireMavenVersion` `is not in the allowed range` `maven-enforcer`
+
+**根因**: 项目的 `maven-enforcer-plugin` 指定了最低 Maven 版本要求（如 `[3.9.11,)`），而 Dockerfile 中安装的 Maven 版本（如 3.9.1）低于该要求。
+
+**典型报错**:
+```
+#8 69.10 [ERROR] Rule 5: org.apache.maven.enforcer.rules.version.RequireMavenVersion failed with message:
+#8 69.10 [ERROR] Detected Maven Version: 3.9.1 is not in the allowed range [3.9.11,).
+#8 69.10 [ERROR] -> [Help 1]
+#8 ERROR: process "/bin/sh -c git clone -b ${VERSION} ... && mvn clean install ..." did not complete successfully: exit code: 1
+```
+
+**修复方法**: 将 Dockerfile 中的 Maven 版本从旧版（如 3.9.1）升级到满足约束的版本（如 3.9.14）。注意同时确认新版 Maven 在 `dlcdn.apache.org` 可用（否则参考模式01换源）。
+
+**历史案例**:
+- PR #2207: `Database/neo4j/2026.04.0` — 要求 >= 3.9.11，安装了 3.9.1 → 升级到 3.9.14
+- PR #2102: `Database/neo4j/2026.03.1` — 同类问题 → 升级到 3.9.14
+
+---
+
+## 模式08：cmake patch hunk 应用失败（上游代码变更导致偏移量不匹配）
+
+**症状关键词**: `Hunk #N FAILED` `patch unexpectedly ends` `.rej` `cmake_curl.patch`
+
+**根因**: 补丁文件（如 `cmake_curl.patch`）是针对特定版本上游代码生成的，上游代码更新后行号偏移，导致 `patch` 命令 hunk 应用失败。
+
+**典型报错**:
 ```
 #13 0.064 patching file cmake/external.cmake
 #13 0.064 Hunk #1 succeeded at 937 (offset 43 lines).
@@ -405,528 +181,244 @@ HTTP request sent, awaiting response... 403 Forbidden
 #13 ERROR: process "/bin/sh -c patch -Np1 < cmake_curl.patch && ./build.sh" did not complete successfully: exit code: 1
 ```
 
-**修复方法**:
-针对新版上游代码重新生成 `cmake_curl.patch` 补丁文件，并调整编译参数。
+**修复方法**: 针对目标版本的实际上游源码**重新生成** patch 文件（`git diff` 生成），一并更新 Dockerfile 和 build.sh。
 
-**涉及文件**:
-- `Database/tdengine/3.4.1.7/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile（+19）
-- `Database/tdengine/3.4.1.7/24.03-lts-sp3/cmake_curl.patch`: 更新后的补丁文件（+13）
-- `Database/tdengine/3.4.1.7/24.03-lts-sp3/build.sh`: 构建脚本（+7）
+**历史案例**:
+- PR #2209: `Database/tdengine/3.4.1.7` — cmake/external.cmake 行号偏移 43 行
+- PR #2104: `Database/tdengine/3.4.1.1` — 同类问题
 
 ---
 
-## openeuler/openeuler-docker-images PR #2208 · 2026-05-08
+## 模式09：BuildKit 预定义变量 BUILDARCH 冲突
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Shell变量语法错误/$nproc应为$(nproc)` |
-| 置信度 | 高 |
+**症状关键词**: `BUILDARCH` `amd64` `404` `if [ "amd64" = "amd64" ]`
 
-**根因**:
-- 失败位置: `Others/snort3/3.12.2.0/24.03-lts-sp3/Dockerfile` make 构建步骤
-- 失败原因: Dockerfile 中使用了 `$nproc` 作为变量引用，但 `nproc` 是命令而非变量，正确写法应为 `$(nproc)` 命令替换
+**根因**: `BUILDARCH` 是 BuildKit 的**预定义全局 ARG**（值为 `amd64`/`arm64`），在 `RUN` 中对其重新赋值（如 `BUILDARCH="x64"`）不会生效——BuildKit 会恢复为内置值，导致用错误架构字符串构造下载 URL，产生 404。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
-make: *** [Makefile:156: all] Error 2
-[33m1 warning found (use --debug to expand):
-- UndefinedVar: Usage of undefined variable '$LD_LIBRARY_PATH' (line 16)
+> [4/5] RUN if [ "amd64" = "amd64" ]; then BUILDARCH="x64"; ...
+0.285 HTTP request sent, awaiting response... 404 Not Found
+0.353 2026-05-04 00:12:49 ERROR 404: Not Found.
 ```
 
-**修复方法**:
-将 Dockerfile 中的 `$nproc` 改为 `$(nproc)`，使构建时能正确获取 CPU 核心数并行编译。
+**修复方法**: 将变量名从 `BUILDARCH` 改为其他自定义名称（如 `MY_ARCH`、`JAVA_ARCH`），避免与 BuildKit 预定义变量冲突。
 
-**涉及文件**:
-- `Others/snort3/3.12.2.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，修正 $(nproc) 语法（+21）
+**历史案例**:
+- PR #2211: `Others/spring-cloud/5.0.1`
+- PR #2105: `Bigdata/kyuubi/1.11.1`（与 JDK 版本 404 叠加）
 
 ---
 
-## openeuler/openeuler-docker-images PR #2207 · 2026-05-08
+## 模式10：缺少构建依赖（CMake / configure 找不到系统库）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Maven版本约束不满足/版本过低` |
-| 置信度 | 高 |
+**症状关键词**: `Could NOT find` `cmake` `configure: error` `missing:` `-devel`
 
-**根因**:
-- 失败位置: `Database/neo4j/2026.04.0/24.03-lts-sp3/Dockerfile` mvn build 步骤
-- 失败原因: neo4j 2026.04.0 的 maven-enforcer-plugin 要求 Maven >= 3.9.11，但 Dockerfile 安装的是 Maven 3.9.1
+**根因**: Dockerfile 的 `dnf install` 步骤遗漏了编译所需的 `-devel` 库包，cmake/autoconf 配置阶段报错。
 
-**原始报错**（如能获取）:
+**典型报错（示例）**:
 ```
-#8 69.10 [ERROR] Rule 5: org.apache.maven.enforcer.rules.version.RequireMavenVersion failed with message:
-#8 69.10 [ERROR] Detected Maven Version: 3.9.1 is not in the allowed range [3.9.11,).
-#8 69.10 [ERROR] -> [Help 1]
-#8 ERROR: process "/bin/sh -c git clone -b ${VERSION} https://github.com/neo4j/neo4j.git && cd neo4j && mvn clean install ..." did not complete successfully: exit code: 1
+# libxml2 缺失
+CMake Error: Could NOT find LibXml2 (missing: LIBXML2_LIBRARY LIBXML2_INCLUDE_DIR)
+
+# PCRE 缺失
+./configure: error: the HTTP rewrite module requires the PCRE library.
+
+# protobuf-c 缺失
+./configure: error: protoc-c not found. Please install protobuf-c-compiler package.
+
+# MySQL Boost 缺失（表现为 CURL 报错，实为 Boost 未配置）
+-- Could NOT find CURL (missing: CURL_LIBRARY CURL_INCLUDE_DIR)
 ```
 
-**修复方法**:
-将 Dockerfile 中 Maven 版本从 3.9.1 升级至 3.9.14。
+**修复方法**: 根据报错的库名，在 `dnf install` 中补充对应的 `-devel` 包：
 
-**涉及文件**:
-- `Database/neo4j/2026.04.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，Maven 升级至 3.9.14（+34）
+| 报错 | 需安装的包 |
+|------|-----------|
+| `LibXml2` not found | `libxml2-devel` |
+| PCRE library required | `pcre pcre-devel` |
+| `protoc-c` not found | `protobuf-c-compiler protobuf-c-devel` |
+| MySQL Boost 未配置 | cmake 参数加 `-DDOWNLOAD_BOOST=1 -DWITH_BOOST=/tmp/boost` |
+
+**历史案例**:
+- PR #2210: `Others/wireshark/4.6.5` — 缺 `libxml2-devel`
+- PR #2162: `Cloud/nginx/1.30.0` — 缺 `pcre pcre-devel`
+- PR #1933: `Others/rsyslog/8.2602.0` — 缺 `protobuf-c-compiler protobuf-c-devel`
+- PR #2205: `Database/mysql/9.7.0` — Boost 未配置，cmake 加 `-DDOWNLOAD_BOOST=1`
 
 ---
 
-## openeuler/openeuler-docker-images PR #2206 · 2026-05-08
+## 模式11：YAML / 元数据文件错误
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少必需的二进制文件/COPY文件不存在` |
-| 置信度 | 高 |
+**症状关键词**: `yaml.parser.ParserError` `expected '<document start>'` `version_suffix` `image-list.yml`
 
-**根因**:
-- 失败位置: `Bigdata/logstash/9.3.4/24.03-lts-sp3/Dockerfile` COPY env2yaml 步骤
-- 失败原因: 与 PR #2264 同类问题——env2yaml 架构相关二进制文件未包含在仓库中
+**根因**: 元数据文件（`meta.yml`、`image-info.yml`、`image-list.yml`）存在格式错误或字段名错误，导致 CI 预检阶段解析失败或一致性校验不通过。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
-#15 [11/13] COPY env2yaml/env2yaml-amd64 /usr/local/bin/env2yaml
-#15 ERROR: failed to calculate checksum of ref ...: "/env2yaml/env2yaml-amd64": not found
+yaml.parser.ParserError: expected '<document start>', but found '<block mapping start>'
+  in "Others/fastjson/meta.yml", line 6, column 1
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE
 ```
 
 **修复方法**:
-在仓库中添加 `env2yaml/env2yaml-amd64` 和 `env2yaml/env2yaml-arm64` 二进制文件。
 
-**涉及文件**:
-- `Bigdata/logstash/9.3.4/24.03-lts-sp3/env2yaml/env2yaml-amd64`: 新增二进制文件
-- `Bigdata/logstash/9.3.4/24.03-lts-sp3/env2yaml/env2yaml-arm64`: 新增二进制文件
-- `Bigdata/logstash/9.3.4/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile（+47）
+| 问题类型 | 修复操作 |
+|---------|---------|
+| YAML block mapping 格式错误 | 修正缩进或文档分隔符（`---`） |
+| 字段名拼写错误 | 检查 CI schema，如 `version_suffix` → `version_prefix` |
+| image-list.yml 条目遗漏 | 向对应的 `image-list.yml` 补充缺失的镜像条目 |
+| 元数据包含不可用版本 | 从 `image-info.yml` 移除 beta/不稳定版本条目 |
 
----
-
-## openeuler/openeuler-docker-images PR #2205 · 2026-05-08
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `CMake缺少依赖/Boost库未配置` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Database/mysql/9.7.0/24.03-lts-sp3/Dockerfile` cmake 配置步骤
-- 失败原因: cmake 配置时找不到 CURL 库（实际根因是 Boost 依赖未正确配置，MySQL 编译需通过 `-DDOWNLOAD_BOOST` 获取 Boost）
-
-**原始报错**（如能获取）:
-```
-#8 185.6 -- Could NOT find CURL (missing: CURL_LIBRARY CURL_INCLUDE_DIR)
-#8 185.6 -- CURL_INCLUDE_DIR =
-#8 185.6 -- Configuring incomplete, errors occurred!
-```
-
-**修复方法**:
-在 cmake 构建参数中添加 `-DDOWNLOAD_BOOST=1 -DWITH_BOOST=/tmp/boost`，让 MySQL 自动下载并使用 Boost 库。
-
-**涉及文件**:
-- `Database/mysql/9.7.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 Boost cmake 参数（+48）
+**历史案例**:
+- PR #2268: `Others/fastjson/meta.yml` — YAML 格式错误（block mapping start）
+- PR #2270: `AI/diskann/doc/image-info.yml` — 字段名 `version_suffix` → `version_prefix`
+- PR #2262: `Bigdata/image-list.yml` — 7 条镜像条目缺失
+- PR #2269: `Database/milvus/doc/image-info.yml` — 包含不稳定 `3.0-beta` 版本条目
 
 ---
 
-## openeuler/openeuler-docker-images PR #2204 · 2026-05-08
+## 模式12：上游代码目录结构变更（requirements / 配置路径迁移）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `requirements文件路径变更/pip找不到依赖文件` |
-| 置信度 | 高 |
+**症状关键词**: `No such file or directory` `requirements` `Could not open requirements file`
 
-**根因**:
-- 失败位置: `AI/vllm-cpu/0.20.1/24.03-lts-sp3/Dockerfile` pip install 步骤
-- 失败原因: vllm-cpu 上游仓库重组了目录结构，`requirements/cpu-build.txt` 移动至 `requirements/build/cpu.txt`
+**根因**: 上游项目重组了目录结构，Dockerfile 中 `COPY` 或 `pip install -r` 引用的路径已失效。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
 #12 [build 1/2] RUN pip install -r requirements/cpu-build.txt
 #12 0.668 ERROR: Could not open requirements file: [Errno 2] No such file or directory: 'requirements/cpu-build.txt'
 #12 ERROR: process "/bin/sh -c pip install -r requirements/cpu-build.txt" did not complete successfully: exit code: 1
 ```
 
-**修复方法**:
-将 Dockerfile 中的 requirements 路径从 `requirements/cpu-build.txt` 改为 `requirements/build/cpu.txt`。
+**修复方法**: 查看上游仓库对应版本的实际目录结构，更新 Dockerfile 中的路径引用。
 
-**涉及文件**:
-- `AI/vllm-cpu/0.20.1/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，修正 requirements 路径（+52）
-
----
-
-## openeuler/openeuler-docker-images PR #2164 · 2026-04-24
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少系统工具/shadow-utils未安装` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `AI/mlflow/3.11.1/24.03-lts-sp3/Dockerfile` RUN groupadd 步骤
-- 失败原因: 与 PR #2266 同类问题，openeuler:24.03-lts-sp3 基础镜像默认不含 shadow-utils
-
-**原始报错**（如能获取）:
-```
-49.71 /bin/sh: line 1: groupadd: command not found
-```
-
-**修复方法**:
-在 Dockerfile 的 dnf install 步骤中添加 `shadow` 包。
-
-**涉及文件**:
-- `AI/mlflow/3.11.1/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 shadow 依赖（+19）
+**历史案例**:
+- PR #2204: `AI/vllm-cpu/0.20.1` — requirements 从 `requirements/cpu-build.txt` 迁移到 `requirements/build/cpu.txt`
 
 ---
 
-## openeuler/openeuler-docker-images PR #2163 · 2026-04-24
+## 模式13：Shell 命令替换语法错误（$cmd 误写为命令）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少必需的二进制文件/COPY文件不存在` |
-| 置信度 | 高 |
+**症状关键词**: `$nproc` `UndefinedVar` `make: *** Error 2`
 
-**根因**:
-- 失败位置: `Bigdata/logstash/9.3.3/24.03-lts-sp3/Dockerfile` COPY env2yaml 步骤
-- 失败原因: 与 PR #2264/#2206 同类问题，env2yaml 二进制文件未包含在仓库中
+**根因**: `nproc` 是 Shell 命令而非变量，`$nproc` 展开为空字符串，导致 make 使用默认并行数或产生语法错误。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
-#16 [11/13] COPY env2yaml/env2yaml-amd64 /usr/local/bin/env2yaml
-#16 ERROR: failed to calculate checksum of ref ydytjq0j10wdx7q8kbvosbxmt::...: "/env2yaml/env2yaml-amd64": not found
+make: *** [Makefile:156: all] Error 2
+- UndefinedVar: Usage of undefined variable '$LD_LIBRARY_PATH' (line 16)
 ```
 
-**修复方法**:
-在仓库中添加 `env2yaml/env2yaml-amd64` 和 `env2yaml/env2yaml-arm64` 二进制文件。
+**修复方法**: 将 `$nproc` 改为 `$(nproc)`（命令替换），或使用 `${NPROC:-$(nproc)}` 以支持外部覆盖。
 
-**涉及文件**:
-- `Bigdata/logstash/9.3.3/24.03-lts-sp3/env2yaml/env2yaml-amd64`: 新增二进制文件
-- `Bigdata/logstash/9.3.3/24.03-lts-sp3/env2yaml/env2yaml-arm64`: 新增二进制文件
-- `Bigdata/logstash/9.3.3/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile（+47）
+**历史案例**:
+- PR #2208: `Others/snort3/3.12.2.0` — `make -j $nproc` → `make -j $(nproc)`
 
 ---
 
-## openeuler/openeuler-docker-images PR #2162 · 2026-04-24
+## 模式14：pip 版本不兼容（pip 26.0 移除 API）
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少构建依赖/PCRE库未安装` |
-| 置信度 | 高 |
+**症状关键词**: `AttributeError` `allow_all_prereleases` `PackageFinder` `pip`
 
-**根因**:
-- 失败位置: `Cloud/nginx/1.30.0/24.03-lts-sp3/Dockerfile` configure 步骤
-- 失败原因: nginx 编译时 `--with-http_rewrite_module` 需要 PCRE 库，但 Dockerfile 未安装 pcre/pcre-devel
+**根因**: SPDK 等项目的 `pkgdep.sh` 在创建 Python venv 时使用 `--upgrade-deps` 将 pip 升级到 26.0，而 `pip-tools 7.5.2` 调用了 pip 26.0 中已删除的 `PackageFinder.allow_all_prereleases` 属性。
 
-**原始报错**（如能获取）:
-```
-#7 104.4 ./configure: error: the HTTP rewrite module requires the PCRE library.
-#7 104.4 You can either disable the module by using --without-http_rewrite_module
-#7 104.4 option, or install the PCRE library into the system, or build the PCRE library
-#7 104.4 statically from the source with nginx by using --with-pcre=<path> option.
-```
-
-**修复方法**:
-在 Dockerfile 的 dnf install 步骤中添加 `pcre` 和 `pcre-devel` 包。
-
-**涉及文件**:
-- `Cloud/nginx/1.30.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 pcre/pcre-devel 依赖（+46）
-
----
-
-## openeuler/openeuler-docker-images PR #2105 · 2026-04-08
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 404/JDK版本不存在` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Bigdata/kyuubi/1.11.1/24.03-lts-sp3/Dockerfile` RUN wget JDK 步骤
-- 失败原因: Adoptium JDK 11.0.28_6 在清华镜像站上不存在，下载返回 404（同时也受 BUILDARCH 变量冲突影响，实际下载 URL 中使用了错误路径）
-
-**原始报错**（如能获取）:
-```
-#10 0.087 --2026-04-06 01:14:48--  https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/x64/linux/OpenJDK11U-jre_x64_linux_hotspot_11.0.28_6.tar.gz
-#10 0.317 Connecting to mirrors.tuna.tsinghua.edu.cn|101.6.15.130|:443... connected.
-#10 0.503 HTTP request sent, awaiting response... 404 Not Found
-#10 0.586 2026-04-06 01:14:49 ERROR 404: Not Found.
-```
-
-**修复方法**:
-将 JDK 版本从 11.0.28_6 升级至 11.0.30_7（已在 Adoptium 上发布的版本）。
-
-**涉及文件**:
-- `Bigdata/kyuubi/1.11.1/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，JDK 升级至 11.0.30_7（+62）
-
----
-
-## openeuler/openeuler-docker-images PR #2104 · 2026-04-08
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Patch应用失败/上游代码变更导致补丁冲突` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Database/tdengine/3.4.1.1/24.03-lts-sp3/Dockerfile` patch 应用步骤
-- 失败原因: 与 PR #2209 同类问题，cmake_curl.patch 第2个 hunk 因上游代码行号变化而应用失败
-
-**原始报错**（如能获取）:
-```
-#13 0.072 patching file cmake/external.cmake
-#13 0.072 Hunk #1 succeeded at 937 (offset 43 lines).
-#13 0.072 patch unexpectedly ends in middle of line
-#13 0.072 Hunk #2 FAILED at 1099.
-#13 0.072 1 out of 2 hunks FAILED -- saving rejects to file cmake/external.cmake.rej
-#13 ERROR: process did not complete successfully: exit code: 1
-```
-
-**修复方法**:
-针对 tdengine 3.4.1.1 的上游代码重新生成 cmake_curl.patch，并更新编译参数。
-
-**涉及文件**:
-- `Database/tdengine/3.4.1.1/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile（+19）
-- `Database/tdengine/3.4.1.1/24.03-lts-sp3/cmake_curl.patch`: 重新生成的补丁文件（+13）
-- `Database/tdengine/3.4.1.1/24.03-lts-sp3/build.sh`: 构建脚本（+7）
-
----
-
-## openeuler/openeuler-docker-images PR #2102 · 2026-04-07
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Maven版本约束不满足/版本过低` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Database/neo4j/2026.03.1/24.03-lts-sp3/Dockerfile` mvn build 步骤
-- 失败原因: 与 PR #2207 同类问题，neo4j 2026.03.1 要求 Maven >= 3.9.11，Dockerfile 中为 3.9.1
-
-**原始报错**（如能获取）:
-```
-#8 69.10 [ERROR] Detected Maven Version: 3.9.1 is not in the allowed range [3.9.11,).
-#8 69.10 [ERROR] Rule 5: org.apache.maven.enforcer.rules.version.RequireMavenVersion failed
-#8 ERROR: process "/bin/sh -c git clone -b ${VERSION} ... && mvn clean install ..." did not complete successfully: exit code: 1
-```
-
-**修复方法**:
-将 Dockerfile 中 Maven 版本从 3.9.1 升级至 3.9.14。
-
-**涉及文件**:
-- `Database/neo4j/2026.03.1/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，Maven 升级至 3.9.14（+33）
-
----
-
-## openeuler/openeuler-docker-images PR #2100 · 2026-04-07
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 404/Maven版本不在Apache CDN` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/netty/4.2.12/24.03-lts-sp3/Dockerfile` RUN wget Maven 步骤
-- 失败原因: Apache CDN (`dlcdn.apache.org`) 不再托管 Maven 3.9.12（已被更新版本替换），返回 404
-
-**原始报错**（如能获取）:
-```
-#9 0.111 --2026-04-06 07:28:51--  https://dlcdn.apache.org/maven/maven-3/3.9.12/binaries/apache-maven-3.9.12-bin.tar.gz
-#9 0.175 HTTP request sent, awaiting response... 404 Not Found
-#9 0.177 2026-04-06 07:28:51 ERROR 404: Not Found.
-#9 ERROR: process "/bin/sh -c wget .../apache-maven-${MAVEN_VERSION}-bin.tar.gz ..." did not complete successfully: exit code: 8
-```
-
-**修复方法**:
-将 Dockerfile 中 `ARG MAVEN_VERSION=3.9.12` 改为 `ARG MAVEN_VERSION=3.9.14`（Apache CDN 当前可用版本）。
-
-**涉及文件**:
-- `Others/netty/4.2.12/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，Maven 升级至 3.9.14（+28）
-
----
-
-## openeuler/openeuler-docker-images PR #1934 · 2026-02-24
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `x86_64编译错误/AVX512BF16指令集缺少fallback` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `AI/vllm-cpu/0.16.0/24.03-lts-sp3/Dockerfile` 编译 csrc/cpu/mla_decode.cpp 步骤
-- 失败原因: `KernelVecType<c10::BFloat16>` 只有 `__AVX512BF16__`/`__s390x__`/`__aarch64__` 三个特化，无 `#else` 分支，导致在普通 x86_64（无 AVX512BF16）上 `qk_vec_type` 解析为 `void`
-
-**原始报错**（如能获取）:
-```
-error: incomplete type 'qk_vec_type' {aka 'void'} used in nested name specifier
-```
-
-**修复方法**:
-回溯移植 vllm-project/vllm PR #34052 的修复：将两个相同的 `#elif` 分支合并为单一 `#else`，使所有非 AVX512BF16 平台共用 `FP32Vec16` 计算路径。以 Python patch 步骤在 Dockerfile 的 `git clone` 后应用。
-
-**涉及文件**:
-- `AI/vllm-cpu/0.16.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，包含 Python patch 步骤修复 AVX512BF16 fallback（+55）
-
----
-
-## openeuler/openeuler-docker-images PR #1933 · 2026-02-24
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少构建依赖/protobuf-c-compiler未安装` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/rsyslog/8.2602.0/24.03-lts-sp3/Dockerfile` ./configure 步骤
-- 失败原因: rsyslog 8.2602.0 新增了对 protobuf-c 的依赖，但 Dockerfile 未安装 `protobuf-c-compiler` 和 `protobuf-c-devel`
-
-**原始报错**（如能获取）:
-```
-./configure: error: protoc-c not found. Please install protobuf-c-compiler package.
-```
-
-**修复方法**:
-在 Dockerfile 的 dnf install 步骤中添加 `protobuf-c-compiler` 和 `protobuf-c-devel`。
-
-**涉及文件**:
-- `Others/rsyslog/8.2602.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 protobuf-c 相关依赖（+21）
-
----
-
-## openeuler/openeuler-docker-images PR #1932 · 2026-02-24
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 404/软件包版本不存在` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Database/phoenix/5.3.0/24.03-lts-sp3/Dockerfile` RUN wget 步骤
-- 失败原因: `phoenix-hbase-2.4-5.3.0-bin.tar.gz` 不存在——Phoenix 5.3.0 已放弃 HBase 2.4 支持，且 `dlcdn.apache.org` 只托管最新版本
-
-**原始报错**（如能获取）:
-```
-无法获取日志，根因来自 PR 描述：phoenix-hbase-2.4-5.3.0-bin.tar.gz does not exist
-```
-
-**修复方法**:
-1. 将下载源从 `dlcdn.apache.org` 改为 `archive.apache.org/dist`（保留历史版本）
-2. 将 HBase 版本从 `hbase-2.4` 改为 `hbase-2.5`（Phoenix 5.3.0 支持的版本）
-
-**涉及文件**:
-- `Database/phoenix/5.3.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，使用 archive.apache.org + hbase-2.5（+9）
-
----
-
-## openeuler/openeuler-docker-images PR #1884 · 2026-02-10
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `下载URL 404/Maven版本不在Apache CDN` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/netty/4.2.10/24.03-lts-sp3/Dockerfile` RUN wget Maven 步骤
-- 失败原因: Maven 3.9.11 在 Apache CDN 上不存在（只有 3.8.9 和 3.9.12），x86_64 和 aarch64 均报 HTTP 404
-
-**原始报错**（如能获取）:
-```
-curl -I https://dlcdn.apache.org/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz
-# HTTP 404 Not Found
-```
-
-**修复方法**:
-将 Dockerfile 中 `MAVEN_VERSION` 从 3.9.11 改为 3.9.12，并将 Maven 文件名中的硬编码版本改为变量 `${MAVEN_VERSION}`。
-
-**涉及文件**:
-- `Others/netty/4.2.10/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，MAVEN_VERSION 升级至 3.9.12（+28）
-
----
-
-## openeuler/openeuler-docker-images PR #1858 · 2026-02-08
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `缺少系统工具/shadow-utils未安装` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `AI/mlflow/3.9.0/24.03-lts-sp3/Dockerfile` groupadd/useradd 步骤
-- 失败原因: openeuler:24.03-lts-sp3 基础镜像默认不包含 shadow-utils 包，`groupadd`/`useradd` 命令不存在
-
-**原始报错**（如能获取）:
-```
-groupadd: command not found
-(x86_64 和 aarch64 均失败)
-```
-
-**修复方法**:
-在 Dockerfile 第一个 RUN 指令中与 `python3-pip` 一并安装 `shadow-utils`，使用户管理命令在使用前可用。
-
-**涉及文件**:
-- `AI/mlflow/3.9.0/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，添加 shadow-utils 依赖（+19）
-
----
-
-## openeuler/openeuler-docker-images PR #1857 · 2026-02-08
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `RPM包不存在/上游停止发布RPM` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Cloud/grafana-agent/0.44.7/24.03-lts-sp3/Dockerfile` RPM 下载/安装步骤
-- 失败原因: grafana-agent RPM 包在 v0.44.2 后停止发布，v0.44.7 无可用 RPM，CI 下载失败
-
-**原始报错**（如能获取）:
-```
-无法获取日志，根因来自 PR 描述：grafana-agent v0.44.7 does not publish RPM packages (RPM releases stopped after v0.44.2)
-```
-
-**修复方法**:
-改用多阶段 Docker 构建：直接从官方 `grafana/agent:v0.44.7` Docker 镜像中 COPY grafana-agent 二进制文件，替代从不存在的 RPM 安装。
-
-**涉及文件**:
-- `Cloud/grafana-agent/0.44.7/24.03-lts-sp3/Dockerfile`: 新增多阶段 Dockerfile，从官方镜像复制二进制（+12）
-
----
-
-## openeuler/openeuler-docker-images PR #1856 · 2026-02-05
-
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `pip版本不兼容/pip 26.0移除API` |
-| 置信度 | 高 |
-
-**根因**:
-- 失败位置: `Others/spdk/26.01/24.03-lts-sp3/Dockerfile` pkgdep.sh 执行步骤
-- 失败原因: SPDK v26.01 的 `scripts/pkgdep/rhel.sh` 创建 Python venv 时使用 `--upgrade-deps` 将 pip 升级到 26.0，而 pip-tools 7.5.2 调用了 pip 26.0 中已被删除的 `PackageFinder.allow_all_prereleases` 属性
-
-**原始报错**（如能获取）:
+**典型报错**:
 ```
 AttributeError: 'PackageFinder' object has no attribute 'allow_all_prereleases'
 (x86_64 和 aarch64 的 check_build 均失败)
 ```
 
-**修复方法**:
-在 Dockerfile 中，于运行 `pkgdep.sh` 前添加一步 `sed` 命令，从 `rhel.sh` 中删除 `--upgrade-deps` 参数，使 venv 保持使用系统 pip 版本（与 pip-tools 7.5.2 兼容）。
+**修复方法**: 在 Dockerfile 中，运行 `pkgdep.sh` 前用 `sed` 删除脚本中的 `--upgrade-deps` 参数，使 venv 保留系统 pip 版本（与 pip-tools 兼容）：
 
-**涉及文件**:
-- `Others/spdk/26.01/24.03-lts-sp3/Dockerfile`: 新增 Dockerfile，含 sed 去除 --upgrade-deps（+27）
+```dockerfile
+RUN sed -i 's/--upgrade-deps//g' scripts/pkgdep/rhel.sh && ./pkgdep.sh
+```
+
+**历史案例**:
+- PR #1856: `Others/spdk/26.01` — pip-tools 7.5.2 与 pip 26.0 不兼容
 
 ---
 
-## openeuler/openeuler-docker-images PR #1768 · 2026-01-08
+## 模式15：编译错误——AVX512BF16 缺少 fallback 分支
 
-| 字段 | 内容 |
-|------|------|
-| 失败类型 | `Dockerfile构建错误（推断）` |
-| 置信度 | 低 |
+**症状关键词**: `incomplete type` `qk_vec_type` `void` `AVX512BF16` `BFloat16`
 
-**根因**:
-- 失败位置: `Others/spring-cloud/5.0.0/24.03-lts-sp3/Dockerfile`
-- 失败原因: PR #1756 的 CI 构建失败，具体错误信息无法从 PR 描述中获取；通过 Dockerfile 更新修复
+**根因**: `KernelVecType<c10::BFloat16>` 只特化了 `__AVX512BF16__`/`__s390x__`/`__aarch64__` 三个分支，无 `#else`，导致在普通 x86_64（无 AVX512BF16 指令集支持）上 `qk_vec_type` 解析为 `void`，编译器报错。
 
-**原始报错**（如能获取）:
+**典型报错**:
 ```
-无法获取日志
+error: incomplete type 'qk_vec_type' {aka 'void'} used in nested name specifier
 ```
 
-**修复方法**:
-更新 `Others/spring-cloud/5.0.0/24.03-lts-sp3/Dockerfile`（具体修改内容基于文件 diff 推断，+31 行新增）。
+**修复方法**: 在 Dockerfile 的 `git clone` 后，用 Python/sed patch 步骤应用 vllm-project/vllm PR #34052 的修复：将两个相同的 `#elif` 分支合并为单一 `#else`，使所有非 AVX512BF16 平台共用 `FP32Vec16` 计算路径。
 
-**涉及文件**:
-- `Others/spring-cloud/5.0.0/24.03-lts-sp3/Dockerfile`: 新增/重写 Dockerfile（+31）
+**历史案例**:
+- PR #1934: `AI/vllm-cpu/0.16.0`
 
+---
+
+## 模式16：RPM 包停止发布（换多阶段构建绕过）
+
+**症状关键词**: `does not publish RPM` `RPM releases stopped` `404` RPM 下载
+
+**根因**: 上游项目在某版本后停止了 RPM 包发布，CI 尝试下载时失败。
+
+**修复方法**: 改用多阶段 Docker 构建，直接从官方 Docker 镜像中 `COPY` 二进制文件，替代从 RPM 安装：
+
+```dockerfile
+FROM grafana/agent:v0.44.7 AS agent-source
+FROM openeuler/openeuler:24.03-lts-sp3
+COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
+```
+
+**历史案例**:
+- PR #1857: `Cloud/grafana-agent/0.44.7` — v0.44.2 后无 RPM 发布
+
+---
+
+## 模式17：Copyright / SPDX 声明缺失
+
+**症状关键词**: `check_package_license` `Copyright` `SPDX` `license check`
+
+**根因**: 新增文件（Dockerfile、README.md、meta.yml、image-info.yml）未包含 Copyright 和 SPDX-License-Identifier 头，CI `check_package_license` 检查未通过。
+
+**修复方法**: 为每类文件添加对应格式的版权头：
+
+```dockerfile
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
+# SPDX-License-Identifier: MulanPSL-2.0
+```
+
+```markdown
+<!-- Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved. -->
+<!-- SPDX-License-Identifier: MulanPSL-2.0 -->
+```
+
+**历史案例**:
+- PR #2516: `AI/vllm-cpu/0.22.1` — 4 个新增文件均缺少 Copyright + SPDX 头
+
+---
+
+## 模式18：git 浅克隆与 commit hash checkout 不兼容
+
+**症状关键词**: `--depth 1` `git checkout` `commit hash` `2>/dev/null || true`
+
+**根因**: `git clone --depth 1` 只拉取最新提交，历史 commit hash 不在浅克隆的可访问范围内；同时 `|| true` 静默掩盖了错误，导致 checkout 实际失败但构建继续，产生错误的构建结果。
+
+**修复方法**: 将 checkout 逻辑从 `git checkout ${VERSION} 2>/dev/null || true` 改为先 `git fetch origin ${VERSION}` 再 `git checkout ${VERSION}`，或去掉 `--depth 1` 改为完整克隆。
+
+**历史案例**:
+- PR #2512: `Storage/3fs/22fca04` — `--depth 1` + commit hash checkout 不兼容
+
+---
+
+## 模式19：证据不足 / 无法定位根因
+
+适用于 CI 日志无法获取、PR 描述过于简略的情况，优先通过 diff 推断修复意图。
+
+**历史案例**:
+- PR #2489: `AI/diskann/0.52.0` — VERSION 变量引用方式有误（diff 推断）
+- PR #2308: `AI/diskann/README.md` — 纯文档修正
+- PR #1768: `Others/spring-cloud/5.0.0` — Dockerfile 重写，具体错误信息缺失
