@@ -43,7 +43,7 @@ jobs:
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
       GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-      GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN || '' }}
+      GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN || '' }}
 
     steps:
       - name: Checkout docker-images-workflow
@@ -64,7 +64,7 @@ jobs:
         if: env.SOURCE_PLATFORM == 'gitcode'
         run: |
           git clone --depth=1 \
-            https://oauth2:${{ secrets.GITCODE_WATCH_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git \
+            https://oauth2:${{ secrets.GITCODE_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git \
             source-repo
 
       - name: Setup Python
@@ -106,7 +106,7 @@ jobs:
         if: failure()
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN || '' }}
         run: |
           python - <<'EOF'
           import os, sys
@@ -116,7 +116,7 @@ jobs:
           api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['DISPATCH_TOKEN']
+          token = os.environ.get('GITCODE_TOKEN') or os.environ['DISPATCH_TOKEN']
           try:
               api.add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
           except Exception as e:
@@ -139,7 +139,7 @@ jobs:
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
       GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-      GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
+      GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN || '' }}
 
     steps:
       - name: Checkout docker-images-workflow
@@ -160,7 +160,7 @@ jobs:
         if: env.SOURCE_PLATFORM == 'gitcode'
         run: |
           git clone \
-            https://oauth2:${{ secrets.GITCODE_WRITE_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git \
+            https://oauth2:${{ secrets.GITCODE_TOKEN }}@gitcode.com/${{ env.SOURCE_REPO }}.git \
             source-repo
 
       - name: Setup fix branch
@@ -243,7 +243,7 @@ jobs:
           if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
             PUSH_REPO="${GITCODE_FORK_REPO:-$SOURCE_REPO}"
             git remote set-url origin \
-              https://oauth2:${{ secrets.GITCODE_WRITE_TOKEN }}@gitcode.com/${PUSH_REPO}.git
+              https://oauth2:${{ secrets.GITCODE_TOKEN }}@gitcode.com/${PUSH_REPO}.git
           else
             git remote set-url origin \
               https://x-access-token:${{ secrets.WRITE_TOKEN }}@github.com/${{ env.SOURCE_REPO }}.git
@@ -253,7 +253,7 @@ jobs:
       - name: Create fix PR if not exists
         env:
           GH_TOKEN: ${{ secrets.WRITE_TOKEN }}
-          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN || '' }}
         run: |
           if [ "$SOURCE_PLATFORM" = "gitcode" ]; then
             python - <<'EOF'
@@ -264,7 +264,7 @@ jobs:
 
           repo      = os.environ['SOURCE_REPO']
           fork_repo = os.environ.get('GITCODE_FORK_REPO', '').strip() or repo
-          token     = os.environ['GITCODE_WRITE_TOKEN']
+          token     = os.environ['GITCODE_TOKEN']
           fix_br    = os.environ['FIX_BRANCH']
           pr_num    = os.environ['PR_NUMBER']
           pr_title  = os.environ['PR_TITLE']
@@ -416,7 +416,7 @@ jobs:
         if: failure()
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN || '' }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN || '' }}
         run: |
           python - <<'EOF'
           import os, sys
@@ -426,7 +426,7 @@ jobs:
           api = get_api(platform)
           repo = os.environ['SOURCE_REPO']
           pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_WRITE_TOKEN') or os.environ['DISPATCH_TOKEN']
+          token = os.environ.get('GITCODE_TOKEN') or os.environ['DISPATCH_TOKEN']
           try:
               api.add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
           except Exception as e:

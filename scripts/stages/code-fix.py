@@ -34,7 +34,7 @@ def parse_env() -> dict:
     platform = os.getenv('SOURCE_PLATFORM', 'github')
     token = os.getenv('GITHUB_TOKEN', '')
     if platform == 'gitcode':
-        token = os.getenv('GITCODE_WRITE_TOKEN') or token
+        token = os.getenv('GITCODE_TOKEN') or token
     return {
         'source_repo': source_repo,
         'source_platform': platform,

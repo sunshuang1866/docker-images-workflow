@@ -39,12 +39,12 @@ jobs:
 
       - name: Debug GitCode API
         env:
-          GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
           python - <<'EOF'
           import os, requests, json
-          token = os.getenv('GITCODE_WATCH_TOKEN', '')
-          print(f"GITCODE_WATCH_TOKEN: {'set (' + str(len(token)) + ' chars)' if token else 'NOT SET'}")
+          token = os.getenv('GITCODE_TOKEN', '')
+          print(f"GITCODE_TOKEN: {'set (' + str(len(token)) + ' chars)' if token else 'NOT SET'}")
           url = "https://gitcode.com/api/v5/repos/openeuler/openeuler-docker-images/pulls"
           params = {'state': 'open', 'per_page': 20}
           if token:
@@ -61,8 +61,8 @@ jobs:
       - name: Process PR events
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-          GITCODE_WATCH_TOKEN: ${{ secrets.GITCODE_WATCH_TOKEN }}
-          GITCODE_WRITE_TOKEN: ${{ secrets.GITCODE_WRITE_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
           python scripts/watch/process_pr_events.py
 

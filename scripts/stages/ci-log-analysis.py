@@ -31,10 +31,10 @@ def parse_env() -> dict:
         raise ValueError('SOURCE_REPO and PR_NUMBER are required')
     owner, repo = source_repo.split('/', 1)
     platform = os.getenv('SOURCE_PLATFORM', 'github')
-    # GitCode 优先用 GITCODE_WATCH_TOKEN，fallback GITHUB_TOKEN
+    # GitCode 优先用 GITCODE_TOKEN，fallback GITHUB_TOKEN
     token = os.getenv('GITHUB_TOKEN', '')
     if platform == 'gitcode':
-        token = os.getenv('GITCODE_WATCH_TOKEN') or token
+        token = os.getenv('GITCODE_TOKEN') or token
     return {
         'source_repo': source_repo,
         'source_platform': platform,

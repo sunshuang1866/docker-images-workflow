@@ -122,12 +122,12 @@ def process_all():
         api = get_api(platform)
         ci_failed_label = (repo_config.get('trigger_labels') or ['ci_failed'])[0]
 
-        # GitCode: 读操作用 GITCODE_WATCH_TOKEN，写操作（评论/标签）用 GITCODE_WRITE_TOKEN
+        # GitCode: 读操作用 GITCODE_TOKEN，写操作（评论/标签）用 GITCODE_TOKEN
         token = watch_token
         write_token = watch_token
         if platform == 'gitcode':
-            token = os.getenv('GITCODE_WATCH_TOKEN') or watch_token
-            write_token = os.getenv('GITCODE_WRITE_TOKEN') or token
+            token = os.getenv('GITCODE_TOKEN') or watch_token
+            write_token = os.getenv('GITCODE_TOKEN') or token
 
         log(f"\n{'='*60}")
         log(f"📦 {repo} [{platform}] label={ci_failed_label}")
