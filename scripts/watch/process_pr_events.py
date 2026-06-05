@@ -199,11 +199,6 @@ def process_all():
                                 f"🤖 AI 已尝试修复 {MAX_RETRIES} 次，仍未通过 CI，自动关闭。请人工处理。",
                                 write_token,
                             )
-                            api.add_pr_comment(
-                                repo, pr_number,
-                                f"🤖 AI 修复 PR #{fix_pr['number']} 已尝试 {MAX_RETRIES} 次失败，已关闭，请人工介入。",
-                                write_token,
-                            )
                         except Exception as e:
                             log(f"    ⚠️  Close/comment failed: {e}")
                     else:

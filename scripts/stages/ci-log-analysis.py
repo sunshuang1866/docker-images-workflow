@@ -167,20 +167,6 @@ def main():
     except Exception as e:
         log_stage('ci-log-analysis', f'⚠️ ci-data write failed: {e}')
 
-    # 评论到原始 PR
-    heading = (
-        f"## 🔍 CI 失败分析 (ci-log-analysis)\n\n"
-        f"**PR**: #{env['pr_number']} — {env['pr_title']}\n\n---"
-    )
-    try:
-        api.add_pr_comment(
-            env['source_repo'], env['pr_number'],
-            f"{heading}\n\n{analysis}",
-            env['token'],
-        )
-    except Exception as e:
-        log_stage('ci-log-analysis', f'⚠️ PR comment failed: {e}')
-
     # 自动推进到 code-fix 阶段（analysis 已在 ci-data 分支，不再通过 payload 传递）
     dispatch_code_fix(env)
     log_stage('ci-log-analysis', '✅ done')

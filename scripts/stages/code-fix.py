@@ -18,7 +18,6 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
-from scripts.lib.ci_api import get_api
 from scripts.lib import ci_data
 
 WORK_BASE = os.path.join(Path.home(), 'tech-design-data', 'ci-fix')
@@ -192,16 +191,6 @@ def main():
             )
         except Exception as e:
             log_stage('code-fix', f'⚠️ ci-data write failed (non-fatal): {e}')
-        try:
-            api = get_api(env['source_platform'])
-            api.add_pr_comment(
-                env['source_repo'], env['pr_number'],
-                f"## ℹ️ 无需代码修复 (code-fix)\n\n"
-                f"AI 判断此次 CI 失败无需修改代码（可能是基础设施问题或临时错误），建议重试 CI。\n\n---\n\n{summary}",
-                env['token'],
-            )
-        except Exception as e:
-            log_stage('code-fix', f'⚠️ PR comment failed (non-fatal): {e}')
         # 通知 workflow 后续步骤（push / create PR）无需执行
         gh_output = os.environ.get('GITHUB_OUTPUT', '')
         if gh_output:
@@ -231,19 +220,6 @@ def main():
         log_stage('code-fix', '✅ knowledge base updated')
     except Exception as e:
         log_stage('code-fix', f'⚠️ ci-data write failed (non-fatal): {e}')
-
-    # 评论到原始 PR
-    comment_body = (
-        f"## 🔧 代码修复完成 (code-fix)\n\n"
-        f"**PR**: #{env['pr_number']} — {env['pr_title']}\n"
-        f"**Fix branch**: `{env['fix_branch']}`\n\n---\n\n"
-        f"{summary}"
-    )
-    try:
-        api = get_api(env['source_platform'])
-        api.add_pr_comment(env['source_repo'], env['pr_number'], comment_body, env['token'])
-    except Exception as e:
-        log_stage('code-fix', f'⚠️ PR comment failed: {e}')
 
     log_stage('code-fix', '✅ done')
 

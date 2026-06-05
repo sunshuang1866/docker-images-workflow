@@ -105,21 +105,7 @@ jobs:
 
       - name: Mark failed
         if: failure()
-        run: |
-          python - <<'EOF'
-          import os, sys
-          sys.path.insert(0, '.')
-          from scripts.lib.ci_api import get_api
-          platform = os.environ.get('SOURCE_PLATFORM', 'github')
-          api = get_api(platform)
-          repo = os.environ['SOURCE_REPO']
-          pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_TOKEN') or os.environ['DISPATCH_TOKEN']
-          try:
-              api.add_pr_comment(repo, pr, "⚠️ CI 日志分析阶段失败，请检查 workflow 日志。", token)
-          except Exception as e:
-              print(f"⚠️ PR comment failed (non-fatal): {e}")
-          EOF
+        run: echo "⚠️ ci-log-analysis failed, check workflow logs"
 
   # ── 阶段 2: 代码修复 ────────────────────────────────────────────
   code-fix:
@@ -315,18 +301,4 @@ jobs:
 
       - name: Mark failed
         if: failure()
-        run: |
-          python - <<'EOF'
-          import os, sys
-          sys.path.insert(0, '.')
-          from scripts.lib.ci_api import get_api
-          platform = os.environ.get('SOURCE_PLATFORM', 'github')
-          api = get_api(platform)
-          repo = os.environ['SOURCE_REPO']
-          pr = int(os.environ['PR_NUMBER'])
-          token = os.environ.get('GITCODE_TOKEN') or os.environ['DISPATCH_TOKEN']
-          try:
-              api.add_pr_comment(repo, pr, "⚠️ 代码修复阶段失败，请检查 workflow 日志。", token)
-          except Exception as e:
-              print(f"⚠️ PR comment failed (non-fatal): {e}")
-          EOF
+        run: echo "⚠️ code-fix failed, check workflow logs"
