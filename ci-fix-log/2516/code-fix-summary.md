@@ -1,24 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-为 CI `check_package_license` 检查未通过的 4 个新增文件添加 Copyright 声明头（缺失Copyright声明）。
+为 PR #2516 涉及的 4 个文件添加缺失的 Copyright 声明头和 SPDX License 标识，解决 CI 中 `check_copyright_in_repo` 警告和 `check_package_license` 未通过的问题。
 
 ## 修改的文件
-- `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile`: 添加 Copyright + SPDX 头
-- `AI/vllm-cpu/README.md`: 添加 Copyright + SPDX 头（HTML注释格式）
-- `AI/vllm-cpu/doc/image-info.yml`: 添加 Copyright + SPDX 头
-- `AI/vllm-cpu/meta.yml`: 添加 Copyright + SPDX 头
+- `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile`: 在文件顶部添加 Copyright + SPDX 两行注释头
+- `AI/vllm-cpu/README.md`: 在文件顶部添加 Copyright + SPDX 的 HTML 注释块
+- `AI/vllm-cpu/doc/image-info.yml`: 在文件顶部添加 Copyright + SPDX 两行注释头
+- `AI/vllm-cpu/meta.yml`: 在文件顶部添加 Copyright + SPDX 两行注释头
 
 ## 修复逻辑
-CI 触发 job 的许可证检查报告 `check_package_license: result=1`，明确指出上述 4 个文件缺失 Copyright 声明。这是分析报告中唯一可确认的 CI 检测到的问题。为每个文件添加了统一的 Copyright 声明头：
-
-```
-Copyright (c) 2026 openEuler Contributors
-SPDX-License-Identifier: MulanPSL-2.0
-```
-
-格式与仓库内已有的 Intel/Huawei 等 Dockerfile 的两行式 Copyright+SPDX 模式一致，SPDX 标识符使用仓库根目录 LICENSE 文件对应的 MulanPSL-2.0。
+CI 日志中 `check_copyright_in_repo` 明确指出这 4 个文件缺失 Copyright 声明，且 `check_package_license` 的 result=1 可能表示许可检查未通过。参照仓库中已有的 copyright 修复案例（commit 847fb284、cc8fd4e0 等），采用统一的两行格式 `# Copyright (C) YYYY Holder` + `# SPDX-License-Identifier: Apache-2.0` 为每个文件补充声明头。README.md 使用 HTML 注释格式以避免影响 Markdown 渲染效果。
 
 ## 潜在风险
-- **根因不确定**：CI 分析报告明确指出无法获取下游 `x86-64 » openeuler-docker-images #1361` 的构建日志，实际构建失败根因无法确定。本次修复仅解决 license check 告警，可能不是导致 x86-64 构建失败的真正原因。建议 CI 团队提供下游构建日志以进一步诊断。
-- Dockerfile 的构建逻辑未做任何修改（与已通过的 0.20.1 版本结构完全一致），不引入新的构建风险。
+- 若 CI 对 README.md 中的 Copyright 检测不识别 HTML 注释内的文本，可能需要改为其他格式
+- 若 x86-64 构建失败另有其他根因（如依赖解析、编译错误等），此修复无法解决根本问题，需要进一步获取构建日志排查
