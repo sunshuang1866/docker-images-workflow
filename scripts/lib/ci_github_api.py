@@ -49,6 +49,14 @@ def get_pr_diff(repo: str, pr_number: int, token: str) -> str:
     return resp.text[:MAX_DIFF_CHARS]
 
 
+def get_pr_file_names(repo: str, pr_number: int, token: str) -> List[str]:
+    """返回 PR 涉及的文件路径列表（从 API 获取，不依赖本地 git history）。"""
+    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files"
+    resp = requests.get(url, headers=_headers(token), params={'per_page': 100}, timeout=30)
+    resp.raise_for_status()
+    return [f['filename'] for f in resp.json() if f.get('filename')]
+
+
 def get_branch_commit_count(repo: str, branch: str, base_branch: str, token: str) -> int:
     url = f"https://api.github.com/repos/{repo}/compare/{base_branch}...{branch}"
     resp = requests.get(url, headers=_headers(token), timeout=30)

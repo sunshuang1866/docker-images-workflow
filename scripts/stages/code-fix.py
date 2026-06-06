@@ -18,6 +18,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.lib.ai_runner import run_agent
 from scripts.lib.stage_common import agent_prompt_file, log_stage, get_conventions_file
+from scripts.lib.ci_api import get_api
 from scripts.lib import ci_data
 
 WORK_BASE = os.path.join(PROJECT_ROOT, 'ci-fix-log')
@@ -126,7 +127,17 @@ def main():
         raise RuntimeError(f'source-repo directory not found: {SOURCE_REPO_DIR}')
 
     pr_files = get_pr_file_list(SOURCE_REPO_DIR, env['pr_head_sha'], env['pr_base_branch'])
-    log_stage('code-fix', f'PR touched {len(pr_files)} file(s): {pr_files}')
+    log_stage('code-fix', f'PR touched {len(pr_files)} file(s) [git diff]: {pr_files}')
+
+    # git diff 返回空时，从平台 API 获取文件列表（SHA 未拉取到本地时的 fallback）
+    if not pr_files:
+        log_stage('code-fix', '⚠️ git diff empty — trying platform API for file list...')
+        try:
+            api = get_api(env['source_platform'])
+            pr_files = api.get_pr_file_names(env['source_repo'], env['pr_number'], env['token'])
+            log_stage('code-fix', f'PR touched {len(pr_files)} file(s) [API]: {pr_files}')
+        except Exception as e:
+            log_stage('code-fix', f'⚠️ API file list fallback failed: {e}')
 
     context = {
         'pr': {
@@ -158,10 +169,29 @@ def main():
 
     # 只暂存原始 PR 涉及的文件，严禁暂存任何其他文件
     if not pr_files:
-        raise RuntimeError(
-            'PR file list is empty — cannot determine safe files to stage. '
-            'Refusing to fall back to git add -A.'
-        )
+        # API fallback 也为空——无法确定安全文件列表，以 no_changes 退出
+        log_stage('code-fix', 'ℹ️ PR file list empty after all fallbacks — treating as no-change')
+        summary = ''
+        if os.path.exists(output_file):
+            try:
+                with open(output_file, 'r', encoding='utf-8') as _f:
+                    summary = _f.read().strip()
+            except Exception:
+                pass
+        try:
+            ci_data.write_file(
+                ci_data.fix_summary_path(env['pr_number']),
+                summary or '(no changes: PR file list was empty)',
+                f"code-fix: {env['source_repo']} PR #{env['pr_number']} (no changes, empty file list)",
+            )
+        except Exception as e:
+            log_stage('code-fix', f'⚠️ ci-data write failed (non-fatal): {e}')
+        gh_output = os.environ.get('GITHUB_OUTPUT', '')
+        if gh_output:
+            with open(gh_output, 'a') as _f:
+                _f.write('no_changes=true\n')
+        log_stage('code-fix', '✅ done (no commit, empty file list)')
+        return
 
     log_stage('code-fix', 'staging PR files only...')
     pr_files_set = set(pr_files)

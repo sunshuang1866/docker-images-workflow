@@ -88,6 +88,19 @@ def get_pr_diff(repo: str, pr_number: int, token: str) -> str:
     return '\n'.join(parts)[:MAX_DIFF_CHARS]
 
 
+def get_pr_file_names(repo: str, pr_number: int, token: str) -> List[str]:
+    """返回 PR 涉及的文件路径列表（从 API 获取，不依赖本地 git history）。"""
+    owner, name, _ = parse_repo(repo)
+    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls/{pr_number}/files"
+    resp = requests.get(url, params={'access_token': token}, timeout=30)
+    resp.raise_for_status()
+    files = resp.json()
+    if not isinstance(files, list):
+        return []
+    return [f.get('filename') or f.get('new_path', '') for f in files
+            if f.get('filename') or f.get('new_path')]
+
+
 def get_branch_commit_count(repo: str, branch: str, base_branch: str, token: str) -> int:
     owner, name, _ = parse_repo(repo)
     url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/compare/{base_branch}...{branch}"
