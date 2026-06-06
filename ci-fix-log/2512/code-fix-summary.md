@@ -1,16 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-修复 Dockerfile 中浅克隆（`--depth 1`）与 `git checkout` 指定 commit hash 不兼容的构建逻辑缺陷。
+`git clone --depth 1` 浅克隆后无法 checkout 指定 commit hash，导致 3FS 镜像构建在错误源码上执行从而编译失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 在第 23-24 行，将 `git checkout ${VERSION} 2>/dev/null || true` 替换为 `git fetch origin ${VERSION}` + `git checkout ${VERSION}`（移除错误静默掩盖）。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 第22-24行的 git clone/checkout/submodule update 命令，去掉 `--depth 1` 和错误掩码 `2>/dev/null || true`
 
 ## 修复逻辑
-分析报告指出：`git clone --depth 1` 浅克隆仅包含默认分支最新提交，不包含 `22fca04` 这个 commit 的完整历史。原代码中 `git checkout ${VERSION} 2>/dev/null || true` 在 checkout 失败时静默忽略错误，导致仓库实际停留在默认分支最新代码而非指定版本，最终引发 cmake 编译版本不匹配。
+1. 去掉 `git clone --recurse-submodules --depth 1 --shallow-submodules` 中的 `--depth 1` 和 `--shallow-submodules`，改为完整克隆，确保 `ARG VERSION=22fca04` 对应的 commit 在本地仓库中可访问
+2. 去掉 `git checkout ${VERSION} 2>/dev/null || true` 中的 `2>/dev/null || true`，使 checkout 失败时显式报错而非静默跳过
+3. 去掉 `git submodule update --init --recursive --depth 1 2>/dev/null || true` 中的 `--depth 1`（与完整克隆保持一致）和 `2>/dev/null || true`，使 submodule 更新失败时显式报错
 
-修复方案：在 checkout 前增加 `git fetch origin ${VERSION}` 来获取目标 commit 所需的必要历史，使 checkout 能正确定位到指定版本。同时移除原来的 `2>/dev/null || true` 错误掩盖，让 checkout 失败时能正确暴露问题。
+以上修改直接解决了 CI 分析报告中指出的根因：浅克隆后 commit hash checkout 不兼容 + 错误掩码掩盖构建失败。
 
 ## 潜在风险
-- `git fetch origin ${VERSION}` 需要网络访问 github.com，在离线 CI 环境中可能失败。但这是纠正版本获取正确性的必要步骤，且失败会正确报错而非静默掩盖。
-- 其他网络依赖（yum install、curl 安装 Rust）未配置重试机制，但分析报告证据不足，未作修改。如构建日志确认是网络问题，需后续跟进。
+- 去掉 `--depth 1` 后克隆体积和耗时增加，但对构建环境来说是可接受的
+- 如果 commit `22fca04` 在 deepseek-ai/3fs 仓库中不存在或不完整（如已被 GC），即使完整克隆也无法 checkout，需要进一步确认该 commit 的有效性
