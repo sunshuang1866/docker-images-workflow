@@ -398,6 +398,7 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2516: `AI/vllm-cpu/0.22.1` — 4 个新增文件均缺少 Copyright + SPDX 头
+- PR #2529: `Database/milvus/3.0-beta/24.03-lts-sp3/Dockerfile` — 为 PR #2529 涉及的 4 个文件补充缺失的 Copyright 和 SPDX-License-Identifie
 
 ---
 
