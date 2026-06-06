@@ -2,46 +2,40 @@
 
 ## 基本信息
 - PR: #1822 — 【轻量级 PR】：update: 更新文件 README.md
-- 失败类型: infra-error
-- 置信度: 低
-- 知识库匹配: 模式19 + 模式20
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 失败类型: **证据不足**（倾向于 `infra-error` 或与 PR 无关的预存问题）
+- 置信度: **低**
+- 知识库匹配: **模式19 + 模式20**
+- 新模式标题: 下游构建日志缺失
+- 新模式症状关键词: downstream job, FAILURE, build logs not available
 
 ## 根因分析
 
 ### 直接错误
-下游构建 job 的日志未提供，无法获取实际错误信息：
-
+CI 日志中**没有任何构建错误信息**。日志仅包含触发流水线（parent job）的输出，其内容为：
 ```
 multiarch » openeuler » x86-64 » openeuler-docker-images #261 completed. Result was FAILURE
 multiarch » openeuler » aarch64 » openeuler-docker-images #258 completed. Result was FAILURE
 ```
-
-上游 trigger job 自身执行成功（clone、license check、SCA check 均通过），仅下游 x86-64 和 aarch64 两个构建 job 失败，但构建日志完全缺失。
+两条下游构建 job（x86-64 #261、aarch64 #258）均标记为 `FAILURE`，但它们的实际构建日志未被提供。触发 job 本身成功完成（`Finished: SUCCESS`）。
 
 ### 根因定位
-- 失败位置: 无法定位 — 下游 x86-64（#261）和 aarch64（#258）构建 job 的日志未提供
+- 失败位置: **无法定位** — 下游 x86-64（#261）和 aarch64（#258）构建 job 的实际日志缺失
 - 失败原因: **证据不足，无法确定根因**
 
 ### 与 PR 变更的关联
-PR 仅修改了 `AI/cuda/README.md` 中的**一个单词**（`cann` → `cuda`），这是纯文档修正，不涉及任何 Dockerfile、构建配置或代码逻辑的变更。文档修改本身不可能导致两架构构建全量失败。
-
-失败更可能是以下原因之一：
-1. 下游构建 job 中存在与本次 PR 无关的预存问题（如某个镜像的 Dockerfile 依赖失效、下载 404 等）
-2. CI 基础设施临时故障（runner 资源、网络等）
-
-两架构同时失败提示这是一个系统性/环境性问题，而非平台特定的构建错误。
+**与 PR 无关。** PR #1822 仅修改了 `AI/cuda/README.md` 中的一个单词（`cann` → `cuda`，即 "Start a cann instance" → "Start a cuda instance"），属于纯文档修正。一个 README 中的单字拼写修正不可能导致 x86-64 和 aarch64 两个架构的构建同时失败。该失败极有可能是 CI 基础设施问题或原本就存在的构建问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-PR 变更本身无需修复。需要获取下游 x86-64（#261）和 aarch64（#258）构建 job 的完整日志，定位实际失败的镜像及错误信息后，才能判断修复方向。
+**PR 本身无需修复。** 这是一个 README 文档修正，不涉及任何 Dockerfile 或构建逻辑。失败原因与 PR 变更无关，建议：
+- 重新触发 CI（retry/rebuild），确认是否为偶发性基础设施问题
+- 如果是偶发问题，rerun 后应能通过
 
 ### 方向 2（置信度: 低）
-如果多次重试后仍然两架构失败，可能是某个 CI 公共依赖或基础镜像出现问题，需要检查 CI 构建环境的基础镜像版本是否有更新。
+**下游 job 存在预存构建问题。** 如果 rerun 后仍然失败，需要获取下游 job（x86-64 #261、aarch64 #258）的实际构建日志，才能定位根因。
 
 ## 需要进一步确认的点
-1. **下游 job 构建日志**：需要获取 x86-64（#261）和 aarch64（#258）的完整构建输出，这是确定根因的必要条件
-2. **失败是否为预存问题**：对比同分支在本次 PR 之前的最近一次构建结果，判断该失败是否在 PR 引入前就已存在
-3. **CI 重试结果**：如果重新触发 CI 后通过，则确认为 infra 临时故障
+1. **获取下游构建日志**：需要从 Jenkins 获取 `multiarch » openeuler » x86-64 » openeuler-docker-images #261` 和 `multiarch » openeuler » aarch64 » openeuler-docker-images #258` 的完整构建日志，这是定位根因的唯一途径
+2. **确认实际触发范围**：验证 CI 是否因为仅修改了 README 就触发了全量构建（如果 CI 正确跳过纯文档变更的构建，则根本不应该失败）
+3. **检查 CI 调度器状态**：确认 Jenkins 节点和下游 job 的配置是否正常
