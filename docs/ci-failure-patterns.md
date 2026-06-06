@@ -415,6 +415,7 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 - PR #2512: `Storage/3fs/22fca04` — `--depth 1` + commit hash checkout 不兼容
 - PR #2526: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — 修复 3FS Dockerfile 中 `git clone --recurse-submodules --shallo
 - PR #2512: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — `git clone --depth 1` 浅克隆后无法 checkout 指定 commit hash，导致 3FS 
+- PR #2512: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile:22-24` — `git clone --depth 1` 浅克隆后无法 checkout 指定 commit hash `22fca0
 
 ---
 
