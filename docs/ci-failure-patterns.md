@@ -422,3 +422,17 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 - PR #2489: `AI/diskann/0.52.0` — VERSION 变量引用方式有误（diff 推断）
 - PR #2308: `AI/diskann/README.md` — 纯文档修正
 - PR #1768: `Others/spring-cloud/5.0.0` — Dockerfile 重写，具体错误信息缺失
+
+---
+
+## 模式20：x86-64构建日志缺失
+
+**症状关键词**: missing build logs, downstream job, trigger-only, x86-64 only failure
+
+**根因**: - 失败位置: **无法定位** — 下游 x86-64 构建 job（#1384）的日志未提供
+- 失败原因: **证据不足，无法确定根因**
+
+**修复方法**: 在 vllm-cpu 0.22.1 Dockerfile 中缺失 AVX512BF16 fallback patch，导致无 AVX512BF16 指令集的 x86_64 平台编译 `mla_decode.cpp` 时 `KernelVecType<c10::BFloat16>` 解析为 `void` 从而编译失败。
+
+**历史案例**:
+- PR #2527: `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile` — 在 vllm-cpu 0.22.1 Dockerfile 中缺失 AVX512BF16 fallback patch，导
