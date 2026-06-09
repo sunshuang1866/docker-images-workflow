@@ -5,14 +5,13 @@
 - 失败类型: lint-error
 - 置信度: 高
 - 知识库匹配: 模式11
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 其他关联模式: 模式18（潜在问题，本次 CI 未触发）
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-06-04 17:22:14,799-...-update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-06-04 17:22:14,799-.../update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +--------------------------+------------------------------------------------------------+--------------+
 |       Check Items        |                        Description                         | Check Result |
 +--------------------------+------------------------------------------------------------+--------------+
@@ -23,22 +22,22 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `.claude/agents/README.md`（CI appstore 发布规范预检阶段）
-- 失败原因: CI 的 appstore 发布规范预检要求 `.claude/` 工具目录下的 README 文件位于根层级 `.claude/README.md`，而 PR 将 README.md 放在了 `.claude/agents/` 子目录下，路径不符合预期规范。
+- 失败位置: `.claude/agents/README.md`（期望位置 `.claude/README.md`）
+- 失败原因: CI appstore 发布规范预检要求 `.claude/` 工具目录的 README 文件位于 `.claude/README.md`（根层级），但 PR 将其放在了 `.claude/agents/README.md`（子目录 agents 内）。
 
 ### 与 PR 变更的关联
-PR 将整个 `.agents/` 目录重命名为 `.claude/`，其中 `.agents/agents/README.md` 被移动为 `.claude/agents/README.md`。CI 的 `eulerpublisher` 预检工具在该目录下扫描 README 文件时，要求路径必须是 `.claude/README.md`（根层级），而非 `.claude/agents/README.md`（子层级）。PR 变更直接触发了此失败。
+PR 进行了大规模重命名：将工具目录从 `.agents/` 迁移到 `.claude/`。在此过程中，`README.md` 原本位于 `.agents/agents/README.md`，被重命名为 `.claude/agents/README.md`。但 CI 预检规则期望 `.claude/` 目录的 README 位于 `.claude/README.md`，而非 `.claude/agents/README.md`。该预检在 Dockerfile 构建启动前即失败，导致构建流程被阻断。
 
-注意：当前 CI 日志仅覆盖了 appstore 发布规范预检阶段，预检失败后构建即中止，因此日志中未出现 Docker 构建阶段的任何输出。若预检问题修复后，构建流程继续进入下游架构 job（x86-64 / aarch64），**模式18（git 浅克隆与 commit hash checkout 不兼容）和 模式23（RPM 包名不存在）可能成为后续阻塞点**，但当前日志不包含这些阶段的错误。
+另外，PR diff 中引入了 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` 新文件（52 行），其中第 22-24 行使用了 `git clone --depth 1` + `git checkout ${VERSION}` 模式，对应历史模式18（git 浅克隆与 commit hash checkout 不兼容）。但由于 CI 在预检阶段即失败，Dockerfile 构建从未执行，该问题**尚未暴露**在当前日志中。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 `.claude/agents/README.md` 移动到 `.claude/README.md`（即从 `.claude/agents/` 子目录提升到 `.claude/` 根目录），以满足 CI appstore 发布规范的路径要求。同时检查是否需要更新引用该文件路径的脚本或文档。
+将 `.claude/agents/README.md` 移动到 `.claude/README.md`，即从 `agents` 子目录提升到 `.claude/` 根层级，同时更新文件中 `python3 .claude/run_workflow.py` 和 `python3 .claude/scripts/setup_symlinks.py` 的相对路径引用以适应新位置（当前引用是相对于仓库根的，移到根层级后应仍然正确，但需验证）。
 
 ### 方向 2（置信度: 中）
-如果 `eulerpublisher` 预检工具的路径校验规则可配置，可以考虑在预检规则中将 `.claude/agents/README.md` 也纳入合法路径列表。但这涉及 CI 基础设施层面的改动，通常不是 PR 作者的修改范围。
+修复 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile:22-24` 的 git 浅克隆兼容性问题：将 `git clone --depth 1` 改为完整克隆或增加 `git fetch origin ${VERSION}` 后再 checkout，确保指定 commit hash 能被正确拉取。此问题虽非当前失败的直接原因，但通过预检后构建阶段极可能触发失败（参见模式18）。
 
 ## 需要进一步确认的点
-1. **下游架构构建 job 日志**：当前日志仅覆盖预检阶段。若预检修复后继续构建，需获取 `/job/x86-64/…` 和 `/job/aarch64/…` 的完整日志以确认模式18（`git clone --depth 1` + commit hash checkout）和模式23（`boost-foundation` 等 RPM 包名错误）是否在 Docker 构建阶段触发新的失败。
-2. **`eulerpublisher` 预检规则的官方文档**：确认 `.claude/` 目录下 README 文件的路径规范究竟是固定要求（`.claude/README.md`）还是允许子目录下的 README（`.claude/agents/README.md`），以决定修复策略。
+1. 确认 CI appstore 预检规则的完整 schema：`.claude/` 目录下的 `README.md` 是否强制要求在根层级，以及 `.claude/agents/` 内的其他文件（如各 agent 的 `.md` 文件）是否有路径规范要求。
+2. 确认 Dockerfile 第 22-24 行 `git clone --depth 1` + commit hash checkout 的组合在实际构建中是否确实会失败（需等预检通过后 x86-64/aarch64 构建 job 日志验证）。模式18 中已有同类案例记录，修复可提前进行。
