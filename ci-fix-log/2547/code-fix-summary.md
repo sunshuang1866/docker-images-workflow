@@ -1,18 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中用于跳过 libaio 哈希校验的正则表达式存在边界缺陷：当 `_verify_hash` 是 `Fetcher` 类的最后一个方法时，正向前瞻 `(?=\n    def )` 无法匹配任何后续方法定义，导致正则整体不匹配，`_verify_hash` 方法未被替换为 `pass`，哈希校验保留导致构建失败。
+`fix_getdeps.py` 中跳过 `_verify_hash` 方法的正则表达式存在边界缺陷，当 `_verify_hash` 是类中最后一个方法时无法匹配，导致哈希校验未被跳过，构建失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 修复 `_verify_hash` 替换正则的前瞻边界条件
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 将正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 改为 `r'def _verify_hash\(self\):.*?(?=\n    def |\nclass |\Z)'`
 
 ## 修复逻辑
-将第17行的正向前瞻断言从 `(?=\n    def )` 改为 `(?=\n    def |\nclass |\ndef |\Z)`，新增三个备选匹配边界：
-- `\nclass ` — 遇到下一个类定义（0缩进），表示当前类结束
-- `\ndef ` — 遇到下一个顶层函数定义，表示当前类结束
-- `\Z` — 文件末尾
-
-这样无论 `_verify_hash` 在 `Fetcher` 类中处于何种位置（包括最后一个方法），正则都能成功匹配并将其替换为无操作的 `pass` 语句，从而跳过 libaio 的哈希校验回退下载逻辑。
+原正则的 lookahead `(?=\n    def )` 要求 `_verify_hash` 之后必须还有另一个方法定义，当 `_verify_hash` 是类末尾方法时该 lookahead 匹配不到，导致 `re.sub` 整体匹配失败、替换不生效。修复后的正则增加了两个备选匹配目标：`\nclass `（下一个类定义开始）和 `\Z`（文件末尾），覆盖了"类中最后一个方法"的边界情况。
 
 ## 潜在风险
-无。该修改仅扩展正则匹配的终止边界，不影响已有的匹配行为；`_verify_hash` 方法名和替换内容未变，不影响其他方法或代码。
+无。修改仅是一个字符的差异，不影响已有正常工作的场景（非末尾方法时 `\n    def ` 仍会优先匹配）。
