@@ -45,6 +45,8 @@ def parse_env() -> dict:
         'head_sha': os.getenv('HEAD_SHA', ''),
         'fix_branch': os.getenv('FIX_BRANCH', f'fix/{pr_number}'),
         'pr_base_branch': os.getenv('PR_BASE_BRANCH', 'main'),
+        # 重试时为 fix PR 编号（CI 评论在 fix PR 上），首次为 0（评论在原始 PR 上）
+        'fix_pr_number': int(os.getenv('FIX_PR_NUMBER', '0')),
         'token': token,
         'dispatch_token': os.getenv('GITHUB_TOKEN', ''),
     }
@@ -98,13 +100,17 @@ def main():
         log_stage('ci-log-analysis', f'⚠️ PR diff fetch failed: {e}')
 
     # 获取 CI 失败日志
-    log_stage('ci-log-analysis', f"fetching CI logs for sha={env['head_sha'][:8]}...")
+    # 重试时：head_sha 指向 fix branch 最新 commit，CI 机器人将 build URL 评论在 fix PR 上；
+    # 首次时：head_sha 是原始 PR 的 HEAD，CI 评论在原始 PR 上。
+    comment_pr_number = env['fix_pr_number'] if env['fix_pr_number'] else env['pr_number']
+    log_stage('ci-log-analysis', f"fetching CI logs for sha={env['head_sha'][:8]} "
+              f"(comment lookup PR=#{comment_pr_number})...")
     ci_logs = ''
     run_info = ''
     try:
         run = api.get_latest_failed_run(
             env['source_repo'], env['head_sha'], env['token'],
-            pr_number=env['pr_number'],
+            pr_number=comment_pr_number,
         )
         if run:
             run_info = f"Pipeline/Run: {run.get('name', run.get('id', ''))}, id={run['id']}"

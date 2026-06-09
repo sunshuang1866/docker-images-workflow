@@ -42,6 +42,8 @@ jobs:
       HEAD_SHA: ${{ github.event.client_payload.head_sha }}
       FIX_BRANCH: ${{ github.event.client_payload.fix_branch }}
       PR_BASE_BRANCH: ${{ github.event.client_payload.pr_base_branch }}
+      # 重试时为 fix PR 编号，首次为 0；ci-log-analysis 用它从 fix PR 评论中查最新 build URL
+      FIX_PR_NUMBER: ${{ github.event.client_payload.fix_pr_number || '0' }}
       GITHUB_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
       GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN || '' }}

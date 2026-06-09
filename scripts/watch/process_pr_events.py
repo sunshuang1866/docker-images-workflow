@@ -50,7 +50,7 @@ def log(msg: str):
 
 
 def dispatch_ci_fix(repo: str, platform: str, pr: Dict, pr_base_branch: str,
-                    token: str, target_repo: str) -> bool:
+                    token: str, target_repo: str, fix_pr_number: int = 0) -> bool:
     payload = {
         'event_type': 'run-ci-fix-phase',
         'client_payload': {
@@ -62,6 +62,8 @@ def dispatch_ci_fix(repo: str, platform: str, pr: Dict, pr_base_branch: str,
             'head_sha': pr['head']['sha'],
             'fix_branch': f"fix/{pr['number']}",
             'pr_base_branch': pr_base_branch,
+            # 重试时传入 fix PR 编号，让 ci-log-analysis 从 fix PR 评论中查找最新 build URL
+            'fix_pr_number': fix_pr_number,
         }
     }
     url = f"https://api.github.com/repos/{target_repo}/dispatches"
@@ -235,7 +237,8 @@ def process_all():
                             'title': pr_title,
                             'head': fix_pr['head'],
                         }
-                        if dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo):
+                        if dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo,
+                                           fix_pr_number=fix_pr['number']):
                             total_dispatched += 1
 
                 else:
