@@ -82,9 +82,10 @@ class TestFindJenkinsUrlInComments:
     def test_no_jenkins_url(self):
         assert _find_jenkins_url_in_comments([_comment('nothing here')]) == ''
 
-    def test_single_trigger_url_returned_as_fallback(self):
+    def test_trigger_url_filtered_out_returns_empty(self):
+        # trigger URL 被过滤，没有任何 build URL → 返回空字符串
         comments = [_comment(f'门禁运行中 {TRIGGER}')]
-        assert _find_jenkins_url_in_comments(comments) == TRIGGER
+        assert _find_jenkins_url_in_comments(comments) == ''
 
     def test_build_url_beats_trigger_in_same_failure_comment(self):
         # 真实 PR #2534 场景：一条评论含 trigger + x86 + aarch64，且有 FAILED 关键词
@@ -126,15 +127,14 @@ class TestFindJenkinsUrlInComments:
         result = _find_jenkins_url_in_comments([_comment(body)])
         assert result in (X86, AARCH64)
 
-    def test_prefers_failure_keyword_comment_over_neutral(self):
+    def test_trigger_in_failure_comment_filtered_falls_back_to_neutral_build(self):
+        # trigger URL 在失败评论里但被过滤；build URL 在中性评论里 → 返回 build URL
         comments = [
             _comment(f'passed {X86}'),       # neutral with build URL
-            _comment(f'error {TRIGGER}'),    # failure with trigger URL
+            _comment(f'error {TRIGGER}'),    # failure with trigger URL (filtered)
         ]
-        # failure 评论的 trigger 分数 (False,4,False) < neutral 的 build URL (True,4,True)
         result = _find_jenkins_url_in_comments(comments)
-        # failure 组有 TRIGGER，neutral 组有 X86；failure 优先选 → 结果是 TRIGGER
-        assert result == TRIGGER
+        assert result == X86
 
     def test_chinese_failure_keyword(self):
         body = f'构建失败 {X86}'
@@ -220,14 +220,15 @@ class TestGetLatestFailedRun:
             result = get_latest_failed_run(REPO, SHA, TOKEN, pr_number=42)
         assert result['target_url'] == X86
 
-    def test_trigger_returned_when_only_candidate(self):
-        # 没有任何 build URL，只有 trigger，fallback 返回 trigger
+    def test_trigger_only_returns_none(self):
+        # 只有 trigger URL，没有任何 build URL → 返回 None（不抓 trigger 日志）
+        # trigger 日志里的 Finished: SUCCESS 会误导 agent 认为构建成功
         statuses = [{'state': 'failure', 'context': 'ci', 'target_url': TRIGGER}]
         with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=_mock_pipeline_404()), \
              patch('scripts.lib.ci_gitcode_api._get_commit_statuses', return_value=statuses), \
              patch('scripts.lib.ci_gitcode_api._get_pr_comments',     return_value=[]):
             result = get_latest_failed_run(REPO, SHA, TOKEN, pr_number=42)
-        assert result['target_url'] == TRIGGER
+        assert result is None
 
     def test_comments_only_no_status(self):
         # commit status 空，全靠评论

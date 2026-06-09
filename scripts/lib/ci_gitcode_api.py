@@ -147,12 +147,20 @@ def _get_pr_comments(repo: str, pr_number: int, token: str) -> List[Dict]:
     return []
 
 
-def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
-    """从 PR 评论中提取最适合抓取构建日志的 Jenkins URL。
+def _is_build_url(url: str) -> bool:
+    """True 表示 URL 指向实际构建 job，False 表示 trigger/编排层 job。
 
-    openEuler CI 的结果评论里同时包含 trigger URL 和各架构 build URL，
-    三者路径深度相同，靠架构标识符（x86-64、aarch64 等）区分。
-    优先从失败相关评论中取，再用 _url_score 选出实际构建 job URL。
+    trigger/编排层日志只包含调度结果，不包含真正的构建错误，不应抓取。
+    """
+    return not bool(_ORCHESTRATOR_RE.search(url))
+
+
+def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
+    """从 PR 评论中提取实际构建 job 的 Jenkins URL（排除 trigger/编排层）。
+
+    openEuler CI 的结果评论里同时包含 trigger URL 和各架构 build URL。
+    trigger 日志只记录调度结果，其 Finished: SUCCESS 不代表构建成功，
+    只有实际构建 job（x86-64、aarch64 等）的日志才含真正的错误信息。
     """
     failed_urls: List[str] = []
     other_urls: List[str] = []
@@ -164,6 +172,8 @@ def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
         is_failure = any(k in body.lower() for k in ['fail', 'error', 'failed', '失败'])
         for raw in matches:
             url = raw.rstrip('.,;)>]')
+            if not _is_build_url(url):
+                continue  # 丢弃 trigger/编排层 URL
             (failed_urls if is_failure else other_urls).append(url)
 
     candidates = failed_urls or other_urls
@@ -224,15 +234,18 @@ def get_latest_failed_run(repo: str, head_sha: str, token: str,
     except Exception:
         pass
 
-    # 2. 收集 commit status 中的候选 URL
+    # 2. 收集 commit status 中的候选 URL（排除 trigger/编排层 URL）
+    # openEuler CI 上报的 commit status 往往指向 trigger 层，trigger 日志只含调度结果，
+    # 其 Finished: SUCCESS 不代表构建成功，不应抓取。
     candidate_urls: List[str] = []
     statuses = _get_commit_statuses(repo, head_sha, token)
     print(f"[ci-log] commit statuses: {len(statuses)} total", flush=True)
     failed = [s for s in statuses if s.get('state') in ('failure', 'error', 'failed')]
     for s in failed:
-        print(f"[ci-log]   failed status: context={s.get('context')} target_url={s.get('target_url','')[:80]}", flush=True)
         target = s.get('target_url', '')
-        if target:
+        is_build = _is_build_url(target) if target else False
+        print(f"[ci-log]   failed status: context={s.get('context')} is_build={is_build} target_url={target[:80]}", flush=True)
+        if target and is_build:
             candidate_urls.append(target)
 
     # 3. 收集 PR 评论中的候选 URL（始终执行，与 step 2 统一打分）
