@@ -276,6 +276,7 @@ Finished: FAILURE
 - PR #2270: `AI/diskann/doc/image-info.yml` — 字段名 `version_suffix` → `version_prefix`
 - PR #2262: `Bigdata/image-list.yml` — 7 条镜像条目缺失
 - PR #2269: `Database/milvus/doc/image-info.yml` — 包含不稳定 `3.0-beta` 版本条目
+- PR #2512: `.claude/agents/README.md` — CI appstore 路径校验失败：`.claude/agents/README.md` 不在期望路径 `.claud
 
 ---
 
