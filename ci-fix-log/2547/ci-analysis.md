@@ -2,41 +2,53 @@
 
 ## 基本信息
 - PR: #2547 — 【自动升级】fbthrift容器镜像升级至2026.06.08.00版本.
-- 失败类型: infra-error
-- 置信度: 低
+- 失败类型: build-error
+- 置信度: 高
 - 知识库匹配: 模式22
-- 新模式标题: (无)
-- 新模式症状关键词: (无)
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
-日志在 googletest 依赖构建阶段被截断，未见致命错误。日志覆盖的范围为 getdeps 依赖构建链：zstd → boost → glog → gflags → googletest，尚未进入 fbthrift 本身的编译阶段。实际失败原因无法从提供的日志中确定。
-
-日志中出现的非致命信息：
-- `#11 53.43 -- Failed to find LLVM FileCheck` — cmake 功能探测，不影响构建
-- `#11 176.1 SEND_ERROR "Target Boost::date_time already has an imported location..."` — Boost 构建期间的 CMake 配置警告（SEND_ERROR 在 Boost b2 构建上下文中为非致命警告），后续 Boost 库均成功编译并安装
-- `#11 63.72 fatal: not a git repository (or any of the parent directories): .git` — 构建脚本在解压后的 tarball 目录中执行 git 命令，非致命
+```
+#11 354.0 Assessing libaio...
+#11 354.0 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
+#11 354.0 .. 2238 of (Unknown)  [Complete in 1.187799 seconds]
+#11 354.0 Date: Tue, 09 Jun 2026 01:09:04 GMT
+#11 354.0 Content-Type: text/html; charset=utf-8
+#11 354.0 Set-Cookie: techaro.lol-anubis-auth=; Path=/; Expires=Tue, 09 Jun 2026 01:08:04 GMT; Max-Age=0; Secure; SameSite=None
+#11 354.0 Connection: close
+#11 354.0 Transfer-Encoding: chunked
+#11 354.0 
+#11 354.0 
+#11 ERROR: process "/bin/sh -c git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build &&     cd /build &&     mkdir -p /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads &&     cp /tmp/libaio.tar.gz /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz &&     python3 /tmp/fix_getdeps.py &&     ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift" did not complete successfully: exit code: 1
+```
 
 ### 根因定位
-- 失败位置: 无法定位 — 日志截断前未出现导致构建终止的致命错误
-- 失败原因: 证据不足，无法确定根因。日志仅覆盖依赖构建阶段，实际致命错误极可能发生在日志截断之后的 fbthrift 编译阶段
+- 失败位置: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py:18-20`（`_verify_hash` 替换正则存在边界缺陷）
+- 失败原因: `fix_getdeps.py` 中用于跳过 libaio 哈希校验的正则表达式 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 使用前瞻断言 `(?=\n    def )` 查找下一个方法定义，当 `_verify_hash` 是类中最后一个方法时，前瞻无法匹配任何内容，正则整体不匹配，导致 `_verify_hash` 方法未被替换为 `pass`，哈希校验静默保留。getdeps 随后校验预先拷贝的 libaio tarball 时发现哈希不匹配，回退到从 pagure.io 下载，但 pagure.io 返回的是 HTML 页面（2228字节，Content-Type: text/html）而非有效 tar.gz 文件，导致解压/构建阶段失败。
+
+### 发生链路详析
+1. Dockerfile:18 RUN 执行 `fix_getdeps.py`，尝试用正则替换 `_verify_hash` 方法体
+2. 正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 依赖后续方法定义作为边界标记
+3. `_verify_hash` 是 `Fetcher` 类的最后一个方法，正则匹配失败，原方法保持不变
+4. getdeps 在处理 libaio 依赖时，校验预先拷贝的 tarball 哈希 → 不匹配
+5. getdeps 回退下载，但 pagure.io 的 URL 返回 HTML 错误页面而非 tarball
+6. getdeps 尝试以 tar.gz 格式解压 HTML 内容，失败，exit code 1
 
 ### 与 PR 变更的关联
-本次 PR 新增了 fbthrift 2026.06.08.00 版本的 Dockerfile 及相关文件，属于**全新引入的构建配置**。此 failure 与 PR 变更直接相关（构建的就是 PR 新增的镜像），但具体失败原因需要完整日志才能判定。
-
-根据知识库模式22 的历史记录，该 PR 曾存在 `fix_getdeps.py` 中 `_verify_hash` 方法替换正则在「类中最后一个方法」场景下匹配失败的已知问题，可能仍是根因。
+是。该失败由 PR 新增的 `fix_getdeps.py` 脚本中的正则表达式边界缺陷直接触发。脚本本身是为绕开 getdeps 对预拷贝 libaio tarball 的哈希校验而设计，但由于正则缺陷，绕开逻辑未生效。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-检查 `fix_getdeps.py` 中 `_verify_hash` 方法替换的正则表达式边界匹配问题。当前正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 使用「下一个 `def `」作为前瞻边界，当 `_verify_hash` 是类中最后一个方法时前瞻无法匹配，导致替换静默失败。
+### 方向 1（置信度: 高）
+修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则的边界缺陷。当前正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 使用前瞻断言要求存在后续方法，当目标方法是类中最后一个方法时匹配失败。应将正则改为能匹配到方法体末尾（即遇到下一个方法定义 **或** 类定义结束/下一个非方法行）的形式，确保无论方法在类中的位置如何都能正确替换为 `pass`。
 
-### 方向 2（置信度: 低）
-日志被截断，实际错误可能完全不同于模式22 定位的问题。需获取完整日志后才能进一步分析。
+### 方向 2（置信度: 中）
+若修复正则后仍然失败，需确认 pagure.io 上的 libaio 下载 URL 是否已变更。备选方案为将 libaio 的获取逻辑改为完全使用本地预拷贝的 tarball，在 getdeps manifest 或构建参数层面彻底跳过 libaio 的网络下载步骤。
 
 ## 需要进一步确认的点
-1. **获取完整 CI 日志**：当前日志在 googletest 构建阶段被截断，需要获取 fbthrift 编译阶段的完整日志才能定位真正的致命错误
-2. **确认日志截断原因**：日志是被 CI 系统的行数限制截断，还是构建在该阶段因超时被终止
-3. **验证 fix_getdeps.py 正则有效性**：在目标 `fetcher.py` 源文件中确认 `_verify_hash` 方法后是否有后续方法定义，判断正则是否能正确匹配
-4. **确认 fbthrift v2026.06.08.00 上游代码变化**：该版本可能引入了新的编译依赖或代码变更，导致之前有效的构建流程失效
+1. 需要查看 fbthrift 源码中 `build/fbcode_builder/getdeps/fetcher.py` 的 `Fetcher` 类结构，确认 `_verify_hash` 是否确实为类中最后一个方法，以验证正则边界缺陷假设。
+2. 需要确认 `libaio-libaio-0.3.113.tar.gz` 从 pagure.io 下载的 URL 当前是否仍有效（返回 HTML 可能是 404 或重定向到登录页）。
+3. 如果 getdeps 的版本在不同构建间可能变化，需确认 `_verify_hash` 方法在 fetcher.py 中的位置是否稳定。
