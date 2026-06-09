@@ -5,31 +5,40 @@
 - 失败类型: lint-error
 - 置信度: 高
 - 知识库匹配: 模式11
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-06-04 17:22:14,799-...-update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
++--------------------------+------------------------------------------------------------+--------------+
+|       Check Items        |                        Description                         | Check Result |
++--------------------------+------------------------------------------------------------+--------------+
 | .claude/agents/README.md | [Path Error] The expected path should be .claude/README.md |   FAILURE    |
++--------------------------+------------------------------------------------------------+--------------+
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `.claude/agents/README.md`
-- 失败原因: CI appstore 发布规范预检要求工具目录 `.claude/` 下的 README 文件位于 `.claude/README.md`（根层级），而非嵌套在 `agents/` 子目录下的 `.claude/agents/README.md`
+- 失败位置: `.claude/agents/README.md`（CI appstore 发布规范预检阶段）
+- 失败原因: CI 的 appstore 发布规范预检要求 `.claude/` 工具目录下的 README 文件位于根层级 `.claude/README.md`，而 PR 将 README.md 放在了 `.claude/agents/` 子目录下，路径不符合预期规范。
 
 ### 与 PR 变更的关联
-本次 PR 将工具目录整体从 `.agents/` 迁移到 `.claude/`。原 `.agents/agents/README.md` 被重命名为 `.claude/agents/README.md`（路径中 `agents/` 子目录层级被保留）。CI 的 appstore 发布规范检查对 `.claude/` 工具目录的 README 路径有严格校验：README 必须直接位于 `.claude/` 根下（即 `.claude/README.md`），不允许嵌套在 `agents/` 子目录中。PR 触发此校验后失败。
+PR 将整个 `.agents/` 目录重命名为 `.claude/`，其中 `.agents/agents/README.md` 被移动为 `.claude/agents/README.md`。CI 的 `eulerpublisher` 预检工具在该目录下扫描 README 文件时，要求路径必须是 `.claude/README.md`（根层级），而非 `.claude/agents/README.md`（子层级）。PR 变更直接触发了此失败。
+
+注意：当前 CI 日志仅覆盖了 appstore 发布规范预检阶段，预检失败后构建即中止，因此日志中未出现 Docker 构建阶段的任何输出。若预检问题修复后，构建流程继续进入下游架构 job（x86-64 / aarch64），**模式18（git 浅克隆与 commit hash checkout 不兼容）和 模式23（RPM 包名不存在）可能成为后续阻塞点**，但当前日志不包含这些阶段的错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 README 文件从 `.claude/agents/README.md` 移动到 `.claude/README.md`，使其符合 CI appstore 发布规范的路径要求。如果 `agents/` 目录下的 README 内容主要描述 agents 机制本身，可考虑将其合并到 `.claude/CLAUDE.md` 或 `.claude/README.md` 中。
+将 `.claude/agents/README.md` 移动到 `.claude/README.md`（即从 `.claude/agents/` 子目录提升到 `.claude/` 根目录），以满足 CI appstore 发布规范的路径要求。同时检查是否需要更新引用该文件路径的脚本或文档。
 
 ### 方向 2（置信度: 中）
-如果 `.claude/agents/README.md` 的内容仅对 agents 子目录有说明价值、不应放在 `.claude/` 根层级，则需要确认 CI 的 appstore 路径校验规则是否可配置，或是否应将此文件从 PR 变更范围中排除（不作为 appstore 发布需要校验的文件）。
+如果 `eulerpublisher` 预检工具的路径校验规则可配置，可以考虑在预检规则中将 `.claude/agents/README.md` 也纳入合法路径列表。但这涉及 CI 基础设施层面的改动，通常不是 PR 作者的修改范围。
 
 ## 需要进一步确认的点
-- `.claude/CLAUDE.md`（由 `.agents/CLAUDE.md` 重命名而来）是否也需要通过 appstore 路径校验，以及其期望路径是什么
-- CI appstore 路径校验规则的具体实现逻辑：是否有文件白名单机制允许 `.claude/agents/` 下的非应用镜像文件被豁免检查
+1. **下游架构构建 job 日志**：当前日志仅覆盖预检阶段。若预检修复后继续构建，需获取 `/job/x86-64/…` 和 `/job/aarch64/…` 的完整日志以确认模式18（`git clone --depth 1` + commit hash checkout）和模式23（`boost-foundation` 等 RPM 包名错误）是否在 Docker 构建阶段触发新的失败。
+2. **`eulerpublisher` 预检规则的官方文档**：确认 `.claude/` 目录下 README 文件的路径规范究竟是固定要求（`.claude/README.md`）还是允许子目录下的 README（`.claude/agents/README.md`），以决定修复策略。
