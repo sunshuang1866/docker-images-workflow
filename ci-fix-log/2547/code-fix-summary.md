@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中用于跳过 `_verify_hash` 哈希校验的正则表达式不匹配上游 fbthrift v2026.06.08.00 中 `fetcher.py` 的实际方法签名，导致 getdeps 对自定义 libaio tarball 做哈希校验失败。
+`fix_getdeps.py` 中用于绕过 `_verify_hash` 的正则表达式使用了 raw string (`r'...'`)，导致 `\n` 被解释为两个字面字符（反斜杠+n）而非换行符，正则永远无法匹配源码中的 `_verify_hash` 方法，hash 校验未被跳过，构建失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 修复 `re.sub` 的正则表达式，使其能匹配带有返回类型注解 `-> None:` 的 `_verify_hash` 方法签名，并添加 `\Z` 作为兜底结束条件
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 移除正则表达式字符串的 `r` 前缀，使 `\n` 被正确解释为换行符，确保 `_verify_hash` 方法被正确替换为 `pass`。
 
 ## 修复逻辑
-上游 fbthrift 的 `build/fbcode_builder/getdeps/fetcher.py` 中 `_verify_hash` 方法的实际签名为 `def _verify_hash(self) -> None:`（带有 `-> None:` 返回类型注解）。但 `fix_getdeps.py` 中使用的正则表达式 `def _verify_hash\(self\):` 期望签名以 `):` 结尾，导致在 `)` 后遇到 ` -> None:` 时匹配失败，`re.sub` 未执行任何替换，哈希校验未被跳过，getdeps 对自定义 libaio 二进制 tarball 计算 sha256 后发现与 manifest 中预期值不匹配而报错退出。
-
-修复方案：将正则从 `def _verify_hash\(self\):` 改为 `def _verify_hash\(self[^)]*\).*?:`，其中 `[^)]*` 处理括号内可能的额外参数，`.*?:` 处理返回类型注解到冒号之间的内容。同时在 lookahead 中添加 `|\Z` 作为兜底终止条件。
+将 `re.sub()` 的第一个参数从 raw string `r'def _verify_hash\(self\):.*?(?=\n    def )'` 改为非 raw string `'def _verify_hash\\(self\\):.*?(?=\n    def )'`。在非 raw string 中，`\n` 被正确解析为换行字符，正则的 lookahead `(?=\n    def )` 能够匹配到紧随下一个方法定义前的换行，从而正确替换整个 `_verify_hash` 方法体为 `pass`，实现 hash 校验的绕过。
 
 ## 潜在风险
-无。正则更改仅放宽了方法签名的匹配条件，替换行为不变。已验证新正则能正确匹配上游代码并将方法体替换为 `pass`，同时不破坏后续方法定义。
+无。`\(` 和 `\)` 在非 raw string 中仍被正确转义为字面括号，不影响正则匹配语义。
