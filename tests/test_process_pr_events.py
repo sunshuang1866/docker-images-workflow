@@ -3,6 +3,7 @@ Tests for scripts/watch/process_pr_events.py
 
 覆盖范围：
 - _is_prerelease: PR 标题预发布版本检测
+- fix PR skip logic: title starts with 'fix:'
 """
 
 import pytest
@@ -77,3 +78,33 @@ class TestIsPrerelease:
     def test_title_with_alpha_in_description_not_version(self):
         # alpha 出现在描述中但不是版本标记（没有 -. 前缀）
         assert _is_prerelease('升级 alpha 通道的软件包') is False
+
+
+# ── fix PR skip（标题以 fix: 开头）────────────────────────────────────────────
+
+def _is_fix_pr_title(title: str) -> bool:
+    """复用 process_pr_events.py 中相同的判断逻辑。"""
+    return title.lstrip().lower().startswith('fix:')
+
+
+class TestIsFixPrTitle:
+    @pytest.mark.parametrize("title", [
+        'fix: etcd 3.6.11 (fix #2534)',
+        'fix: libyuv 1948 (fix #2546)',
+        'Fix: something capitalized',
+        '  fix: leading spaces',
+        'FIX: uppercase',
+    ])
+    def test_fix_titles_are_skipped(self, title):
+        assert _is_fix_pr_title(title) is True, f"Expected fix PR: {title}"
+
+    @pytest.mark.parametrize("title", [
+        '【自动升级】etcd容器镜像升级至3.6.11版本.',
+        'chore: update dependencies',
+        'feat: add new feature',
+        'fixup some thing',       # 以 fixup 开头，不是 fix:
+        'prefix fix: something',  # fix: 不在开头
+        '',
+    ])
+    def test_non_fix_titles_are_not_skipped(self, title):
+        assert _is_fix_pr_title(title) is False, f"Should not skip: {title}"

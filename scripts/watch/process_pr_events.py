@@ -169,6 +169,10 @@ def process_all():
                 log(f"    → Skipping: pre-release version in title (alpha/beta/rc/etc.)")
                 continue
 
+            if pr_title.lstrip().lower().startswith('fix:'):
+                log(f"    → Skipping: fix PR (title starts with 'fix:'), handles its own CI retries")
+                continue
+
             fix_pr = api.find_any_pr_by_head_branch(repo, fix_branch, token)
 
             if fix_pr is None or fix_pr['state'] == 'closed':
