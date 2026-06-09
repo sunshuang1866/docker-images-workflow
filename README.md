@@ -5,6 +5,7 @@
 ## 功能特性
 
 - **自动检测 CI 失败**：监控目标仓库中带有 `ci_failed` label 的 PR，轮询间隔由 `watchlist.json` 的 `poll_interval_minutes` 控制
+- **仅处理正式版本**：预发布版本（`-alpha`、`-beta`、`-rc`、`-preview`、`-dev`、`-snapshot`、`-nightly` 等）的升级 PR 自动跳过，不触发修复流程；只有正式版本才会进入 AI 修复链路
 - **两阶段 AI 修复**：
   - `ci-log-analysis`：AI 分析 CI 日志，定位根因，产出结构化诊断报告
   - `code-fix`：AI 基于诊断报告在代码库中实施最小化修复并提交
@@ -22,6 +23,9 @@
   ↓
 Monitor 定时轮询，检测 ci_failed PR
   ↓
+PR 标题含预发布标记？(alpha/beta/rc/preview/dev/snapshot/nightly)
+  ├─ 是 → 跳过，不触发修复 🚫
+  └─ 否（正式版本）↓
 ci-log-analysis: AI 分析 CI 日志 + PR diff → 诊断报告（存入 ci-data 分支）
   ↓（repository_dispatch 自动推进）
 code-fix: AI 修改代码 → git commit → push fix/<pr-number> 到 fork
