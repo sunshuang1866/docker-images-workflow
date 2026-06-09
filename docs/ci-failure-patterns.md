@@ -457,3 +457,17 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — Dockerfile 第 19 行 `ENV LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRAR
+
+---
+
+## 模式22：日志截断致证据不足
+
+**症状关键词**: 日志截断, 未见致命报错, fbthrift, getdeps, boost SEND_ERROR
+
+**根因**: - 失败位置: 无法定位 — 日志截断前未出现致命错误
+- 失败原因: **证据不足，无法确定根因**。日志仅覆盖了 getdeps 依赖构建阶段（zstd → boost → glog → gflags → googletest），尚未进入 fbthrift 本身的编译。实际错误极可能发生在日志截断之后的阶段。
+
+**修复方法**: 修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况，导致 libaio tarball 哈希校验静默未被跳过。
+
+**历史案例**:
+- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况
