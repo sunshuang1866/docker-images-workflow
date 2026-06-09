@@ -473,3 +473,4 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况
+- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中跳过 `_verify_hash` 方法替换的正则表达式边界缺陷：当 `_ve
