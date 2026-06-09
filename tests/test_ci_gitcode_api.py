@@ -157,6 +157,20 @@ class TestFindJenkinsUrlInComments:
         assert result in (X86, AARCH64)
         assert 'trigger' not in result
 
+    def test_mixed_table_only_failed_arch_selected(self):
+        # PR #2546 真实场景：x86 行含 SUCCESS，aarch64 行含 FAILED
+        # 逐行匹配时应只把 aarch64 放入 failed_urls，返回 AARCH64
+        body = (
+            f'<tr><td>x86_64</td><td>check_build</td>'
+            f'<td>&#9989;<strong>SUCCESS</strong></td>'
+            f'<td><a href={X86}>#1404</a></td></tr>\n'
+            f'<tr><td>aarch64</td><td>check_build</td>'
+            f'<td>&#10060;<strong>FAILED</strong></td>'
+            f'<td><a href={AARCH64}>#1379</a></td></tr>'
+        )
+        result = _find_jenkins_url_in_comments([_comment(body)])
+        assert result == AARCH64
+
 
 # ── get_latest_failed_run ─────────────────────────────────────────────────────
 

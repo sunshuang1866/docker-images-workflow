@@ -155,26 +155,32 @@ def _is_build_url(url: str) -> bool:
     return not bool(_ORCHESTRATOR_RE.search(url))
 
 
+_FAIL_TOKENS = re.compile(r'fail|error|failed|失败|&#10060;|✗|×', re.IGNORECASE)
+
+
 def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
     """从 PR 评论中提取实际构建 job 的 Jenkins URL（排除 trigger/编排层）。
 
-    openEuler CI 的结果评论里同时包含 trigger URL 和各架构 build URL。
-    trigger 日志只记录调度结果，其 Finished: SUCCESS 不代表构建成功，
-    只有实际构建 job（x86-64、aarch64 等）的日志才含真正的错误信息。
+    openEuler CI 的结果表格里，每行（<tr>）同时包含 SUCCESS/FAILED 标记和对应 URL，
+    必须逐行判断而非按整条评论判断，否则同一评论里的成功架构 URL 会被误归为失败。
     """
     failed_urls: List[str] = []
     other_urls: List[str] = []
     for comment in reversed(comments):  # 最新评论优先
         body = comment.get('body', '')
-        matches = _JENKINS_URL_RE.findall(body)
-        if not matches:
+        if not _JENKINS_URL_RE.search(body):
             continue
-        is_failure = any(k in body.lower() for k in ['fail', 'error', 'failed', '失败'])
-        for raw in matches:
-            url = raw.rstrip('.,;)>]')
-            if not _is_build_url(url):
-                continue  # 丢弃 trigger/编排层 URL
-            (failed_urls if is_failure else other_urls).append(url)
+        # 逐行匹配，让 URL 与同行的 FAILED/SUCCESS 关键词绑定
+        for line in body.splitlines():
+            line_matches = _JENKINS_URL_RE.findall(line)
+            if not line_matches:
+                continue
+            is_failure = bool(_FAIL_TOKENS.search(line))
+            for raw in line_matches:
+                url = raw.rstrip('.,;)>]')
+                if not _is_build_url(url):
+                    continue  # 丢弃 trigger/编排层 URL
+                (failed_urls if is_failure else other_urls).append(url)
 
     candidates = failed_urls or other_urls
     if not candidates:
