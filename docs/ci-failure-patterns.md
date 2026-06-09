@@ -280,6 +280,7 @@ Finished: FAILURE
 - PR #2512: `.claude/agents/README.md` — CI appstore 发布规范预检失败：`.claude/agents/README.md` 路径不符合预期，要求 R
 - PR #2512: `.claude/README.md` — CI appstore 发布规范预检失败：`.claude/agents/README.md` 路径不符合规范，CI 期
 - PR #2512: `.claude/README.md` — CI appstore 发布规范检查要求 `.claude/` 工具目录的 README 文件位于根层级 `.claud
+- PR #2512: `.claude/agents/README.md` — CI appstore 发布规范预检要求 `.claude/README.md` 位于 `.claude/` 根目录，而
 
 ---
 
