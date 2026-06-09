@@ -442,3 +442,17 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2527: `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile` — 在 vllm-cpu 0.22.1 Dockerfile 中缺失 AVX512BF16 fallback patch，导
+
+---
+
+## 模式21：ENV自引用未定义变量
+
+**症状关键词**: UndefinedVar, LD_LIBRARY_PATH, ENV
+
+**根因**: - **失败位置**: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile:19`
+- **失败原因**: Dockerfile 中 `ENV LD_LIBRARY_PATH=/usr/local/lib:/libyuv/build:$LD_LIBRARY_PATH` 在一个全新的构建阶段中自引用了 `$LD_LIBRARY_PATH`。由于该变量此前从未在同一构建阶段被定义，BuildKit 检测到对未定义变量的引用，产生 `UndefinedVar` 警告。
+
+**修复方法**: Dockerfile 第 19 行 `ENV LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRARY_PATH` 变量，触发 BuildKit `UndefinedVar` 警告。
+
+**历史案例**:
+- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — Dockerfile 第 19 行 `ENV LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRAR
