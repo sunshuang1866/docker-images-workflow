@@ -1,14 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI appstore 发布规范检查要求 `.claude/` 工具目录的 README 文件位于根层级 `.claude/README.md`，而非嵌套在 `agents/` 子目录下的 `.claude/agents/README.md`。
+CI appstore 发布规范预检要求 `.claude/README.md` 位于 `.claude/` 根目录，而 PR 将其放在了 `.claude/agents/` 子目录下，导致路径校验失败。
 
 ## 修改的文件
-- `.claude/README.md`: 新建，包含工具包完整说明文档（从 `.claude/agents/README.md` 迁移内容，并更新架构图中 README 自身路径及 CLAUDE.md 引用路径）
-- `.claude/agents/README.md`: 清空原有内容，替换为简短索引说明，指向 `../README.md` 和 `../CLAUDE.md`
+- `.claude/agents/README.md` → `.claude/README.md`: 使用 `git mv` 将 README 从 `.claude/agents/` 子目录提升到 `.claude/` 根目录，同时修正了内部的相对引用 `../CLAUDE.md` → `CLAUDE.md`（因文件层级变化）。
 
 ## 修复逻辑
-CI 的 appstore 发布规范预检规则对 `.claude/` 工具目录下的 README 路径有严格校验：README 必须直接位于 `.claude/` 根下（即 `.claude/README.md`），不允许嵌套在 `agents/` 等子目录中。本次修复将 README 内容从 `.claude/agents/README.md` 迁移到 `.claude/README.md`，使其符合路径规范要求，同时将原文件改为简短索引，避免创建无内容的空文件。
+CI 的 `eulerpublisher` 预检工具扫描 `.claude/` 目录下的 README 文件时，要求路径必须是 `.claude/README.md`（根层级），而非 `.claude/agents/README.md`（子层级）。PR 将原 `.agents/` 目录重命名为 `.claude/` 时，其中 `.agents/agents/README.md` 被移动为 `.claude/agents/README.md`，触发了路径校验失败。修复方案是将 README 移动到 CI 要求的正确位置 `.claude/README.md`。
 
 ## 潜在风险
-无。迁移后的 `.claude/README.md` 保持了原文档的完整性和引用正确性（架构图路径和 CLAUDE.md 引用均已更新为对应的相对路径）。
+- `.claude/agents/README.md` 变为 `.claude/README.md` 后，原文件已不存在于 `agents/` 子目录中。已检查 PR 变更范围内所有文件，无其他文件引用旧路径 `.claude/agents/README.md`，无风险。
