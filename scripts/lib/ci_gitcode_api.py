@@ -18,6 +18,25 @@ MAX_DIFF_CHARS = 30_000
 # 匹配 openEuler Jenkins CI URL，停止于空白或 HTML/Markdown 分隔符
 _JENKINS_URL_RE = re.compile(r'https?://ci\.openeuler\.openatom\.cn/job/[^\s<>"\')\]\|]+')
 
+# 实际构建 job 的架构标识符（openEuler CI 路径中第三段）
+_BUILD_ARCH_RE = re.compile(r'/(?:x86[-_]64|aarch64|arm64|armv7l?|s390x|ppc64(?:le)?|riscv64)/')
+# 编排/触发层 job（不包含实际构建日志）
+_ORCHESTRATOR_RE = re.compile(r'/(?:trigger|gate|pre[-_]check)/')
+
+
+def _url_score(url: str) -> tuple:
+    """对 Jenkins URL 打分，分数越高越接近实际构建 job。
+
+    维度：(是否含架构标识, 路径深度, 是否非编排层)
+    openEuler CI 的 trigger/orchestrator URL 与构建 URL 深度相同，
+    靠架构标识符区分（x86-64、aarch64 等）。
+    """
+    return (
+        bool(_BUILD_ARCH_RE.search(url)),
+        url.count('/job/'),
+        not bool(_ORCHESTRATOR_RE.search(url)),
+    )
+
 
 def parse_repo(repo: str):
     """'https://gitcode.com/owner/name' 或 'owner/name' → (owner, name, 'owner%2Fname')"""
@@ -129,7 +148,12 @@ def _get_pr_comments(repo: str, pr_number: int, token: str) -> List[Dict]:
 
 
 def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
-    """从 PR 评论中提取最新的 Jenkins 构建 URL，优先失败相关的评论。"""
+    """从 PR 评论中提取最适合抓取构建日志的 Jenkins URL。
+
+    openEuler CI 的结果评论里同时包含 trigger URL 和各架构 build URL，
+    三者路径深度相同，靠架构标识符（x86-64、aarch64 等）区分。
+    优先从失败相关评论中取，再用 _url_score 选出实际构建 job URL。
+    """
     failed_urls: List[str] = []
     other_urls: List[str] = []
     for comment in reversed(comments):  # 最新评论优先
@@ -137,12 +161,15 @@ def _find_jenkins_url_in_comments(comments: List[Dict]) -> str:
         matches = _JENKINS_URL_RE.findall(body)
         if not matches:
             continue
-        url = matches[0].rstrip('.,;)>]')
-        if any(k in body.lower() for k in ['fail', 'error', 'failed', '失败']):
-            failed_urls.append(url)
-        else:
-            other_urls.append(url)
-    return (failed_urls or other_urls or [''])[0]
+        is_failure = any(k in body.lower() for k in ['fail', 'error', 'failed', '失败'])
+        for raw in matches:
+            url = raw.rstrip('.,;)>]')
+            (failed_urls if is_failure else other_urls).append(url)
+
+    candidates = failed_urls or other_urls
+    if not candidates:
+        return ''
+    return max(candidates, key=_url_score)
 
 
 def _get_commit_statuses(repo: str, sha: str, token: str) -> List[Dict]:
@@ -197,29 +224,34 @@ def get_latest_failed_run(repo: str, head_sha: str, token: str,
     except Exception:
         pass
 
-    # 2. 查 commit status API（外部 CI 若通过 status API 上报）
+    # 2. 收集 commit status 中的候选 URL
+    candidate_urls: List[str] = []
     statuses = _get_commit_statuses(repo, head_sha, token)
     print(f"[ci-log] commit statuses: {len(statuses)} total", flush=True)
     failed = [s for s in statuses if s.get('state') in ('failure', 'error', 'failed')]
     for s in failed:
         print(f"[ci-log]   failed status: context={s.get('context')} target_url={s.get('target_url','')[:80]}", flush=True)
-    if failed:
-        s = failed[0]
         target = s.get('target_url', '')
         if target:
-            return {'id': s.get('id', 0), 'name': s.get('context', 'external-ci'), 'target_url': target}
-        # status 存在但无 target_url，继续尝试 PR 评论
+            candidate_urls.append(target)
 
-    # 3. 从 PR 评论中提取 Jenkins URL（Jenkins bot 通常以评论形式上报构建链接）
+    # 3. 收集 PR 评论中的候选 URL（始终执行，与 step 2 统一打分）
+    # commit status 上报的往往是 trigger/编排层 URL，评论里才有各架构的实际构建 URL
     if pr_number:
         comments = _get_pr_comments(repo, pr_number, token)
         print(f"[ci-log] PR #{pr_number} comments: {len(comments)} total", flush=True)
         jenkins_url = _find_jenkins_url_in_comments(comments)
-        print(f"[ci-log] Jenkins URL from comments: {jenkins_url or '(not found)'}", flush=True)
+        print(f"[ci-log] best Jenkins URL from comments: {jenkins_url or '(not found)'}", flush=True)
         if jenkins_url:
-            return {'id': 0, 'name': 'jenkins-from-comment', 'target_url': jenkins_url}
+            candidate_urls.append(jenkins_url)
 
-    return None
+    if not candidate_urls:
+        return None
+
+    # 对所有候选 URL 统一打分，优先返回实际构建 job（架构标识 > 路径深度 > 非编排层）
+    best_url = max(candidate_urls, key=_url_score)
+    print(f"[ci-log] selected URL (score={_url_score(best_url)}): {best_url}", flush=True)
+    return {'id': 0, 'name': 'jenkins', 'target_url': best_url}
 
 
 def get_failed_job_logs(repo: str, pipeline_id: int, token: str,
