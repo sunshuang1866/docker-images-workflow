@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-fbthrift v2026.06.08.00 上游将 `ArchiveFetcher` 重构为抽象类（要求子类实现 `clean` 和 `hash` 方法），`_create_fetcher` 在开源环境无法导入 `LFSCachingArchiveFetcher` 后回退到直接实例化抽象类 `ArchiveFetcher`，导致 `TypeError: Can't instantiate abstract class ArchiveFetcher with abstract methods clean, hash`。
+修复 `fix_getdeps.py` 中 `_verify_hash` 方法体的正则替换在 `_verify_hash` 为类中最后一个方法时无法匹配的 bug，导致哈希校验未禁用、预置 libaio tarball 被拒绝、getdeps.py 尝试从 pagure.io 下载 HTML 页面而构建失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 新增第 3 步补丁，在 `manifest.py` 末尾追加 monkey-patch 代码，为 `ArchiveFetcher` 提供 `clean` / `hash` 的具体实现并清除 `__abstractmethods__`，使回退路径可正常实例化。
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 增强 `_verify_hash` 补丁逻辑，增加 `\Z` 和 `\nclass ` 前瞻锚点作为额外匹配条件，并添加基于行的回退逻辑作为二次保障。
 
 ## 修复逻辑
-在 `fix_getdeps.py` 中新增对 `build/fbcode_builder/getdeps/manifest.py` 的补丁：读取文件后在末尾追加三行代码 —— 分别给 `ArchiveFetcher` 打上 `clean`（no-op）和 `hash`（no-op）方法，并清空 `__abstractmethods__`。这样当 `_create_fetcher` 的回退路径执行 `return ArchiveFetcher(...)` 时，Python 不再认为该类是抽象的，实例化成功。此补丁在 `git clone` 源码后、`getdeps.py` 构建前执行，与现有补丁 #1、#2 的执行时机和方式一致。
+CI 分析报告指出的根因：原正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 依赖 `_verify_hash` 之后存在另一个同缩进级别的 `def` 方法作为前瞻锚点。若 `_verify_hash` 是类中最后一个方法，前瞻永远不匹配，导致 `re.sub` 是空操作，哈希校验未被禁用。
+
+修复采用两层策略：
+1. 将前瞻锚点扩展为 `(?=\n    def |\nclass |\Z)`，增加对类定义边界和文件末尾的支持。
+2. 增加回退逻辑：若正则仍未匹配（例如 _verify_hash 后存在非 def/class 的同级代码），使用行级遍历，根据缩进级别精确识别方法体边界并替换为 `pass`。
 
 ## 潜在风险
-无。`clean` 和 `hash` 的 no-op 实现仅影响开源环境下的 `ArchiveFetcher` 回退路径；PR 中已提供预下载的 libaio 归档并跳过了 `_verify_hash` 校验，不依赖 `hash` 返回值。
+- 正则中使用 `\Z` 时，`.*?` 在无 `\n    def` 或 `\nclass` 匹配的情况下会匹配到文件末尾，此时若 `_verify_hash` 与 EOF 之间存在其他顶层代码，会被误替换。但实际 `fetcher.py` 文件中方法之后通常直接跟随下一个方法或类定义，此风险极低。
+- 回退逻辑依赖 indentation 判断方法体边界，若文件存在混合 tab/space 缩进可能判断错误，但 Python 项目通常使用统一空格缩进，此风险很低。
