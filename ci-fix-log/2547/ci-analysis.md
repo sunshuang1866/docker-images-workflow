@@ -3,50 +3,60 @@
 ## 基本信息
 - PR: #2547 — 【自动升级】fbthrift容器镜像升级至2026.06.08.00版本.
 - 失败类型: build-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: libaio 下载源失效
-- 新模式症状关键词: pagure.io, Content-Type: text/html, libaio, getdeps.py, download, tar.gz, 2238 bytes
+- 新模式标题: libaio哈希校验绕过失败
+- 新模式症状关键词: Assessing libaio, exit code: 1, _verify_hash, fix_getdeps, fetcher.py
 
 ## 根因分析
 
 ### 直接错误
 ```
-#11 411.5 Assessing libaio...
-#11 411.5 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
-#11 411.5 .. 2238 of (Unknown)  [Complete in 2.811182 seconds]
-#11 411.5 Content-Type: text/html; charset=utf-8
-#11 ERROR: process "/bin/sh -c git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build && ..." did not complete successfully: exit code: 1
+#11 334.7 Assessing libaio...
+#11 ERROR: process "/bin/sh -c git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build &&     cd /build &&     mkdir -p /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads &&     cp /tmp/libaio.tar.gz /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz &&     python3 /tmp/fix_getdeps.py &&     ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift" did not complete successfully: exit code: 1
 ------
 Dockerfile:18
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:18（`RUN git clone ... && ./build/fbcode_builder/getdeps.py ... build fbthrift`）
-- 失败原因: `getdeps.py` 构建系统在构建 libaio 依赖时，尝试从 `pagure.io` 下载 `libaio-libaio-0.3.113.tar.gz`，但 pagure.io 返回的是 HTML 页面（仅 2238 字节，`Content-Type: text/html`）而非有效的 tar.gz 压缩包。尽管 PR 中 Dockerfile 预先 `cp` 了本地 libaio 文件到 downloads 目录，且 `fix_getdeps.py` 跳过了哈希校验，但 getdeps.py 仍然发起了网络下载，下载到的无效 HTML 文件导致后续解压/编译阶段失败。
+- 失败位置: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/Dockerfile`:18 (RUN 命令中的 getdeps.py 调用)
+- 失败原因: `fix_getdeps.py` 中绕过 libaio 哈希校验的正则表达式未能匹配 `fetcher.py` 中实际的 `_verify_hash` 方法体，导致哈希校验未被跳过，getdeps 在校验预置的 libaio tarball 时校验失败，构建以 exit code 1 终止
 
 ### 与 PR 变更的关联
-**直接由 PR 变更触发**。本次 PR 新增了 `Dockerfile` 和 `fix_getdeps.py` 两个文件：
+本次 PR 新增了 `fix_getdeps.py` (`Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py:12-20`)，设计用于绕过 libaio 哈希校验。但其中的正则替换存在缺陷：
 
-1. **Dockerfile 的设计意图**：通过 `COPY libaio-libaio-0.3.113.tar.gz /tmp/libaio.tar.gz` 将本地 tarball 带入构建上下文，再 `cp` 到 getdeps 的 downloads 目录，期望 getdeps.py 识别已有文件并跳过下载。
+```python
+re.sub(
+    r'def _verify_hash\(self\):.*?(?=\n    def )',
+    'def _verify_hash(self):\n        pass',
+    c2,
+    flags=re.DOTALL
+)
+```
 
-2. **fix_getdeps.py 的补救措施不足**：该脚本只做了两件事 — (a) 添加 "openeuler" 到发行版识别列表，(b) 将 `_verify_hash` 方法替换为空操作以跳过哈希校验。但这并未阻止 getdeps.py 发起网络下载，也未能处理下载返回无效内容后的解压失败。
+该正则依赖以下假设：
+1. `_verify_hash` 之后紧跟的下一个方法定义恰好以 `\n    def ` (换行+4空格+def) 开头——若 `fetcher.py` 实际缩进不是 4 空格（如 8 空格、tab），则不匹配。
+2. `_verify_hash` 不是类中的最后一个方法（存在后续 `def` 作为前瞻锚点）——若该方法是末尾方法，则无后续 `def`，正则回退整个文件仍不匹配。
+3. 方法签名恰好为 `def _verify_hash(self):`，不含类型注解或参数差异。
 
-3. **根本矛盾**：pagure.io 上 libaio 的归档 tarball 已不可正常下载（返回 HTML），而 `fix_getdeps.py` 的补丁策略（仅跳过哈希校验）不足以绕过这一问题——因为问题出在"下载内容无效导致解压失败"，而非"哈希校验不通过"。
+以上任一条件不满足，`re.sub` 返回原字符串（无修改），文件被原样写回，哈希校验未被绕过。getdeps 在 `Assessing libaio...` 阶段尝试校验预置的 `libaio-libaio-0.3.113.tar.gz` 的哈希值时失败，导致整个 Docker 构建终止。
+
+日志中仅在 `Assessing libaio...` 后立即报 `exit code: 1`，无具体错误详情（Docker 构建输出截断），但根据 PR 中 `fix_getdeps.py` 的意图（绕过哈希校验）和失败时机（恰好在 libaio 评估阶段），可推断哈希校验失败为直接原因。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-让 getdeps.py 完全跳过 libaio 的下载环节，直接使用预置的本地 tarball。需要在 `fix_getdeps.py` 中额外 patch getdeps 的 fetcher 逻辑，使其在检测到 downloads 目录下已存在对应文件时跳过下载步骤（或直接将 libaio 的下载 URL 替换为本地 file:// 路径）。当前仅跳过哈希校验不足以解决问题。
+### 方向 1（置信度: 中）
+修改 `fix_getdeps.py` 中绕过哈希校验的方式，不使用依赖缩进格式和前瞻锚点的正则，改用更稳健的方法替换 `_verify_hash` 方法体，例如：
+- 匹配 `def _verify_hash` 起至下一个同缩进级别的 `def ` 或类定义结束为止的方法体
+- 或者使用 `sed` 直接在 RUN 命令中处理，如 `sed -i '/def _verify_hash/,/^    def /{s/^/pass  # /}'` 注释掉方法体
 
-### 方向 2（置信度: 中）
-检查 pagure.io 上 libaio 归档 tarball 的实际可用 URL 是否已变更，更新 getdeps 中 hardcoded 的下载 URL。但从日志中 HTML 响应（含 `techaro.lol-anubis-auth` cookie）来看，pagure.io 可能已经停止提供公开的归档下载或要求认证，换 URL 可能同样无效。
-
-### 方向 3（置信度: 低）
-在 getdeps 构建流程中完全移除 libaio 依赖（如果 fbthrift 2026.06.08.00 版本实际不需要 libaio），或在 Dockerfile 中直接通过系统包管理器安装 libaio（若 openEuler 仓库中有 `libaio-devel` 包）。
+### 方向 2（置信度: 低）
+如果方向 1 修复后仍失败，可能存在其他问题：
+- libaio 预置 tarball 的文件名不符合 getdeps 的预期命名规则（当前为 `libaio-libaio-libaio-0.3.113.tar.gz`，三层 `libaio` 前缀疑为异常）
+- 上游 `https://pagure.io/libaio/libaio.git` 不可达（网络问题）
+- getdeps 的 openEuler 发行版适配不完整（除识别外，包名映射等环节也需要额外处理）
 
 ## 需要进一步确认的点
-1. **pagure.io/libaio 归档状态**：需要确认 `https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz` 是否已永久失效，以及是否有替代下载源。
-2. **getdeps.py 的下载跳过逻辑**：需要查看 fbthrift 源码中 `build/fbcode_builder/getdeps/fetcher.py` 的完整逻辑，确认为什么预置到 downloads 目录的文件未被识别为"已下载"。
-3. **libaio 是否为必需依赖**：确认 fbthrift v2026.06.08.00 是否绝对依赖 libaio，以及 openEuler 24.03-lts-sp3 仓库中是否有可用的 `libaio-devel` 系统包可替代源码编译。
-4. **`fix_getdeps.py` 中 regex 替换的健壮性**：当前使用正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 来匹配并替换 `_verify_hash` 方法，若上游 getdeps 代码格式有变（如缩进不一致），该正则可能匹配失败，导致 patch 静默不生效。
+1. **缺失的具体错误信息**：日志在 `Assessing libaio...` 后无任何 getdeps 的报错内容（如 hash mismatch、404、连接超时等），需要获取未被截断的完整 Docker 构建日志以确认确切的错误类型。
+2. **`fetcher.py` 中 `_verify_hash` 的实际方法体结构**：需查看 `build/fbcode_builder/getdeps/fetcher.py` 中 `_verify_hash` 方法的实际缩进格式、行数和后续方法定义情况，以确认正则替换确实失败。
+3. **libaio 的 getdeps manifest 定义**：需确认 libaio 在 fbthrift 构建清单中的下载 URL、预期哈希值和预期 tarball 文件名，以排除文件名不匹配或哈希值已变更的可能性。
