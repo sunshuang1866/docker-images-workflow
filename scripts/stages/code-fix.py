@@ -239,15 +239,14 @@ def main():
     git(['commit', '-m', commit_msg], cwd=SOURCE_REPO_DIR)
     log_stage('code-fix', '✅ committed')
 
-    # 写入修复摘要到 ci-data 分支，并更新知识库
+    # 写入修复摘要到 ci-fix-log 分支（知识库更新延迟到 fix PR 通过 CI 后进行）
     try:
         ci_data.write_file(
             ci_data.fix_summary_path(env['pr_number']),
             summary,
             f"code-fix: {env['source_repo']} PR #{env['pr_number']}",
         )
-        ci_data.append_pattern(env['pr_number'], env['source_repo'], analysis, summary)
-        log_stage('code-fix', '✅ knowledge base updated')
+        log_stage('code-fix', '✅ fix summary written to ci-fix-log branch')
     except Exception as e:
         log_stage('code-fix', f'⚠️ ci-data write failed (non-fatal): {e}')
 

@@ -210,6 +210,18 @@ def process_all():
                             ci_data.mark_fix_notified(pr_number)
                         except Exception as e:
                             log(f"    ⚠️  Notification failed: {e}")
+                        else:
+                            # 通知成功后将经过 CI 验证的修复模式写入知识库
+                            try:
+                                analysis = ci_data.read_file(ci_data.analysis_path(pr_number))
+                                fix_summary = ci_data.read_file(ci_data.fix_summary_path(pr_number))
+                                if analysis and fix_summary:
+                                    ci_data.append_pattern(pr_number, repo, analysis, fix_summary)
+                                    log(f"    ✅ knowledge base updated with patterns from PR #{pr_number}")
+                                else:
+                                    log(f"    ⚠️  knowledge base skipped: ci-fix-log data not found for PR #{pr_number}")
+                            except Exception as e:
+                                log(f"    ⚠️  knowledge base update failed (non-fatal): {e}")
                     else:
                         log(f"    → Fix PR #{fix_pr['number']} CI passed, already notified, skipping")
 
