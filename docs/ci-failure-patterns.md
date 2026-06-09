@@ -513,3 +513,17 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — libyuv 1948 在 aarch64 平台构建时，`RGBToUVMatrixRow_NEON` 函数实现缺失导致
+
+---
+
+## 模式25：上游下载源失效
+
+**症状关键词**: `Content-Type: text/html`, `pagure.io`, `libaio`, `Download with`, `tar.gz`
+
+**根因**: - 失败位置: Dockerfile 第 18–23 行（RUN getdeps 命令链），具体在 getdeps 的 libaio 下载/提取阶段
+- 失败原因: pagure.io 上 libaio 的归档下载 URL 返回了 HTML 页面（可能为 404 错误页、重定向页或登录页面），getdeps 将其当作 tar.gz 归档处理导致提取或后续校验失败。同时 PR 中预置的本地 libaio 压缩包未被 getdeps 有效利用——getdeps 仍然优先通过网络下载，下载到的 HTML 内容覆盖或无法替代预置的合法压缩包，最终导致构建中止。
+
+**修复方法**: pagure.io 上 libaio 归档下载源失效（返回 HTML 页面而非 tar.gz），导致 getdeps 构建 libaio 依赖时失败；同时修复 `_verify_hash` 正则表达式在边界情况下的匹配缺陷。
+
+**历史案例**:
+- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — pagure.io 上 libaio 归档下载源失效（返回 HTML 页面而非 tar.gz），导致 getdeps 构
