@@ -1,13 +1,23 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中用于跳过 `_verify_hash` 方法的正则表达式无法匹配上游 `fetcher.py` 中带返回类型注解 `-> None:` 的方法签名，导致 `_verify_hash` 补丁静默失败，本地预置的有效 tarball 被 SHA-256 校验失败后删除，进而触发从已失效的 pagure.io 下载 HTML 页面导致构建失败。
+`fix_getdeps.py` 中用于跳过 libaio 哈希校验的正则表达式不够稳健，未能匹配 `fetcher.py` 中实际的 `_verify_hash` 方法体，导致 libaio 哈希校验未被绕过，构建失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 将 `_verify_hash` 方法的匹配正则从 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 改为 `r'def _verify_hash\(self\)[^:]*:.*?(?=\n    def )'`，使其兼容带 `-> None:` 返回类型注解的方法签名。
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 修改第 17 行的正则表达式，提升匹配鲁棒性
 
 ## 修复逻辑
-上游 fbthrift v2026.06.08.00 的 `fetcher.py` 中 `_verify_hash` 方法签名为 `def _verify_hash(self) -> None:`（含类型注解），而原正则 `def _verify_hash\(self\):` 期望括号后紧跟冒号，导致匹配失败。新增的 `[^:]*` 允许在 `(self)` 和 `:` 之间匹配任意非冒号字符（即 ` -> None` 等可选类型注解），使得补丁能正确将整个方法体替换为 `pass`。当 `_verify_hash` 变为空操作后，`ArchiveFetcher.update()` 在发现 `downloads` 目录下已存在预置文件时不会因哈希校验失败删除该文件，从而跳过网络下载，直接使用本地有效 tarball 完成解压和编译。
+**原正则** `r'def _verify_hash\(self\):.*?(?=\n    def )'` 存在三个缺陷：
+1. 硬编码方法签名为 `def _verify_hash(self):`，若上游代码含类型注解则无法匹配
+2. 硬编码 4 空格缩进作为下一个方法的前瞻锚点 (`\n    def `)，不同缩进风格时失败
+3. 若 `_verify_hash` 是类中最后一个方法（无后续 `def`），前瞻锚点永远失败，`.*?` 回退为空匹配，整体替换不生效
+
+**新正则** `r'def _verify_hash\([^)]*\):.*?(?=\n(?: {4,}|\t)(?:def |@)|\n\S|\Z)'` 解决了上述问题：
+1. `def _verify_hash\([^)]*\):` — 匹配任意参数签名（含类型注解）
+2. `(?=\n(?: {4,}|\t)(?:def |@)` — 前瞻锚点兼容不同缩进风格（4+ 空格或 tab）的下一个方法/装饰器
+3. `|\n\S` — 新增非缩进行（类结束）作为边界
+4. `|\Z` — 新增文件末尾作为回退边界，处理 `_verify_hash` 是最后一个方法的情况
 
 ## 潜在风险
-无。修改仅放宽了正则匹配范围，使其同时兼容有/无类型注解的方法签名，不影响原有对 `getdeps_platform.py` 的发行版补丁逻辑。
+- 若 `_verify_hash` 方法体内包含与前瞻模式匹配的字符串字面量（如代码注释中含 `\n    def `），可能导致过早截断。但根据 getdeps 代码结构，该风险极低。
+- 此修复不改变 Dockerfile 及其他文件，不影响 libaio tarball 的预置逻辑。
