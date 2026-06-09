@@ -479,6 +479,7 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 - PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中跳过 `_verify_hash` 方法替换的正则表达式边界缺陷：当 `_ve
 - PR #2558: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 方法匹配逻辑的 bug：原正则 `r'def 
 - PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 方法替换的正则表达式边界匹配缺陷：当 `_ve
+- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — `fix_getdeps.py` 中用于跳过 libaio 哈希校验的正则表达式存在边界缺陷：当 `_verify_ha
 
 ---
 
