@@ -2,43 +2,42 @@
 
 ## 基本信息
 - PR: #2512 — Add 3FS Image
-- 失败类型: build-error
-- 置信度: 中
-- 知识库匹配: 模式18 + 模式20
-- 新模式: 否
+- 失败类型: lint-error
+- 置信度: 高
+- 知识库匹配: 模式11
+- 新模式标题: (不适用 — 已匹配已有模式)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
-CI 日志中**缺失 x86-64 和 aarch64 下游构建 job 的实际构建日志**。提供的日志仅包含触发 job（trigger），显示：
 ```
-multiarch » openeuler » x86-64 » openeuler-docker-images #1357 completed. Result was FAILURE
-multiarch » openeuler » aarch64 » openeuler-docker-images #1332 completed. Result was FAILURE
+2026-06-04 17:22:14,799-.../eulerpublisher/update/container/app/update.py[line:273]-ERROR:
+There are some specification errors for releasing on appstore in this PR, please check as above.
++--------------------------+------------------------------------------------------------+--------------+
+|       Check Items        |                        Description                         | Check Result |
++--------------------------+------------------------------------------------------------+--------------+
+| .claude/agents/README.md | [Path Error] The expected path should be .claude/README.md |   FAILURE    |
++--------------------------+------------------------------------------------------------+--------------+
 ```
-触发 job 自身以 SUCCESS 结束，但下游两个架构的 Docker 构建 job 均失败。**具体构建报错信息不可见**。
 
 ### 根因定位
-- 失败位置: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile:28-30`（推断）
-- 失败原因: `git clone --depth 1` 浅克隆后无法 checkout 指定 commit hash `22fca04`，且错误被 `2>/dev/null || true` 静默掩盖，导致构建使用了错误的源码版本（默认分支 HEAD 而非指定 commit），触发下游编译/链接失败
+- 失败位置: `.claude/agents/README.md`（CI 规格校验阶段，非代码编译阶段）
+- 失败原因: 本次 PR 将工具套件目录从 `.agents/` 整体重命名为 `.claude/`，其中 `README.md` 文件位于 `.claude/agents/README.md`，但 CI 的 appstore 发布路径校验规则期望 README 文件位于 `.claude/README.md`（即 `.claude/` 目录的根层级）。
 
 ### 与 PR 变更的关联
-本次 PR 新增了 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`，其中第 28-30 行存在两处问题：
-
-1. **浅克隆与 commit hash checkout 冲突**：`git clone --recurse-submodules --depth 1` 只拉取最新一次提交，随后 `git -C /tmp/3fs checkout ${VERSION}`（VERSION=22fca04，为一个 commit hash）尝试切换到一个不在浅克隆对象范围内的历史提交，checkout 必然失败。
-
-2. **错误被静默掩盖**：`git -C /tmp/3fs checkout ${VERSION} 2>/dev/null || true` 中的 `|| true` 使 checkout 失败后构建继续，但实际代码并未切换到目标版本 22fca04，导致后续 `cmake` 构建阶段使用了错误的上游代码，最终在两个架构均编译失败。
-
-历史知识库（模式18）已记录此 PR 的相同问题，确认为 `--depth 1` + commit hash checkout 不兼容导致。
+PR 的变更有两个维度：
+1. **新增 3FS 镜像**（`Storage/3fs/` 下新增 Dockerfile、README、meta.yml、image-info.yml 等）— 这部分与失败无关。
+2. **工具套件目录迁移**：将 `.agents/` 整体重命名为 `.claude/`，其中 `README.md` 从 `.agents/agents/README.md` 迁移到 `.claude/agents/README.md` — **这是触发 CI 失败的直接原因**。CI 的 appstore 路径校验器在扫描变更文件时，检测到 `.claude/agents/README.md` 的路径不符合预期的 `.claude/README.md` 规范，判定为路径错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 `git clone --depth 1` 改为完整克隆（去掉 `--depth 1`），确保 commit hash `22fca04` 在本地仓库中可访问，使 `git checkout ${VERSION}` 能正确切换。同时去掉 `2>/dev/null || true` 的错误抑制，让 checkout 失败时构建立即终止，避免静默使用错误代码。
+将 `README.md` 文件从 `.claude/agents/README.md` 移动到 `.claude/README.md`（即 `.claude/` 目录的直接子级），以符合 CI appstore 发布路径校验规则对 `.claude/` 目录结构的预期。同时需要检查并更新 `.claude/agents/README.md` 中引用该路径的任何文档内相对链接。
 
 ### 方向 2（置信度: 中）
-保留 `--depth 1` 浅克隆，但在 checkout 前先执行 `git -C /tmp/3fs fetch --depth 1 origin ${VERSION}` 将目标 commit 拉取到本地，再执行 `git checkout ${VERSION}`，并去掉 `|| true` 错误抑制。
+如果 `.claude/agents/` 目录下的 README.md 有独立存在的必要（如仅描述 agents 子目录内容），则可保留该文件但同时需要在 `.claude/` 根层级补充一个 `.claude/README.md` 以满足 CI 校验要求。但从日志错误信息 "The expected path should be .claude/README.md" 的措辞来看，CI 期望的是 `.claude/README.md` 这个特定路径的文件存在，而非 `.claude/agents/README.md`。
 
 ## 需要进一步确认的点
-1. x86-64 和 aarch64 下游构建 job 的**完整构建日志**（含 Docker build 输出），以确认具体编译错误信息是否与 git checkout 失败导致的源码版本不一致相符
-2. commit `22fca04` 相对于 deepseek-ai/3fs 默认分支 HEAD 的差异范围，以评估源码版本不一致可能引发的构建失败类型
-3. `--shallow-submodules` 在 submodule 上下文中的行为是否也影响了子模块的正确检出
+- CI appstore 校验器（`eulerpublisher/update/container/app/update.py`）的路径规则是否硬编码了 `.claude/README.md` 为必须路径，还是基于某种文件目录结构约定（如每个一级子目录必须包含顶层的 README.md 文件）。
+- 如果仅补充创建 `.claude/README.md`，原来的 `.claude/agents/README.md` 是否还会被 CI 检查器接受（即是否允许两个位置同时存在 README 文件）。
