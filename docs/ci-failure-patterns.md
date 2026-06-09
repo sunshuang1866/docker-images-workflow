@@ -278,6 +278,7 @@ Finished: FAILURE
 - PR #2269: `Database/milvus/doc/image-info.yml` — 包含不稳定 `3.0-beta` 版本条目
 - PR #2512: `.claude/agents/README.md` — CI appstore 路径校验失败：`.claude/agents/README.md` 不在期望路径 `.claud
 - PR #2512: `.claude/agents/README.md` — CI appstore 发布规范预检失败：`.claude/agents/README.md` 路径不符合预期，要求 R
+- PR #2512: `.claude/README.md` — CI appstore 发布规范预检失败：`.claude/agents/README.md` 路径不符合规范，CI 期
 
 ---
 
