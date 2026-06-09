@@ -5,6 +5,7 @@ Tests for scripts/lib/ci_gitcode_api.py
 - _url_score: Jenkins URL 打分逻辑
 - _find_jenkins_url_in_comments: 从 PR 评论中选取最优构建 URL
 - get_latest_failed_run: 候选 URL 收集与择优（mock HTTP）
+- _fetch_external_ci_log: 日志提取（尾部优先，不截断末尾关键段）
 """
 
 import pytest
@@ -14,6 +15,7 @@ from scripts.lib.ci_gitcode_api import (
     _url_score,
     _find_jenkins_url_in_comments,
     get_latest_failed_run,
+    _fetch_external_ci_log,
 )
 
 # ── 共享测试 URL 常量 ──────────────────────────────────────────────────────────
@@ -170,6 +172,78 @@ class TestFindJenkinsUrlInComments:
         )
         result = _find_jenkins_url_in_comments([_comment(body)])
         assert result == AARCH64
+
+
+# ── _fetch_external_ci_log ────────────────────────────────────────────────────
+
+def _mock_http_200(text: str) -> MagicMock:
+    m = MagicMock()
+    m.status_code = 200
+    m.text = text
+    return m
+
+
+class TestFetchExternalCiLog:
+    def test_tail_wins_no_early_noise_cuts_critical_end(self):
+        # 模拟 PR #2547 场景：日志很长，早期有大量含 'error'/'fail' 的噪声行，
+        # 真正的失败行（anubis/libaio）在末尾。
+        # 旧逻辑：error_lines[:150] 消耗过多预算，末尾关键行被截断。
+        # 新逻辑：只取尾部，关键行必须出现。
+        early_noise = ['CMake Error in test: irrelevant\n' * 1] * 200  # 200 行早期噪声
+        critical_end = [
+            'Assessing libaio...',
+            'Download with https://pagure.io/libaio/...',
+            'Content-Type: text/html; charset=utf-8',
+            'Set-Cookie: techaro.lol-anubis-auth=...',
+            '#11 ERROR: exit code: 1',
+            'Finished: FAILURE',
+        ]
+        full_log = '\n'.join(early_noise + critical_end)
+        mock_resp = _mock_http_200(full_log)
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=mock_resp):
+            result = _fetch_external_ci_log('https://ci.example.com/job/test/1/console')
+        assert 'libaio' in result
+        assert 'anubis' in result.lower()
+        assert 'Finished: FAILURE' in result
+
+    def test_short_log_returned_in_full(self):
+        log_text = 'step 1\nstep 2\nFailed: build error\n'
+        mock_resp = _mock_http_200(log_text)
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=mock_resp):
+            result = _fetch_external_ci_log('https://ci.example.com/job/test/2/console')
+        assert 'Failed: build error' in result
+
+    def test_very_long_tail_truncated_from_end(self):
+        # 500 行 × 200 字节 = 100,000 字符 > MAX_LOG_CHARS(50,000)
+        # 超限时应保留末尾（最新内容），最后一行不能丢失
+        long_line = 'x' * 190
+        lines = [long_line] * 500
+        lines[-1] = 'FINAL_LINE_MUST_SURVIVE'
+        mock_resp = _mock_http_200('\n'.join(lines))
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=mock_resp):
+            result = _fetch_external_ci_log('https://ci.example.com/job/test/3/console')
+        assert 'FINAL_LINE_MUST_SURVIVE' in result
+        assert len(result) <= 50_000
+
+    def test_http_error_returns_empty(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=mock_resp):
+            result = _fetch_external_ci_log('https://ci.example.com/job/test/4/console')
+        assert result == ''
+
+    def test_non_console_url_appends_consoletext(self):
+        # URL 不以 /console 结尾时应追加 /consoleText
+        captured = []
+        mock_resp = _mock_http_200('ok')
+
+        def side_effect(url, **kwargs):
+            captured.append(url)
+            return mock_resp
+
+        with patch('scripts.lib.ci_gitcode_api.requests.get', side_effect=side_effect):
+            _fetch_external_ci_log('https://ci.example.com/job/test/5')
+        assert any('consoleText' in u for u in captured)
 
 
 # ── get_latest_failed_run ─────────────────────────────────────────────────────

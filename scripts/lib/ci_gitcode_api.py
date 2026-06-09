@@ -212,12 +212,15 @@ def _fetch_external_ci_log(target_url: str) -> str:
             print(f"[ci-log] GET {url} → HTTP {resp.status_code}", flush=True)
             if resp.status_code == 200:
                 lines = resp.text.split('\n')
-                error_lines = [l for l in lines if any(
-                    k in l.lower() for k in ['error', 'fail', 'exception', 'traceback', 'fatal']
-                )]
-                tail = lines[-300:]
-                combined = error_lines[:150] + (['---'] if error_lines else []) + tail
-                return '\n'.join(combined)[:MAX_LOG_CHARS]
+                # 尾部优先：实际失败几乎总在日志末尾。
+                # 不再从全量日志中提取 error_lines，避免早期 CMake 测试失败、
+                # SEND_ERROR 等噪声行挤占预算、导致末尾关键段（如 Anubis 拦截）被截断。
+                tail = lines[-500:]
+                result = '\n'.join(tail)
+                if len(result) > MAX_LOG_CHARS:
+                    # 尾部本身超限时保留末尾（最新内容），而非截断头部
+                    result = result[-MAX_LOG_CHARS:]
+                return result
         except Exception as e:
             print(f"[ci-log] GET {url} → exception: {e}", flush=True)
             continue
@@ -310,12 +313,10 @@ def get_failed_job_logs(repo: str, pipeline_id: int, token: str,
             if log_resp.status_code == 200:
                 raw = log_resp.text
                 lines = raw.split('\n')
-                error_lines = [l for l in lines if any(
-                    k in l.lower() for k in ['error', 'fail', 'exception', 'traceback', 'fatal']
-                )]
-                tail = lines[-300:]
-                combined = error_lines[:150] + (['---'] if error_lines else []) + tail
-                content = '\n'.join(combined)[:20000]
+                tail = lines[-500:]
+                content = '\n'.join(tail)
+                if len(content) > 20000:
+                    content = content[-20000:]
                 parts.append(f"### Job: {job_name}\n```\n{content}\n```")
             else:
                 parts.append(f"### Job: {job_name}\n[HTTP {log_resp.status_code}]")
