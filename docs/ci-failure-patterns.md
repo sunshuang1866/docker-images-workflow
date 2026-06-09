@@ -457,6 +457,7 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — Dockerfile 第 19 行 `ENV LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRAR
+- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `ENV LD_LIBRARY_PATH` 自引用了未定义变量 `$LD_LIBRARY_PA
 
 ---
 
