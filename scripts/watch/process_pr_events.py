@@ -30,7 +30,7 @@ from scripts.lib.ci_api import detect_platform, normalize_repo, get_api
 from scripts.lib import ci_data
 
 WATCHLIST_FILE = os.path.join(PROJECT_ROOT, 'config', 'watchlist.json')
-MAX_RETRIES = 3
+MAX_RETRIES = 6
 
 
 _PRERELEASE_RE = re.compile(
