@@ -405,8 +405,6 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2516: `AI/vllm-cpu/0.22.1` — 4 个新增文件均缺少 Copyright + SPDX 头
-- PR #2529: `Database/milvus/3.0-beta/24.03-lts-sp3/Dockerfile` — 为 PR #2529 涉及的 4 个文件补充缺失的 Copyright 和 SPDX-License-Identifie
-- PR #2534: `Database/etcd/3.8.0-alpha.0/24.03-lts-sp3/Dockerfile` — 为4个缺失Copyright+SPDX声明的文件添加版权头，并修复Dockerfile中`make -j$nproc`的
 
 ---
 
@@ -420,7 +418,6 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2512: `Storage/3fs/22fca04` — `--depth 1` + commit hash checkout 不兼容
-- PR #2526: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — 修复 3FS Dockerfile 中 `git clone --recurse-submodules --shallo
 - PR #2512: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — `git clone --depth 1` 浅克隆后无法 checkout 指定 commit hash，导致 3FS 
 - PR #2512: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile:22-24` — `git clone --depth 1` 浅克隆后无法 checkout 指定 commit hash `22fca0
 
@@ -434,25 +431,10 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 - PR #2489: `AI/diskann/0.52.0` — VERSION 变量引用方式有误（diff 推断）
 - PR #2308: `AI/diskann/README.md` — 纯文档修正
 - PR #1768: `Others/spring-cloud/5.0.0` — Dockerfile 重写，具体错误信息缺失
-- PR #2537: `Database/milvus/3.0-beta/24.03-lts-sp3/Dockerfile` — 将4个文件的Copyright声明和SPDX-License-Identifier修改为openEuler社区规范格式（
 
 ---
 
-## 模式20：x86-64构建日志缺失
-
-**症状关键词**: missing build logs, downstream job, trigger-only, x86-64 only failure
-
-**根因**: - 失败位置: **无法定位** — 下游 x86-64 构建 job（#1384）的日志未提供
-- 失败原因: **证据不足，无法确定根因**
-
-**修复方法**: 在 vllm-cpu 0.22.1 Dockerfile 中缺失 AVX512BF16 fallback patch，导致无 AVX512BF16 指令集的 x86_64 平台编译 `mla_decode.cpp` 时 `KernelVecType<c10::BFloat16>` 解析为 `void` 从而编译失败。
-
-**历史案例**:
-- PR #2527: `AI/vllm-cpu/0.22.1/24.03-lts-sp3/Dockerfile` — 在 vllm-cpu 0.22.1 Dockerfile 中缺失 AVX512BF16 fallback patch，导
-
----
-
-## 模式21：ENV自引用未定义变量
+## 模式20：ENV自引用未定义变量
 
 **症状关键词**: UndefinedVar, LD_LIBRARY_PATH, ENV
 
@@ -467,42 +449,7 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 ---
 
-## 模式22：日志截断致证据不足
-
-**症状关键词**: 日志截断, 未见致命报错, fbthrift, getdeps, boost SEND_ERROR
-
-**根因**: - 失败位置: 无法定位 — 日志截断前未出现致命错误
-- 失败原因: **证据不足，无法确定根因**。日志仅覆盖了 getdeps 依赖构建阶段（zstd → boost → glog → gflags → googletest），尚未进入 fbthrift 本身的编译。实际错误极可能发生在日志截断之后的阶段。
-
-**修复方法**: 修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况，导致 libaio tarball 哈希校验静默未被跳过。
-
-**历史案例**:
-- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况
-- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中跳过 `_verify_hash` 方法替换的正则表达式边界缺陷：当 `_ve
-- PR #2558: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 方法匹配逻辑的 bug：原正则 `r'def 
-- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 方法替换的正则表达式边界匹配缺陷：当 `_ve
-- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — `fix_getdeps.py` 中用于跳过 libaio 哈希校验的正则表达式存在边界缺陷：当 `_verify_ha
-- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — `fix_getdeps.py` 中跳过 `_verify_hash` 方法的正则表达式存在边界缺陷，当 `_verif
-
----
-
-## 模式23：RPM包名不存在
-
-**症状关键词**: `Unable to find a match`, `No match for argument`, `boost-foundation`, `yum`, `开源组件RPM包名映射错误`
-
-**根因**: - **失败位置**: 新增的 3FS Dockerfile（`Storage/3fs/<version>/<oe-version>/Dockerfile`）第 41 行
-- **失败原因**: Dockerfile 的 `yum install` 命令中使用了 **openEuler RPM 仓库中不存在的包名**：
-  - `boost-foundation` — openEuler 中无此 RPM 包名（可能是从其他发行版如 Ubuntu 的 `libboost-foundation-dev` 错误映射而来）
-  - `boost-filesystem`、`boost-system`、`
-
-**修复方法**: Dockerfile 中使用了 openEuler RPM 仓库中不存在的包名 `boost-foundation`，导致 `yum install` 失败；同时缺少 `libevent-devel` 致 CMake 配置阶段找不到 libevent。
-
-**历史案例**:
-- PR #2557: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — Dockerfile 中使用了 openEuler RPM 仓库中不存在的包名 `boost-foundation`，导
-
----
-
-## 模式24：NEON符号缺失链失败
+## 模式21：NEON符号缺失链失败
 
 **症状关键词**: undefined reference, RGBToUVMatrixRow_NEON, collect2: error, ld returned 1 exit status, aarch64
 
