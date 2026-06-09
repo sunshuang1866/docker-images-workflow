@@ -4,50 +4,66 @@
 - PR: #2547 — 【自动升级】fbthrift容器镜像升级至2026.06.08.00版本.
 - 失败类型: build-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: 上游构建系统重构
-- 新模式症状关键词: `ModuleNotFoundError: No module named 'getdeps.facebook'`, `Can't instantiate abstract class ArchiveFetcher with abstract methods clean, hash`, `manifest.py`, `_create_fetcher`
+- 知识库匹配: 新模式 (无完全匹配的历史模式)
+- 新模式标题: 上游下载源返回HTML
+- 新模式症状关键词: Content-Type: text/html, libaio, pagure.io, tar.gz response, Set-Cookie, anubis-auth
 
 ## 根因分析
 
 ### 直接错误
+
 ```
-#11 7.225 Traceback (most recent call last):
-#11 7.225   File "/build/build/fbcode_builder/getdeps/manifest.py", line 634, in _create_fetcher
-#11 7.225     from .facebook.lfs import LFSCachingArchiveFetcher
-#11 7.225 ModuleNotFoundError: No module named 'getdeps.facebook'
-#11 7.225
-#11 7.225 During handling of the above exception, another exception occurred:
-#11 7.225
-...
-#11 7.229   File "/build/build/fbcode_builder/getdeps/manifest.py", line 647, in _create_fetcher
-#11 7.229     return ArchiveFetcher(
-#11 7.229            ^^^^^^^^^^^^^^^
-#11 7.229 TypeError: Can't instantiate abstract class ArchiveFetcher with abstract methods clean, hash
+#11 340.2 Assessing libaio...
+#11 340.2 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
+#11 340.2 .. 2238 of (Unknown)  [Complete in 1.691271 seconds]
+#11 340.2 Date: Tue, 09 Jun 2026 15:05:49 GMT
+#11 340.2 Server: Apache/2.4.37 (Red Hat Enterprise Linux) OpenSSL/1.1.1k mod_wsgi/4.6.4 Python/3.6
+#11 340.2 X-Xss-Protection: 1; mode=block
+#11 340.2 X-Content-Type-Options: nosniff
+#11 340.2 Referrer-Policy: same-origin
+#11 340.2 X-Frame-Options: ALLOW-FROM https://pagure.io/
+#11 340.2 Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+#11 340.2 Content-Type: text/html; charset=utf-8
+#11 340.2 Set-Cookie: techaro.lol-anubis-auth=; Path=/; Expires=Tue, 09 Jun 2026 15:04:49 GMT; Max-Age=0; Secure; SameSite=None
+#11 340.2 Connection: close
+#11 340.2 Transfer-Encoding: chunked
+```
+
+随后构建立即退出:
+```
+#11 ERROR: process "/bin/sh -c git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build && ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `build/fbcode_builder/getdeps/manifest.py:647`
-- 失败原因: fbthrift `v2026.06.08.00` 上游将 `ArchiveFetcher` 重构为抽象类（要求子类实现 `clean` 和 `hash` 方法），同时内部构建依赖 Facebook 专用模块 `getdeps.facebook.lfs.LFSCachingArchiveFetcher`。在开源环境下该模块加载失败后，回退逻辑直接实例化抽象类 `ArchiveFetcher`，导致 TypeError。
+
+- 失败位置: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/Dockerfile:18-23` (RUN 步骤中的 getdeps.py 构建阶段)
+- 失败原因: **pagure.io 对 libaio 归档下载请求返回了 HTML 页面（`Content-Type: text/html`）而非 tar.gz 压缩包**，大小仅 2238 字节，且响应中包含 `Set-Cookie: techaro.lol-anubis-auth=` 等鉴权/WAF 相关头，表明 pagure.io 对该 URL 实施了访问拦截或要求认证。getdeps.py 将此 HTML 文件当作 libaio 归档尝试解压，导致构建退出码为 1。
 
 ### 与 PR 变更的关联
-PR 新增的 `fix_getdeps.py` 仅处理两项兼容性适配：
-1. 添加 "openeuler" 到发行版识别列表
-2. 跳过 libaio 哈希校验
 
-但未处理 fbthrift `v2026.06.08.00` 版本上游构建系统的重大变更——`ArchiveFetcher` 从具体类变为抽象类，且缺少开源环境下的可用具体实现。`fix_getdeps.py` 中 `fetcher.py` 的 `_verify_hash` 方法替换与 `manifest.py` 的 `ArchiveFetcher` 抽象化完全无关（两者在不同文件中），因此该补丁无法修复此问题。
+**PR 变更直接触发了此失败**，但非代码逻辑错误所致。PR 新增的 Dockerfile 设计思路正确——通过预先 `COPY libaio-libaio-0.3.113.tar.gz /tmp/libaio.tar.gz` 并 `cp` 到 getdeps 的 downloads 目录来绕过上游下载。同时 `fix_getdeps.py` 试图通过 patch `_verify_hash` 方法跳过哈希校验，使预置的本地 tarball 能被接受。
 
-**结论：此失败由 PR 引入的新版本直接触发**。旧版本（如 `v2026.05.18.00`）的 `ArchiveFetcher` 为非抽象类，不依赖 Facebook 内部模块即可正常工作；新版本构建系统重构后，`fix_getdeps.py` 的适配策略已不足。
+但实际执行中，getdeps.py **仍然访问了 pagure.io 并下载了 HTML 页面**，覆盖或取代了预置的本地 tarball。两个可能原因叠加:
+
+1. **`fix_getdeps.py` 中 `_verify_hash` 的 regex patch 未成功匹配**：正则表达式 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 依赖 `_verify_hash` 之后存在另一个以 4 空格缩进的 `def ` 方法作为前瞻锚点。如果 `_verify_hash` 是类中最后一个方法，或缩进格式不精确匹配，该正则不会匹配任何内容，导致哈希校验未被禁用，预置 tarball 因哈希不匹配被拒绝。
+
+2. **pagure.io 不再直接提供该版本的 libaio 归档下载**，返回认证/WAF 拦截页面而非二进制文件。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 `fix_getdeps.py`（或新建 patch 文件）中增加对 `manifest.py` 的修补：为 `ArchiveFetcher` 的子类或具体实现补充 `clean` 和 `hash` 方法，或修改 `_create_fetcher` 的回退路径使其不直接实例化抽象类 `ArchiveFetcher`。可参照同仓库中 libyuv 的做法——在 `git clone` 后、构建前用 Python/sed 对上游源码进行针对性 patch。
+**修复 `fix_getdeps.py` 中 `_verify_hash` 的 patch 逻辑**，确保补丁在任何情况下都能正确移除哈希校验。当前正则使用了不稳定的前瞻锚点（依赖后续方法存在）。应改用更稳健的替换方式——例如匹配整个 `_verify_hash` 方法体直到下一个同缩进级别的方法或类结束，或直接从文件层面删除该校验调用。
 
 ### 方向 2（置信度: 中）
-检查 fbthrift `v2026.06.08.00` 的 `manifest.py` 中 `_create_fetcher` 方法的完整回退逻辑。`ModuleNotFoundError` 被捕获后原本应有一个合法的 fetcher 回退，但当前回退到了无法实例化的抽象类。可能需要从 `manifest.py` 中找到 `ArchiveFetcher` 的某个开源可用的具体子类（如 `SimpleArchiveFetcher`、`GitFetcher` 等）来替代回退目标。
+**调查 pagure.io libaio 归档 URL 的正确性**。当前 URL `https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz` 返回 HTML，可能需要：
+- 确认该 tag (`libaio-0.3.113`) 在 pagure.io 上是否存在
+- 检查正确的归档下载 URL 格式
+- 考虑是否因 CI 网络环境被 pagure.io WAF 拦截
+
+### 方向 3（置信度: 低）
+如果 pagure.io 下载源持续不可用，可考虑将 libaio 完全作为本地依赖处理——确保 `fix_getdeps.py` 的哈希绕过生效后，getdeps.py 直接使用预置的 `/tmp/libaio.tar.gz`，无需任何网络请求。
 
 ## 需要进一步确认的点
-- fbthrift `v2026.06.08.00` 的 `manifest.py` 中 `ArchiveFetcher` 是否有开源可用的具体子类可作为回退（当前日志只显示回退到了抽象类本身）
-- `fix_getdeps.py` 中针对 `fetcher.py` 的 `_verify_hash` patch 是否由于上游方法签名变化而匹配失败（regex 依赖 `\n    def ` 为方法边界标识，上游重构后缩进或方法顺序可能改变）
-- 旧版本 `v2026.05.18.00` 的构建是否确实成功（以确认此问题是版本升级引入的回归，而非预存问题）
+1. **fix_getdeps.py 的 regex 是否实际生效**：需确认目标文件 `build/fbcode_builder/getdeps/fetcher.py` 中 `_verify_hash` 方法的实际缩进格式及是否为其类中最后一个方法。如果前瞻锚点未匹配，该补丁是空操作，这是最可能的问题点。
+2. **pagure.io 归档 URL 是否有效**：在 CI 环境外手动访问该 URL，确认其是否返回有效的 tar.gz 还是 HTML。如果 URL 本身已失效，方向 1 修复后仍需验证本地 tarball 能否被正确接受。
+3. **预置 tarball 的文件名是否完全匹配**：getdeps.py 期望的下载文件名与实际 cp 的目标文件名是否完全一致（注意路径中有 `libaio-libaio-libaio-0.3.113.tar.gz`，包含两个 `libaio`）。
