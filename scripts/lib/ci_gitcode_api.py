@@ -71,6 +71,30 @@ def fetch_prs_with_label(repo: str, label: str, token: str, max_prs: int = 50) -
     return [pr for pr in prs if label in [l.get('name') for l in (pr.get('labels') or [])]]
 
 
+def find_open_ci_successful_fix_pr(repo: str, pr_number: int, token: str) -> Optional[Dict]:
+    """查找标题含 '(fix #<pr_number>)' 且为 open 状态、带 ci_successful 标签的 PR。
+
+    修复 PR 的标题格式约定为 'fix: <desc> (fix #<orig_pr_number>)'。
+    若已存在这样的 PR 且 CI 已通过，原始 PR 无需再触发修复流程。
+    """
+    owner, name, _ = parse_repo(repo)
+    url = f"{GITCODE_BASE}/api/v5/repos/{owner}/{name}/pulls"
+    pattern = f'(fix #{pr_number})'
+    try:
+        resp = requests.get(url, params={'state': 'open', 'per_page': 50, 'access_token': token},
+                            timeout=30)
+        if not resp.ok:
+            return None
+        for pr in (resp.json() or []):
+            title = pr.get('title', '')
+            labels = [l.get('name') for l in (pr.get('labels') or [])]
+            if pattern in title and 'ci_successful' in labels:
+                return pr
+    except Exception:
+        pass
+    return None
+
+
 def find_any_pr_by_head_branch(repo: str, head_branch: str, token: str,
                                open_only: bool = False) -> Optional[Dict]:
     owner, name, _ = parse_repo(repo)

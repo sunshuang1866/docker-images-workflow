@@ -16,6 +16,7 @@ from scripts.lib.ci_gitcode_api import (
     _find_jenkins_url_in_comments,
     get_latest_failed_run,
     _fetch_external_ci_log,
+    find_open_ci_successful_fix_pr,
 )
 
 # ── 共享测试 URL 常量 ──────────────────────────────────────────────────────────
@@ -244,6 +245,73 @@ class TestFetchExternalCiLog:
         with patch('scripts.lib.ci_gitcode_api.requests.get', side_effect=side_effect):
             _fetch_external_ci_log('https://ci.example.com/job/test/5')
         assert any('consoleText' in u for u in captured)
+
+
+# ── find_open_ci_successful_fix_pr ────────────────────────────────────────────
+
+FREPO = 'openeuler/openeuler-docker-images'
+FTOKEN = 'test-token'
+
+
+def _mock_prs_response(prs: list) -> MagicMock:
+    m = MagicMock()
+    m.ok = True
+    m.json.return_value = prs
+    return m
+
+
+def _make_pr(number: int, title: str, labels: list) -> dict:
+    return {
+        'number': number,
+        'title': title,
+        'labels': [{'name': l} for l in labels],
+        'state': 'open',
+    }
+
+
+class TestFindOpenCiSuccessfulFixPr:
+    def test_finds_matching_pr(self):
+        prs = [_make_pr(101, 'fix: etcd 3.6.11 (fix #2534)', ['ci_successful'])]
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=_mock_prs_response(prs)):
+            result = find_open_ci_successful_fix_pr(FREPO, 2534, FTOKEN)
+        assert result is not None
+        assert result['number'] == 101
+
+    def test_returns_none_when_no_ci_successful_label(self):
+        prs = [_make_pr(101, 'fix: etcd 3.6.11 (fix #2534)', ['ci_failed'])]
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=_mock_prs_response(prs)):
+            result = find_open_ci_successful_fix_pr(FREPO, 2534, FTOKEN)
+        assert result is None
+
+    def test_returns_none_when_title_does_not_match(self):
+        prs = [_make_pr(101, 'fix: etcd 3.6.11 (fix #9999)', ['ci_successful'])]
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=_mock_prs_response(prs)):
+            result = find_open_ci_successful_fix_pr(FREPO, 2534, FTOKEN)
+        assert result is None
+
+    def test_returns_none_when_list_empty(self):
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=_mock_prs_response([])):
+            result = find_open_ci_successful_fix_pr(FREPO, 2534, FTOKEN)
+        assert result is None
+
+    def test_returns_none_on_http_error(self):
+        m = MagicMock()
+        m.ok = False
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=m):
+            result = find_open_ci_successful_fix_pr(FREPO, 2534, FTOKEN)
+        assert result is None
+
+    def test_ignores_pr_with_different_number(self):
+        # (fix #2534) 不匹配 pr_number=100
+        prs = [_make_pr(101, 'fix: something (fix #2534)', ['ci_successful'])]
+        with patch('scripts.lib.ci_gitcode_api.requests.get', return_value=_mock_prs_response(prs)):
+            result = find_open_ci_successful_fix_pr(FREPO, 100, FTOKEN)
+        assert result is None
+
+    def test_returns_none_on_exception(self):
+        with patch('scripts.lib.ci_gitcode_api.requests.get', side_effect=Exception('timeout')):
+            result = find_open_ci_successful_fix_pr(FREPO, 2534, FTOKEN)
+        assert result is None
 
 
 # ── get_latest_failed_run ─────────────────────────────────────────────────────

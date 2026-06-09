@@ -30,6 +30,25 @@ def fetch_prs_with_label(repo: str, label: str, token: str, max_prs: int = 50) -
     return [pr for pr in resp.json() if label in [l['name'] for l in pr.get('labels', [])]]
 
 
+def find_open_ci_successful_fix_pr(repo: str, pr_number: int, token: str) -> Optional[Dict]:
+    """查找标题含 '(fix #<pr_number>)' 且为 open 状态、带 ci_successful 标签的 PR。"""
+    url = f"https://api.github.com/repos/{repo}/pulls"
+    pattern = f'(fix #{pr_number})'
+    try:
+        resp = requests.get(url, headers=_headers(token),
+                            params={'state': 'open', 'per_page': 50}, timeout=30)
+        if not resp.ok:
+            return None
+        for pr in resp.json():
+            title = pr.get('title', '')
+            labels = [l.get('name') for l in pr.get('labels', [])]
+            if pattern in title and 'ci_successful' in labels:
+                return pr
+    except Exception:
+        pass
+    return None
+
+
 def find_any_pr_by_head_branch(repo: str, head_branch: str, token: str) -> Optional[Dict]:
     owner = repo.split('/')[0]
     url = f"https://api.github.com/repos/{repo}/pulls"
