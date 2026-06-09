@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况，导致 libaio tarball 哈希校验静默未被跳过。
+修复 `fix_getdeps.py` 中跳过 `_verify_hash` 方法替换的正则表达式边界缺陷：当 `_verify_hash` 是类中最后一个方法时，正向前瞻 `(?=\n    def )` 匹配失败，导致哈希校验替换静默不生效，libaio tarball 校验可能抛出异常中断构建。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 扩展 regex 的 lookahead 边界，增加 `\nclass ` 和 `\Z` 两种终止条件
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 将正则从 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 改为 `r'def _verify_hash\(self\):.*?(?=\n    def |$)'`，增加 `$` 作为备选匹配终点。
 
 ## 修复逻辑
-原始正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 仅以「下一个 4 空格缩进的 `def `」作为匹配终止边界。当 `_verify_hash` 是该类中最后一个方法时，其后不存在同缩进级别的 `def`，正则无法匹配任何内容，`re.sub` 静默返回原字符串，`_verify_hash` 方法体未被替换为 `pass`，libaio tarball 的 SHA256 校验仍会执行，可能因校验失败导致构建中止。
-
-修复后的正则 `r'def _verify_hash\(self\):.*?(?=\n(?:    def |class )|\Z)'` 增加两种终止条件：
-- `\nclass `：当 `_verify_hash` 是类中最后一个方法，其后是下一个类定义
-- `\Z`：当 `_verify_hash` 是文件最后一个方法，无后续内容
-
-确保无论 `_verify_hash` 在类中的位置如何，其方法体都能被 `pass` 替换，跳过哈希校验。
+原正则依赖正向前瞻 `(?=\n    def )` 来定位 `_verify_hash` 方法结束位置（下一个同级 `def` 方法定义处）。当 `_verify_hash` 是类中最后一个方法时，该方法后面没有其他 `def` 定义，正向前瞻永远无法匹配，`re.sub` 静默不做任何替换。修复后在正向前瞻中增加 `$` 替代分支：当 `_verify_hash` 后存在下一个 `def` 时，行为与原逻辑一致；当其为最后一个方法时，匹配到字符串末尾，使替换正常生效。
 
 ## 潜在风险
-无。原 regex 在 `_verify_hash` 非末方法时行为不变（`\n    def ` 仍是 lookahead 的首选项），仅覆盖了原本无法匹配的边界情况。
+- 若 `fetcher.py` 中 `_verify_hash` 是该类最后一个方法且类之后还有其他模块级代码（如 `if __name__ == '__main__':`），由于 `.*?` 的懒惰匹配特性，会一直扩展到字符串末尾 `$`，替换范围可能超出方法边界、误删除类后的模块级代码。这种情况在实际 fbcode_builder 的 `fetcher.py` 中极少出现，且构建脚本运行于临时容器环境，影响可控。建议 CI 重跑后通过完整日志验证。
