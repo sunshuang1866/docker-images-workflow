@@ -475,3 +475,19 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 - PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 替换正则无法匹配「类中最后一个方法」的边界情况
 - PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中跳过 `_verify_hash` 方法替换的正则表达式边界缺陷：当 `_ve
 - PR #2558: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — 修复 `fix_getdeps.py` 中 `_verify_hash` 方法匹配逻辑的 bug：原正则 `r'def 
+
+---
+
+## 模式23：RPM包名不存在
+
+**症状关键词**: `Unable to find a match`, `No match for argument`, `boost-foundation`, `yum`, `开源组件RPM包名映射错误`
+
+**根因**: - **失败位置**: 新增的 3FS Dockerfile（`Storage/3fs/<version>/<oe-version>/Dockerfile`）第 41 行
+- **失败原因**: Dockerfile 的 `yum install` 命令中使用了 **openEuler RPM 仓库中不存在的包名**：
+  - `boost-foundation` — openEuler 中无此 RPM 包名（可能是从其他发行版如 Ubuntu 的 `libboost-foundation-dev` 错误映射而来）
+  - `boost-filesystem`、`boost-system`、`
+
+**修复方法**: Dockerfile 中使用了 openEuler RPM 仓库中不存在的包名 `boost-foundation`，导致 `yum install` 失败；同时缺少 `libevent-devel` 致 CMake 配置阶段找不到 libevent。
+
+**历史案例**:
+- PR #2557: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — Dockerfile 中使用了 openEuler RPM 仓库中不存在的包名 `boost-foundation`，导
