@@ -438,14 +438,16 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **症状关键词**: UndefinedVar, LD_LIBRARY_PATH, ENV
 
-**根因**: - **失败位置**: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile:19`
-- **失败原因**: Dockerfile 中 `ENV LD_LIBRARY_PATH=/usr/local/lib:/libyuv/build:$LD_LIBRARY_PATH` 在一个全新的构建阶段中自引用了 `$LD_LIBRARY_PATH`。由于该变量此前从未在同一构建阶段被定义，BuildKit 检测到对未定义变量的引用，产生 `UndefinedVar` 警告。
+**根因**: Dockerfile `ENV LD_LIBRARY_PATH=...:$LD_LIBRARY_PATH` 在首次定义该变量的阶段自引用了尚未存在的 `$LD_LIBRARY_PATH`，BuildKit 检测到对未定义变量的引用，产生 `UndefinedVar` 警告。
 
-**修复方法**: Dockerfile 第 19 行 `ENV LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRARY_PATH` 变量，触发 BuildKit `UndefinedVar` 警告。
+**修复方法**: 将 `$LD_LIBRARY_PATH` 改为 `${LD_LIBRARY_PATH:-}`（shell 默认值语法），变量未定义时展开为空字符串，消除 BuildKit 警告：
+
+```dockerfile
+ENV LD_LIBRARY_PATH=/usr/local/lib:/libyuv/build:${LD_LIBRARY_PATH:-}
+```
 
 **历史案例**:
-- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — Dockerfile 第 19 行 `ENV LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRAR
-- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `ENV LD_LIBRARY_PATH` 自引用了未定义变量 `$LD_LIBRARY_PA
+- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — `ENV LD_LIBRARY_PATH=...:$LD_LIBRARY_PATH` 自引用未定义变量，改为 `${LD_LIBRARY_PATH:-}` 消除 BuildKit UndefinedVar 警告
 
 ---
 
@@ -453,24 +455,13 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **症状关键词**: undefined reference, RGBToUVMatrixRow_NEON, collect2: error, ld returned 1 exit status, aarch64
 
-**根因**: - 失败位置: aarch64 架构构建（日志中安装的包均为 `.aarch64`），链接 `yuvconvert` 可执行文件时
-- 失败原因: libyuv 1948 源码中，函数 `RGBToUVMatrixRow_NEON` 被 `convert.cc` 和 `row_any.cc` 调用，但其实现所在的源文件未被纳入 `yuv_common_objects` 或链接目标的编译/链接范围内，导致 aarch64 平台上产生未定义符号链接错误。日志显示 `yuv_neon64` 目标已成功编译（包含 `row_neon64.cc`、`rotate_neon64.cc`、`compare_
+**根因**: libyuv 某版本的 `row.h` 在 aarch64 条件块内定义了 `HAS_RGBTOUVMATRIXROW_NEON` 宏，但 `row_neon64.cc` 和 `row_neon.cc` 中均只有 `ARGBToUVMatrixRow_NEON`，缺少不带 A 前缀的 `RGBToUVMatrixRow_NEON` 实现，导致 aarch64 链接 `yuvconvert` 时产生未定义符号错误。
 
-**修复方法**: libyuv 1948 在 aarch64 平台构建时，`RGBToUVMatrixRow_NEON` 函数实现缺失导致链接失败（undefined reference）。
+**修复方法**: 在 Dockerfile 的 `git clone` 后、`cmake` 前，用 `sed` 注释掉 `row.h` 中 `HAS_RGBTOUVMATRIXROW_NEON` 宏定义，使编译器回退到 C 语言通用实现（牺牲少量 NEON 性能换取 aarch64 构建成功）：
 
-**历史案例**:
-- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — libyuv 1948 在 aarch64 平台构建时，`RGBToUVMatrixRow_NEON` 函数实现缺失导致
-
----
-
-## 模式25：上游下载源失效
-
-**症状关键词**: `Content-Type: text/html`, `pagure.io`, `libaio`, `Download with`, `tar.gz`
-
-**根因**: - 失败位置: Dockerfile 第 18–23 行（RUN getdeps 命令链），具体在 getdeps 的 libaio 下载/提取阶段
-- 失败原因: pagure.io 上 libaio 的归档下载 URL 返回了 HTML 页面（可能为 404 错误页、重定向页或登录页面），getdeps 将其当作 tar.gz 归档处理导致提取或后续校验失败。同时 PR 中预置的本地 libaio 压缩包未被 getdeps 有效利用——getdeps 仍然优先通过网络下载，下载到的 HTML 内容覆盖或无法替代预置的合法压缩包，最终导致构建中止。
-
-**修复方法**: pagure.io 上 libaio 归档下载源失效（返回 HTML 页面而非 tar.gz），导致 getdeps 构建 libaio 依赖时失败；同时修复 `_verify_hash` 正则表达式在边界情况下的匹配缺陷。
+```dockerfile
+RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW_NEON/' include/libyuv/row.h
+```
 
 **历史案例**:
-- PR #2547: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py` — pagure.io 上 libaio 归档下载源失效（返回 HTML 页面而非 tar.gz），导致 getdeps 构
+- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — `row.h` 定义了 `HAS_RGBTOUVMATRIXROW_NEON` 但实现缺失，通过 sed 注释掉该宏定义修复 aarch64 链接失败
