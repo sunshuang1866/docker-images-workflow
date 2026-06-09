@@ -9,7 +9,7 @@
     }
   ],
   "settings": {
-    "poll_interval_minutes": 50,
+    "poll_interval_minutes": 10,
     "max_events_per_run": 50,
     "lookback_minutes": 100000
   }
