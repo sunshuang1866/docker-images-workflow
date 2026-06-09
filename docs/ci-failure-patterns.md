@@ -492,3 +492,17 @@ COPY --from=agent-source /bin/grafana-agent /usr/local/bin/grafana-agent
 
 **历史案例**:
 - PR #2557: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — Dockerfile 中使用了 openEuler RPM 仓库中不存在的包名 `boost-foundation`，导
+
+---
+
+## 模式24：NEON符号缺失链失败
+
+**症状关键词**: undefined reference, RGBToUVMatrixRow_NEON, collect2: error, ld returned 1 exit status, aarch64
+
+**根因**: - 失败位置: aarch64 架构构建（日志中安装的包均为 `.aarch64`），链接 `yuvconvert` 可执行文件时
+- 失败原因: libyuv 1948 源码中，函数 `RGBToUVMatrixRow_NEON` 被 `convert.cc` 和 `row_any.cc` 调用，但其实现所在的源文件未被纳入 `yuv_common_objects` 或链接目标的编译/链接范围内，导致 aarch64 平台上产生未定义符号链接错误。日志显示 `yuv_neon64` 目标已成功编译（包含 `row_neon64.cc`、`rotate_neon64.cc`、`compare_
+
+**修复方法**: libyuv 1948 在 aarch64 平台构建时，`RGBToUVMatrixRow_NEON` 函数实现缺失导致链接失败（undefined reference）。
+
+**历史案例**:
+- PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — libyuv 1948 在 aarch64 平台构建时，`RGBToUVMatrixRow_NEON` 函数实现缺失导致
