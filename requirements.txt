@@ -1,2 +1,0 @@
-# tech-design-team Python dependencies
-requests>=2.28.0
