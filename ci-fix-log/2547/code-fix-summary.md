@@ -1,22 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-上游 pagure.io 归档 URL 失效导致 getdeps 下载到 HTML 页面而非 tar.gz 文件，构建失败。
+`fix_getdeps.py` 中的正则表达式未能匹配 `_verify_hash` 方法签名，导致哈希校验补丁未生效，getdeps 对预置 libaio tarball 进行哈希校验失败后删除本地文件并尝试从 pagure.io 网络下载，而 pagure.io 返回 HTML 页面导致构建失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/Dockerfile`: 修复 pre-copy 目标文件名中的拼写错误（`libaio-libaio-libaio` → `libaio-libaio`，与 getdeps 从 URL 提取的文件名一致）
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 新增 fetcher.py 补丁，在 `download()` 方法开头检查 `self.archive_file` 是否已存在且大于 10KB，如是则直接返回跳过下载
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 修复第 17 行正则表达式，使其能匹配带类型注解的 `_verify_hash` 方法签名
 
 ## 修复逻辑
-CI 分析报告指出两个并发根因：
-1. Dockerfile 中 `cp` 的目标文件名写成了 `libaio-libaio-libaio-0.3.113.tar.gz`（三个 "libaio"），但 getdeps 从下载 URL `https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz` 提取的文件名是 `libaio-libaio-0.3.113.tar.gz`（两个 "libaio"），导致 getdeps 找不到预置文件而重新从已失效的上游下载
-2. 即使文件名匹配，getdeps 的 fetcher 也可能无条件覆盖已存在的文件
-
-修复方案（对应分析报告方向1）：
-- 修正 Dockerfile 中的文件名拼写，使预拷贝文件能被 getdeps 识别
-- 在 fetcher.py 的所有 `download()` 方法开头注入存在性检查：若目标文件已存在且大小超过 10KB（排除下载失败返回的 HTML 页面），直接返回文件路径，不触发网络下载
+原始正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 要求方法签名必须是 `def _verify_hash(self):`（冒号紧跟在 `(self)` 之后），但 fbthrift v2026.06.08.00 的 `fetcher.py` 源码中实际签名为 `def _verify_hash(self) -> None:`（包含 `-> None:` 类型注解），导致正则无法匹配，`re.sub` 替换失败，`_verify_hash` 方法未被替换为 no-op。修改后的正则 `r'def _verify_hash\(self\).*:.*?(?=\n    def )'` 在 `(self)` 和 `:` 之间使用 `.*` 通配可选的类型注解部分，使正则能正确匹配并替换方法体。
 
 ## 潜在风险
-- `os.path.getsize` 检查阈值 10KB 为保守值，libaio 真实 tar.gz 远大于此，不会误判
-- `download()` 补丁会影响所有 ArchiveFetcher 子类，如某类未定义 `self.archive_file` 属性将抛 AttributeError；但 Meta getdeps 的 fetcher 体系均使用该属性，风险低
-- 若上游恢复后文件内容更新但文件名不变，预置的旧文件可能会被错误复用（因跳过了下载），但考虑到 libaio 版本固定（0.3.113），此场景不会发生
+- 正则中 `.*` 可能匹配到方法签名中额外的意外字符，但就当前 fbthrift 源码而言，方法签名为标准 Python 格式，不存在此类风险。
+- Dockerfile 中 cp 目标文件名 `libaio-libaio-libaio-0.3.113.tar.gz` 已包含正确的三前缀格式，与 getdeps 期望的文件名一致，无需修改。
