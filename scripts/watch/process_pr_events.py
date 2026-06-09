@@ -15,6 +15,7 @@ PR 监控 — CI 失败自动修复触发器
 """
 
 import os
+import re
 import sys
 import json
 import requests
@@ -30,6 +31,17 @@ from scripts.lib import ci_data
 
 WATCHLIST_FILE = os.path.join(PROJECT_ROOT, 'config', 'watchlist.json')
 MAX_RETRIES = 3
+
+
+_PRERELEASE_RE = re.compile(
+    r'[-.](?:alpha|beta|rc\d*|preview|dev|snapshot|nightly)(?![a-zA-Z])',
+    re.IGNORECASE,
+)
+
+
+def _is_prerelease(title: str) -> bool:
+    """判断 PR 标题是否包含预发布版本标记（alpha/beta/rc 等），是则跳过自动修复。"""
+    return bool(_PRERELEASE_RE.search(title))
 
 
 def log(msg: str):
@@ -150,7 +162,12 @@ def process_all():
             pr_base = pr['base']['ref']
             fix_branch = f'fix/{pr_number}'
 
-            log(f"\n  🔎 PR #{pr_number}: {pr.get('title', '')[:60]}")
+            pr_title = pr.get('title', '')
+            log(f"\n  🔎 PR #{pr_number}: {pr_title[:60]}")
+
+            if _is_prerelease(pr_title):
+                log(f"    → Skipping: pre-release version in title (alpha/beta/rc/etc.)")
+                continue
 
             fix_pr = api.find_any_pr_by_head_branch(repo, fix_branch, token)
 
@@ -206,7 +223,7 @@ def process_all():
                         log(f"    → Dispatching retry (attempt #{count + 1})")
                         retry_pr = {
                             'number': pr_number,
-                            'title': pr.get('title', ''),
+                            'title': pr_title,
                             'head': fix_pr['head'],
                         }
                         if dispatch_ci_fix(repo, platform, retry_pr, pr_base, dispatch_token, target_repo):
