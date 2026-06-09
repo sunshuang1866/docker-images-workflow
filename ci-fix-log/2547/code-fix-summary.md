@@ -1,20 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中 `_verify_hash` 的替换正则无法匹配最后方法（无后续 `def` 作为锚点），导致哈希校验绕过失效，getdeps 重新从 pagure.io 下载 libaio 时获取到 HTML 页面而非 tar.gz 归档，构建失败。
+pagure.io 对 libaio 源码包的下载请求返回 HTML 页面（含认证 Cookie），覆盖了 Dockerfile 中预置的本地 `libaio-libaio-0.3.113.tar.gz`，导致后续 tar.gz 提取失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 修复 `_verify_hash` 方法体的正则表达式，增加对"最后方法"和"文件末尾"的锚点支持，并将替换体从 `pass` 改为 `return True`。
+- `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`: 在 `_download` 方法开头插入文件存在性检查，当本地文件已存在且大于 10KB 时跳过远程下载。
 
 ## 修复逻辑
-原正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 的 lookahead 仅匹配下一个同缩进级别的 `def` 定义。当 `_verify_hash` 是所在类的最后一个方法时，后续不存在同缩进的 `def`，导致 `re.sub` 匹配失败、返回原始字符串，哈希绕过未生效。getdeps 对预置的 libaio tarball 执行原始哈希校验，校验失败后触发远程下载，pagure.io 返回 HTML 页面导致构建退出码 1。
+分析报告指出 `fix_getdeps.py` 仅修补了 `_verify_hash` 方法跳过哈希校验，但未阻止 getdeps 的 fetcher 从远程 URL 重新下载文件。pagure.io 目前对 CI 请求返回带认证 Cookie 的 HTML（~2238 字节），下载到的 HTML 内容会覆盖 Dockerfile 中 `cp` 命令预置的本地正确 tar.gz。
 
-新正则 `r'def _verify_hash\(self\):.*?(?=\n    def |\n[a-zA-Z@]|\Z)'` 增加了两个替代锚点：
-- `\n[a-zA-Z@]` — 匹配类结束后的下一个顶层定义（下一 class、顶层函数、装饰器），覆盖最后方法场景
-- `\Z` — 匹配文件结尾，作为最终兜底
+修复方案：在 `_download` 方法（ArchiveFetcher 的实际下载入口）开头插入检查逻辑——如果 `self.file_name` 路径已存在文件且文件大小大于 10000 字节（排除 HTML 响应约 2KB 的情况），则直接 return 跳过远程下载。此阈值为有效 tar.gz（通常数百 KB）与 HTML 错误页（~2KB）之间提供了足够的区分度。
 
-同时将替换体从 `pass` 改为 `return True`，避免调用方对返回值进行 falsy 判断时误认为校验失败。
+同时保留了原有的 `_verify_hash` 补丁及下载失败时的回退逻辑，确保其他未预置本地包的依赖仍可正常下载。
 
 ## 潜在风险
-- 如果 fbcode_builder 的 `fetcher.py` 中方法体使用不同缩进风格（如 2 空格缩进、tab 缩进），`\n    def ` 仍可能无法匹配。但基于现有代码中 `gflags`/`glog`/`googletest` 均下载成功的事实，`fetcher.py` 中其他方法的正则正常工作，表明缩进风格一致，风险低。
-- `return True` 替代 `pass` 不会改变语义（原方法体在成功时隐式返回 `None`，但调用方未必检查返回值），风险极低。
+- 如果其他非 libaio 依赖也需要本地预置包但文件恰好小于 10KB，可能会被误判为无效文件而重新下载。根据当前 Dockerfile 设计，仅 libaio 使用了本地预置策略，此风险在当前场景下不存在。
+- 正则匹配依赖 `def _download(self) -> None:` 的精确签名；若 fbthrift 未来版本修改了类型注解格式（如删去 `-> None`），补丁将静默失效，但不会破坏构建（仅回退到原有行为）。
