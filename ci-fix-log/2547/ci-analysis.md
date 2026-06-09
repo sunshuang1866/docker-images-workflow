@@ -5,48 +5,44 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 上游归档URL失效
-- 新模式症状关键词: Content-Type: text/html, pagure.io, libaio, tar.gz download corrupt, Set-Cookie, techaro.lol-anubis-auth
+- 新模式标题: 预置文件命名不匹配
+- 新模式症状关键词: download, pagure.io, text/html, Content-Type, tar.gz, filename mismatch, getdeps, libaio
 
 ## 根因分析
 
 ### 直接错误
 ```
-#11 339.7 Assessing libaio...
-#11 339.7 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz
-#11 339.7 .. 2238 of (Unknown)  [Complete in 1.215876 seconds]
-#11 339.7 Date: Tue, 09 Jun 2026 12:28:21 GMT
-#11 339.7 Server: Apache/2.4.37 (Red Hat Enterprise Linux) OpenSSL/1.1.1k mod_wsgi/4.6.4 Python/3.6
-#11 339.7 Content-Type: text/html; charset=utf-8
-#11 339.7 Set-Cookie: techaro.lol-anubis-auth=; Path=/; Expires=Tue, 09 Jun 2026 12:27:21 GMT; Max-Age=0; Secure; SameSite=None
-#11 339.7 Connection: close
-#11 339.7 Transfer-Encoding: chunked
-#11 339.7 
-#11 ERROR: process "... ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift" did not complete successfully: exit code: 1
-------
-Dockerfile:18
+#11 340.9 Assessing libaio...
+#11 340.9 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> .../downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
+#11 340.9 Date: Tue, 09 Jun 2026 13:11:41 GMT
+#11 340.9 Server: Apache/2.4.37 (Red Hat Enterprise Linux) OpenSSL/1.1.1k mod_wsgi/4.6.4 Python/3.6
+#11 340.9 Content-Type: text/html; charset=utf-8
+...
+#11 ERROR: process "/bin/sh -c git clone -b ${VERSION} ... && ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/Dockerfile:18`
-- 失败原因: getdeps.py 构建过程中尝试从 `https://pagure.io/libaio/archive/libaio-0.3.113/` 下载 libaio 依赖，但上游 URL 返回了 HTML 页面（Content-Type: text/html，仅 2238 字节）而非 tar.gz 归档文件。HTML 页面触发了 `techaro.lol-anubis-auth` 认证 Cookie 设置，表明该 URL 可能已失效或需要认证。getdeps 下载到本地的 "tar.gz" 实际上是 HTML 页面，导致后续构建步骤（解压/编译）失败。
+- 失败位置: `Others/fbthrift/2026.06.08.00/24.03-lts-sp3/Dockerfile`:18 (RUN 命令中 `./build/fbcode_builder/getdeps.py` 调用)
+- 失败原因: Dockerfile 中预置的 libaio tarball 文件名 `libaio-libaio-0.3.113.tar.gz` 与 getdeps 构建系统期望的下载文件名 `libaio-libaio-libaio-0.3.113.tar.gz` 不一致，导致 getdeps 未找到预置文件，转而从 pagure.io 网络下载，而 pagure.io 返回了 HTML 页面（Content-Type: text/html）而非有效的 tar.gz 归档，触发构建失败。
 
 ### 与 PR 变更的关联
-- **由 PR 直接触发**：该 PR 新增了 fbthrift 2026.06.08.00 的完整 Dockerfile 和构建脚本。虽然 PR 中已预置了 `libaio-libaio-0.3.113.tar.gz` 二进制文件并通过 `COPY` 预拷贝到 downloads 目录，但 `getdeps.py` 在运行时仍会重新下载该文件并**覆盖**预置的本地副本。覆盖后的文件实际为 HTML 页面，导致构建失败。
-- PR 中的 `fix_getdeps.py` 已尝试绕过哈希校验（跳过 `_verify_hash`），但未解决下载源失效的问题。
+
+PR 新增了 4 个文件以实现 fbthrift v2026.06.08.00 的容器镜像构建：
+
+1. **Dockerfile** (`Others/fbthrift/2026.06.08.00/24.03-lts-sp3/Dockerfile`): 第 20 行 `cp /tmp/libaio.tar.gz .../downloads/libaio-libaio-0.3.113.tar.gz` 中，目标文件名缺少一个 `libaio-` 前缀。getdeps 在 `Assessing libaio` 时根据上游 manifest 生成的期望下载路径为 `.../downloads/libaio-libaio-libaio-0.3.113.tar.gz`（三前缀），而 Dockerfile 只提供了两前缀的文件名，造成文件名不匹配。
+
+2. **fix_getdeps.py** (`Others/fbthrift/2026.06.08.00/24.03-lts-sp3/fix_getdeps.py`): 该脚本跳过 libaio 哈希校验（修改 `_verify_hash` 为空操作）是正确的思路，但它无法解决"文件未找到导致回退到网络下载"的问题。文件名不匹配发生在更上游——getdeps 在查找本地文件阶段就已跳过预置文件。
+
+**结论：此失败由本次 PR 的变更直接引发。** Dockerfile 中预置 tarball 的目标文件名与 getdeps 期望的文件名不一致，是导致构建失败的直接原因。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 Dockerfile 中，`cp` 预拷贝 libaio.tar.gz 后，额外创建标记文件或修改文件权限为只读，让 getdeps 跳过下载步骤（取决于 getdeps 的 fetcher 是否有"文件已存在则跳过"的逻辑）。或者，直接禁用 getdeps 对 libaio 的网络下载（修改 fetcher.py 中 libaio 的下载逻辑，如果文件已存在则直接返回）。
+将 Dockerfile 第 20 行的 `cp` 目标文件名从 `libaio-libaio-0.3.113.tar.gz` 改为 `libaio-libaio-libaio-0.3.113.tar.gz`，使其与 getdeps 构建系统根据上游 manifest（`build/fbcode_builder/manifests/libaio`）生成的期望下载文件名完全一致。
 
-### 方向 2（置信度: 中）
-将 libaio 的下载源从 `pagure.io` 替换为其他可用镜像源，或修改为从 GitHub releases / Gitee 等其他可靠源下载。需确认 libaio 0.3.113 版本在其他源上的可用性。
-
-### 方向 3（置信度: 低）
-在 `fix_getdeps.py` 中额外 patch getdeps 的 libaio manifest 配置，将 download URL 替换为有效的源，或直接跳过 libaio 的下载/构建步骤（如果系统已通过 dnf 安装了等效库则可用 `--allow-system-packages` 绕过）。
+### 方向 2（置信度: 低）
+若方向 1 仍失败（即 getdeps 仍尝试从 pagure.io 下载），可进一步考虑在 `fix_getdeps.py` 中增加对 getdeps fetcher 的修改，使其在本地文件存在时直接跳过下载步骤，而非仅跳过哈希校验。
 
 ## 需要进一步确认的点
-1. `https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz` 为何返回 HTML 而非归档文件 —— 是临时故障还是该归档已永久移除；`techaro.lol-anubis-auth` 表明可能被重定向到认证网关。
-2. getdeps 的 fetcher 在目标文件已存在时的行为 —— 是否会跳过下载，还是无条件覆盖。如果会跳过，则预拷贝文件的路径或文件名可能不匹配 getdeps 内部计算的文件名。
-3. 日志中未显示 getdeps 抛出具体错误类型（如 "Failed to extract archive"、"Checksum mismatch"、"No such file"），只显示了 `exit code: 1`，需要获取更完整的构建日志以确认最终致命错误的确切位置。
+1. 确认 getdeps 上游 manifest（`build/fbcode_builder/manifests/libaio`）中 libaio 的下载 URL 是否确实为 `https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz`，以及该 manifest 生成的本地缓存文件名格式是否为 `libaio-libaio-libaio-0.3.113.tar.gz`。
+2. 确认 `pagure.io` 对 fbthrift 仓库 libaio 版本的归档 URL 是否可用——从日志看服务器返回了 HTML 而非 tar.gz，可能该归档在 pagure.io 上已失效，需确认是否需要更换 libaio 下载源或改用其他镜像。
