@@ -12,37 +12,32 @@
 
 ### 直接错误
 ```
-#12 405.8 -- Using gRPC 1.60.0 (via pkg-config)
-#12 405.8 CMake Error at src/CMakeLists.txt:1058 (find_program):
-#12 405.8   Could not find _GRPC_CPP_PLUGIN_EXECUTABLE using the following names:
-#12 405.8   grpc_cpp_plugin
-#12 405.8
-#12 405.8
-#12 405.8 -- Configuring incomplete, errors occurred!
-#12 405.8 + exit 1
+#12 364.9 CMake Error at /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:230 (message):
+#12 364.9   Could NOT find Protobuf (missing: Protobuf_LIBRARIES Protobuf_INCLUDE_DIR)
+#12 364.9 Call Stack (most recent call first):
+#12 364.9   /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:600 (_FPHSA_FAILURE_MESSAGE)
+#12 364.9   /usr/share/cmake/Modules/FindProtobuf.cmake:652 (FIND_PACKAGE_HANDLE_STANDARD_ARGS)
+#12 364.9   src/CMakeLists.txt:1029 (find_package)
+#12 364.9
+#12 364.9 -- Configuring incomplete, errors occurred!
+#12 364.9 + exit 1
 ```
 
 ### 根因定位
-- 失败位置: `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile:41`（`RUN git clone ... ceph ... && ./do_cmake.sh ...` 中的 cmake 配置步骤）
-- 失败原因: Ceph 编译的 cmake 配置阶段找不到 `grpc_cpp_plugin` 可执行文件，该工具是 protobuf/gRPC 代码生成所需的编译器插件。
+- 失败位置: `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`:17（dnf install 行）
+- 失败原因: Dockerfile 的 `dnf install` 步骤遗漏了 ceph 编译所需的 `protobuf` 和 `protobuf-devel` 包，导致 ceph cmake 配置阶段 `find_package(Protobuf)` 失败。
 
 ### 与 PR 变更的关联
-**与 PR 直接相关**。本次 PR 新增了 `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`，在 `dnf install` 依赖列表中遗漏了提供 `grpc_cpp_plugin` 的包。虽然 `grpc++` 库本身作为某些包的传递依赖被自动安装（cmake 能找到 `grpc++`），但 `grpc_cpp_plugin` 二进制文件位于单独的开发工具包中，未被显式声明安装。
-
-此外，日志末尾有一个非致命警告：
-```
-- UndefinedVar: Usage of undefined variable '$LD_LIBRARY_PATH' (line 48)
-```
-这属于**模式20**（ENV 自引用未定义变量），不影响构建结果，但应在后续一并修正。
+PR 新增了 ceph 21.3.0 的 Dockerfile（54 行新增），其中 `dnf install` 命令（第 4-17 行）安装了大量编译依赖，但遗漏了 `protobuf protobuf-devel`。ceph 源码中的 `src/CMakeLists.txt:1029` 调用 `find_package(Protobuf)` 需要这些包。这是 PR 引入的新 Dockerfile 直接导致的构建失败，与历史 20.3.0 版本无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 Dockerfile 的 `dnf install` 步骤中添加提供 `grpc_cpp_plugin` 的包。在 openEuler 24.03-LTS-SP3 上，该二进制文件通常由 `grpc-devel` 或 `grpc-plugins` 包提供。具体包名可通过 `dnf provides */grpc_cpp_plugin` 确认。
+在 Dockerfile 第一个 `RUN dnf install -y` 步骤中添加 `protobuf protobuf-devel` 包。ceph 构建依赖 protobuf 库和头文件，cmake 的 `FindProtobuf` 模块需要 `Protobuf_LIBRARIES` 和 `Protobuf_INCLUDE_DIR`，这些由 `protobuf-devel` 提供。
 
-### 方向 2（置信度: 中，非致命警告修复）
-将 Dockerfile 第 48 行 `ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH` 改为 `ENV LD_LIBRARY_PATH=/usr/local/lib64:${LD_LIBRARY_PATH:-}`，消除 BuildKit 的 UndefinedVar 警告（参考模式20）。
+### 方向 2（置信度: 中）
+Dockerfile 第 48 行 `ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH` 存在自引用未定义变量问题（匹配模式20）。虽然当前这是 BuildKit 警告而非失败原因，但建议将 `$LD_LIBRARY_PATH` 改为 `${LD_LIBRARY_PATH:-}` 以消除警告，避免未来 BuildKit 版本对此类引用的处理更严格。
 
 ## 需要进一步确认的点
-1. openEuler 24.03-LTS-SP3 上提供 `grpc_cpp_plugin` 二进制的确切 RPM 包名（`grpc-devel`、`grpc-plugins` 或 `protobuf-compiler`）。
-2. 除 `grpc_cpp_plugin` 外，是否还缺少其他 protobuf/gRPC 相关工具（如 `protoc`），确认 cmake 日志中没有后续的类似报错。
+- 需要确认 `protobuf` 和 `protobuf-devel` 在 openEuler 24.03-LTS-SP3 仓库中的确切包名（`dnf search protobuf`），通常为 `protobuf`、`protobuf-devel`，但也可能是 `protobuf-c`、`protobuf-c-devel` 或 `protobuf-compiler`，具体取决于 ceph 对 protobuf C++ API 还是 protobuf-c 的依赖。
+- 日志中还有 `jq: command not found` 的非致命报错（`#12 364.5`），虽不影响当前构建，但若 `do_cmake.sh` 后续逻辑依赖 `jq` 解析 JSON 则可能成为隐患，可视需要安装 `jq`。
