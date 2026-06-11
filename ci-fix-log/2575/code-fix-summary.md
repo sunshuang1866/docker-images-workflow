@@ -1,20 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 缺少 gRPC 开发库导致 cmake 配置阶段找不到 `grpc++` 包，同时修复了 FROM 指令大小写不规范和 LD_LIBRARY_PATH 自引用未定义变量两个次要问题。
+Ceph cmake 配置阶段找不到 `grpc_cpp_plugin` 可执行文件导致构建失败，同时修复 ENV 自引用未定义变量的 BuildKit 警告。
 
 ## 修改的文件
-- `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`:
-  - 第 2 行: `as builder` → `AS builder`（修复 BuildKit FromAsCasing 警告）
-  - 第 24 行: 在 `dnf install -y` 中新增 `grpc-devel protobuf-devel` 依赖（修复 cmake 找不到 grpc++ 的构建失败）
-  - 第 48 行: `$LD_LIBRARY_PATH` → `${LD_LIBRARY_PATH:-}`（修复模式20：自引用未定义变量）
+- `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`: 
+  - 在 `dnf install` 依赖列表中添加 `grpc-plugins` 包（第 24 行），提供 `grpc_cpp_plugin` 二进制文件
+  - 将 `ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH` 改为 `ENV LD_LIBRARY_PATH=/usr/local/lib64:${LD_LIBRARY_PATH:-}`（第 48 行），消除 UndefinedVar 警告
 
 ## 修复逻辑
-CI 分析报告指出三个问题：
-1. **主因**（dependency-error）: ceph 21.3.0 编译时需要 `grpc++` 开发库，但 Dockerfile 的 `dnf install` 列表中遗漏了 `grpc-devel` 和 `protobuf-devel`。在 openEuler 24.03-lts-sp3 上补充这两个 RPM 包以提供 `grpc++` pkg-config 模块。
-2. **次要问题**: FROM 指令中 `as` 应为大写 `AS`，符合 Dockerfile 最佳实践。
-3. **次要问题**: ENV 指令中 `$LD_LIBRARY_PATH` 自引用了未定义的变量，改为 `${LD_LIBRARY_PATH:-}` 在变量未定义时使用空值。
+1. **构建失败根因**：分析报告指出 Ceph 编译的 cmake 配置阶段缺少 `grpc_cpp_plugin`（gRPC 代码生成编译器插件）。虽然 `grpc++` 库被自动安装，但插件二进制文件位于独立的 `grpc-plugins` 包中，未被显式声明。在 `dnf install` 中添加 `grpc-plugins` 即可提供该工具。
+2. **非致命警告修复**：`ENV` 指令中使用 `$LD_LIBRARY_PATH` 引用了自身，在首次设置时该变量未定义，BuildKit 会报告 UndefinedVar 警告。使用 `${LD_LIBRARY_PATH:-}` 语法（bash 默认值扩展）可消除此警告。
 
 ## 潜在风险
-- `grpc-devel` 和 `protobuf-devel` 是推测的包名，openEuler 24.03-lts-sp3 仓库中可能使用不同的包名（如 `grpc++-devel`），若构建仍失败需确认仓库中的精确包名。
-- 这些包可能引入额外的运行时依赖，但由于构建阶段（builder）和运行阶段分离（如后续阶段使用多阶段构建），运行时镜像不应受额外构建依赖影响。
+无。`grpc-plugins` 是 `grpc_cpp_plugin` 的标准提供包，不会引入不兼容的依赖或影响其他包。`${LD_LIBRARY_PATH:-}` 语法与 `$LD_LIBRARY_PATH` 在变量已设置时行为完全一致，仅在变量未定义时提供空字符串作为默认值。
