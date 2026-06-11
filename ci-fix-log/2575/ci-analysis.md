@@ -12,31 +12,39 @@
 
 ### 直接错误
 ```
-#12 401.0 -- Found Protobuf: /usr/lib64/libprotobuf.so (found version "4.25.1")
-#12 401.0 -- Checking for module 'grpc++'
-#12 401.0 --   Found grpc++, version 1.60.0
-#12 401.2 -- Using gRPC 1.60.0 (via pkg-config)
-#12 401.2 CMake Error at src/CMakeLists.txt:1058 (find_program):
-#12 401.2   Could not find _GRPC_CPP_PLUGIN_EXECUTABLE using the following names:
-#12 401.2   grpc_cpp_plugin
-#12 401.2 
-#12 401.2 
-#12 401.3 -- Configuring incomplete, errors occurred!
-#12 401.3 + exit 1
+#12 331.5 CMake Error at /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:230 (message):
+#12 331.5   Could NOT find Protobuf (missing: Protobuf_LIBRARIES Protobuf_INCLUDE_DIR)
+#12 331.5 Call Stack (most recent call first):
+#12 331.5   /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:600 (_FPHSA_FAILURE_MESSAGE)
+#12 331.5   /usr/share/cmake/Modules/FindProtobuf.cmake:652 (FIND_PACKAGE_HANDLE_STANDARD_ARGS)
+#12 331.5   src/CMakeLists.txt:1029 (find_package)
+#12 331.5
+#12 331.5 -- Configuring incomplete, errors occurred!
+#12 331.5 + exit 1
+#12 ERROR: process "/bin/sh -c git clone -b v${VERSION} --recursive --depth 1 https://github.com/ceph/ceph.git     && cd ceph     && ./do_cmake.sh -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF     && cd build     && ninja -j$(nproc)     && ninja install" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:41 (`./do_cmake.sh ...` → cmake 配置阶段)
-- 失败原因: Dockerfile 的 `dnf install` 步骤遗漏了 `grpc-plugins` 包，导致 cmake 配置时找不到 `grpc_cpp_plugin` 可执行文件
+- 失败位置: `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`:40（`RUN git clone ...` 行，cmake 配置阶段）
+- 失败原因: Ceph 21.3.0 的 CMake 构建系统要求 Protobuf 库及头文件，但 Dockerfile 的 `dnf install` 步骤遗漏了 `protobuf-devel` 包（可能还需 `protobuf-compiler`），导致 cmake 配置阶段报 `Could NOT find Protobuf` 并终止构建。
 
 ### 与 PR 变更的关联
-PR 新增了整个 `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`（54 行全新文件）。该 Dockerfile 的 `dnf install` 命令行中安装了 gRPC 运行时库（通过依赖间接引入，日志显示 `grpc++` 1.60.0 已找到），但**未显式安装 `grpc-plugins` 包**（该包提供 `grpc_cpp_plugin` 编译器插件）。Ceph 的 cmake 配置脚本在检测到 gRPC 后，尝试进一步查找 protobuf 的 gRPC C++ 代码生成插件，因缺失而失败。
+PR 新增了 `Storage/ceph/21.3.0/24.03-lts-sp3/Dockerfile`（全新文件，54 行），其中 `dnf install` 命令的依赖列表未包含 Protobuf 相关的开发包。Ceph 21.3.0 对 Protobuf 有编译依赖，缺失该包直接导致 cmake 配置失败。此失败与 PR 变更直接相关。
+
+### 次要问题
+日志中另有两个 BuildKit 警告（不影响构建成败，但宜一并修正）：
+
+1. **UndefinedVar**（匹配模式20）：`ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH` 在首次定义 `LD_LIBRARY_PATH` 时自引用了未定义的变量。应将 `$LD_LIBRARY_PATH` 改为 `${LD_LIBRARY_PATH:-}`。
+2. **FromAsCasing**：Dockerfile 第 2 行 `FROM $BASE as builder` 中 `as` 为小写，BuildKit 建议统一大写为 `AS`。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 Dockerfile 第 3 行 `dnf install -y` 的包列表中补充 `grpc-plugins`（或 openEuler 24.03 中对应提供 `grpc_cpp_plugin` 的包名，通常为 `grpc-plugins` 或 `grpc-devel` 中包含）。补完后 cmake 配置应能顺利通过。
+在 Dockerfile 第一个 `dnf install` 命令中补充 Protobuf 相关依赖包：添加 `protobuf-devel` 和 `protobuf-compiler`（Ceph 编译通常需要 protoc 编译器和 Protobuf 库/头文件）。参考 openEuler 24.03-LTS-SP3 仓库中对应的包名，将缺失包追加到 `dnf install` 列表中。
+
+### 方向 2（置信度: 中）
+若仅补充 `protobuf-devel` 仍报错，可能需要同时安装 `protobuf` 运行时包以及检查 Ceph 所需的最低 Protobuf 版本是否在 openEuler 24.03-LTS-SP3 的仓库中可用。CMake 日志中未显示版本不匹配，置信度为中。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP3 中提供 `grpc_cpp_plugin` 可执行文件的确切包名（可能为 `grpc-plugins`、`grpc-devel` 或 `grpc` 子包），建议在 openEuler 环境中 `dnf provides */grpc_cpp_plugin` 确认后写入 Dockerfile。
-- Dockerfile 中有两个 BuildKit 警告（`FromAsCasing` 和 `UndefinedVar`）虽然不阻塞构建，但建议一并修正：`as builder` → `AS builder`，`$LD_LIBRARY_PATH` → `${LD_LIBRARY_PATH:-}`。
+- Ceph 21.3.0 在 openEuler 24.03-LTS-SP3 仓库中 Protobuf 包的准确包名和版本（当前为 `protobuf`/`protobuf-devel`/`protobuf-compiler`，需确认与 Ceph 21.3.0 的版本兼容性）。
+- 除 Protobuf 外，Ceph 21.3.0 是否还有其他被 cmake `Could NOT find` 报告的缺失依赖（本次日志显示 `xfs`、`gperftools`、`JeMalloc`、`Curses` 也为未找到状态，但这些可能是可选依赖，cmake 未将其标记为 Error）。
