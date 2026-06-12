@@ -5,16 +5,25 @@
 - 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: 日志截断无错误详情
-- 新模式症状关键词: Execute shell, 清理缓存, Build step marked build as failure
+- 新模式标题: 日志截断无有效错误
+- 新模式症状关键词: 清理缓存, Build step 'Execute shell' marked build as failure, 无错误详情
 
 ## 根因分析
 
 ### 直接错误
+CI 日志仅包含以下内容，未捕获到任何具体错误信息：
+
 ```
+Started by upstream project "multiarch/openeuler/trigger/openeuler-docker-images" build number 1479
+originally caused by:
+ PR 2580 [infra_team:spring-cloud-软件市场自动升级2026-06-12 -> master] trigger by merge_request
+Running as SYSTEM
+[EnvInject] - Loading node environment variables.
+Building remotely on ecs-build-docker-aarch64-hk (ecs-build-docker-aarch64-03) in workspace /home/jenkins/agent-working-dir/workspace/multiarch/openeuler/aarch64/openeuler-docker-images
 [openeuler-docker-images] $ /bin/bash /tmp/jenkins13668292807163518311.sh
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
 100  1172  100  1172    0     0   2841      0 --:--:-- --:--:-- --:--:--  2844
 清理缓存...
 Build step 'Execute shell' marked build as failure
@@ -23,30 +32,32 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: 未知（日志仅包含 CI 编排层 wrapper 脚本输出，缺少实际的 Docker 构建或预检阶段日志）
-- 失败原因: 日志严重截断，无法定位根因。CI 编排脚本在下载一个 1172 字节文件并执行"清理缓存"后即失败，但**实际错误信息 (stderr) 未被包含在提供的日志中**。无任何 Docker build 步骤输出、无预检失败详情、无编译/测试错误。
+- 失败位置: 无法定位（日志无具体文件/行号/错误信息）
+- 失败原因: Jenkins aarch64 下游 job 在执行 Shell 脚本阶段失败，但日志中未包含任何错误详情，无法确定根因
 
 ### 与 PR 变更的关联
-**无法判断**。PR 新增了 `Others/spring-cloud/5.0.2/24.03-lts-sp3/Dockerfile`（31 行，全新文件）并更新了 README.md、doc/image-info.yml、meta.yml 三个元数据文件。由于日志缺失，无法确认失败是由 PR 改动直接触发，还是 CI 基础设施问题。
+**无法判定**。日志仅显示构建准备脚本（下载 1172 字节脚本 → `清理缓存...`）在 aarch64 节点上失败，Docker 构建阶段尚未启动。PR 本次变更包括：
+1. 新增 `Others/spring-cloud/5.0.2/24.03-lts-sp3/Dockerfile`（31 行，引入 JDK 17.0.19_10 + Maven 构建 spring-cloud-commons v5.0.2）
+2. 更新 `Others/spring-cloud/README.md`、`doc/image-info.yml`、`meta.yml` 添加 5.0.2 条目
+
+因日志中无实际构建输出，无法判断失败是由 PR 变更触发还是已存在的基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-**可能性：预检失败**。日志中仅有 wrapper 脚本输出，可能触发了 Docker 构建前的 CI 预检步骤（如 YAML 格式校验、image-list.yml 完整性检查、Copyright/SPDX 许可证检查等）。若 PR 新增的 Dockerfile 缺少 Copyright + SPDX 头（参考知识库模式17），或 meta.yml 末尾缺少换行符，均可能导致预检失败。
+**基础设施/前置脚本问题**：日志中下载的 1172 字节脚本为 Jenkins 构建前置脚本（如缓存清理、环境准备等），可能因 aarch64 节点环境异常（如磁盘空间不足、权限问题、网络不通）导致脚本执行失败。需检查 aarch64 构建节点的健康状况及前置脚本内容。
 
 ### 方向 2（置信度: 低）
-**可能性：JDK 版本在镜像站 404（参考知识库模式03）**。Dockerfile 中硬编码了 `JDK_VERSION=17.0.19_10`，若该 build 号在 `mirrors.tuna.tsinghua.edu.cn` 已被移除或尚未同步，Docker build 阶段会因 404 下载失败。但由于日志中无任何 Docker build 层输出，无法验证此推断。
+**JDK 版本 404（参考历史模式03）**：Dockerfile 硬编码 `JDK_VERSION=17.0.19_10`，若 Adoptium 镜像站已下架该 build 版本，Docker 构建阶段会因 404 失败。但当前日志未到达 Docker 构建阶段，仅为推测。历史中 spring-cloud 5.0.1（PR #2211）存在 BUILDARCH 变量冲突（模式09），本 PR 已改用 `TARGETARCH`，从 diff 看该问题应已规避。
 
 ### 方向 3（置信度: 低）
-**可能性：Maven 版本不满足项目约束（参考知识库模式07）**。Dockerfile 通过 `dnf install -y git maven` 安装的系统 Maven 版本可能低于 spring-cloud-commons v5.0.2 的 `maven-enforcer-plugin` 最低版本要求，导致 `./mvnw clean install` 阶段失败。
-
-### 方向 4（置信度: 低）
-**可能性：缺少 `image-list.yml` 条目**。PR 在 `meta.yml` 中添加了 `5.0.2-oe2403sp3` 条目，但若未同步在 `Others/spring-cloud/image-list.yml` 或 `Others/image-list.yml` 中添加对应条目，CI 一致性校验可能报错。
+**Copyright/SPDX 声明缺失（参考历史模式17）**：新增的 Dockerfile 未包含 Copyright 和 SPDX-License-Identifier 头，CI 的 `check_package_license` 预检阶段可能因此失败。但日志中未出现相关报错，仅凭"清理缓存"后的失败推测。
 
 ## 需要进一步确认的点
-1. **获取完整 CI 日志**：当前日志仅包含 Jenkins wrapper 脚本输出（1172 字节下载 + "清理缓存"），完全缺少 Docker 构建层输出、预检步骤详情、以及任何实际错误信息 (stderr)。需要获取该 job 的完整构建日志。
-2. **确认失败阶段**：需要了解 wrapper 脚本 `/tmp/jenkins13668292807163518311.sh` 的具体逻辑——失败发生在"清理缓存"之后的哪个步骤（预检？Docker build？后处理？）。
-3. **检查下游架构 job**：当前日志来自 `multiarch/openeuler/aarch64/openeuler-docker-images`（aarch64 专属 job），需要确认 x86-64 架构的对应 job 是否也失败，以判断是架构特定问题还是通用问题。
-4. **检查 Copyright/SPDX**：确认新增的 Dockerfile 是否包含必需的 Copyright 和 SPDX-License-Identifier 声明（参考知识库模式17）。
-5. **验证 JDK 版本可用性**：手动访问 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/aarch64/linux/` 确认 `OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.19_10.tar.gz` 文件是否当前存在于镜像站。
-6. **检查 image-list.yml**：确认 `Others/spring-cloud/` 或 `Others/` 目录下的 `image-list.yml` 是否需要同步更新 `5.0.2-oe2403sp3` 条目。
+1. **获取完整的 aarch64 下游构建 job 日志**（当前日志仅截取到前置脚本阶段，Docker 构建输出完全缺失），重点关注：
+   - 脚本 `/tmp/jenkins13668292807163518311.sh` 的完整内容和退出码
+   - Docker 构建的实际输出（`docker build` / `buildah` 等命令的日志）
+   - `check_package_license` 等 CI 预检步骤的详细报错
+2. **确认 Adoptium 镜像站 `jdk-17.0.19+10` 在 aarch64 架构是否可用**：`https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/aarch64/linux/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.19_10.tar.gz`
+3. **确认 x86-64 架构下游 job 是否同样失败**（当前上下文仅提供 aarch64 日志）
+4. **确认构建节点 `ecs-build-docker-aarch64-03` 的磁盘空间、网络连通性和系统资源状态**
