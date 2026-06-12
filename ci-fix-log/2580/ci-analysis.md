@@ -2,15 +2,17 @@
 
 ## 基本信息
 - PR: #2580 — 【自动升级】spring-cloud容器镜像升级至5.0.2版本.
-- 失败类型: infra-error（证据不足）
+- 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: 构建日志截断无错误详情
-- 新模式症状关键词: `Execute shell marked build as failure`, `清理缓存`, 无实际错误输出
+- 新模式标题: 日志缺失实际错误
+- 新模式症状关键词: 清理缓存, Build step marked build as failure, 无错误输出, aarch64
 
 ## 根因分析
 
 ### 直接错误
+（日志中无可提取的错误信息，以下为完整日志）
+
 ```
 [openeuler-docker-images] $ /bin/bash /tmp/jenkins13668292807163518311.sh
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
@@ -24,31 +26,22 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: 未知
-- 失败原因: CI 日志仅显示 Shell 脚本执行步骤失败（`Build step 'Execute shell' marked build as failure`），但**未捕获任何实际错误信息**。脚本 `/tmp/jenkins13668292807163518311.sh` 在输出 "清理缓存..." 后立即失败，具体错误内容缺失，无法从日志中定位根因。
+- 失败位置: 未知（日志未包含实际错误信息）
+- 失败原因: Jenkins aarch64 构建节点的 shell 脚本在执行过程中以非零退出码结束，但**脚本的实际错误输出未被日志捕获**。日志仅显示下载了一个 1172 字节的文件、输出"清理缓存..."后构建步骤即被标记为失败，中间无任何错误信息。无法从当前日志判断是 Docker 构建失败、前置校验失败还是脚本本身执行错误。
 
 ### 与 PR 变更的关联
-**无法确认**。PR 新增了 `Others/spring-cloud/5.0.2/24.03-lts-sp3/Dockerfile`（31 行）并更新了 `README.md`、`image-info.yml` 和 `meta.yml`。由于日志缺少错误详情，无法判断失败是由 Dockerfile 构建错误、元数据校验失败还是 CI 基础设施问题导致。
-
-#### 基于 Dockerfile 内容的推测（无日志佐证，仅供参考）
-1. **JDK 版本 404（类似模式03）**：Dockerfile 硬编码 `JDK_VERSION=17.0.19_10`，若清华镜像站已下架该确切 build 版本，wget 将返回 404。该 JDK 版本号格式 `17.0.19_10` 与 Adoptium 的版本命名一致，但需确认当前镜像站是否仍托管该 build。
-2. **`image-list.yml` 遗漏（类似模式11）**：PR 更新了 `meta.yml` 添加 `5.0.2-oe2403sp3` 条目，但未修改 `Others/image-list.yml`。若 CI 存在 image-list.yml 一致性校验且该文件需要列出所有镜像，遗漏可能导致预检失败。
-3. **TARGETARCH 变量行为**：Dockerfile 使用 `ARG TARGETARCH`，这是 BuildKit 预定义自动平台参数，与模式09（BUILDARCH 冲突）不同，理论上不会产生变量冲突。
+PR 新增了 `Others/spring-cloud/5.0.2/24.03-lts-sp3/Dockerfile` 及相关元数据文件（README.md、image-info.yml、meta.yml）。由于日志中缺少错误信息，无法判断失败是否由 PR 变更直接触发。但结合知识库**模式09**（`Others/spring-cloud/5.0.1` 曾因 `BUILDARCH` 与 BuildKit 预定义变量冲突导致 404），本次 5.0.2 的 Dockerfile 使用了 `TARGETARCH` 变量，需关注其与 CI 构建环境（Jenkins + `docker build` 非 `buildx`）的兼容性。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-**确认 JDK 版本在镜像站的可用性**。访问清华镜像站 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/aarch64/linux/` 和 `x64/linux/` 目录，确认 `OpenJDK17U-jdk_*_linux_hotspot_17.0.19_10.tar.gz` 是否存在。若不存在，参考模式03将 `JDK_VERSION` 升级为当前可用 build。
-
-### 方向 2（置信度: 低）
-**检查 `Others/image-list.yml` 是否需要补充条目**。若 CI 包含 image-list.yml 一致性检查，可能需要在 `Others/image-list.yml` 中添加 `5.0.2-oe2403sp3` 对应的镜像条目。
-
-### 方向 3（置信度: 低）
-**获取完整构建日志**。当前日志明显被截断，缺失 Docker 构建步骤的实际输出。需要从 Jenkins 构建记录中获取完整日志（包含 `docker build` 输出流），才能定位真正的错误信息。
+日志不足，无法给出有依据的修复方向。以下仅为基于历史模式的推测性线索：
+- 若失败与**模式09**（BUILDARCH 冲突）同类：`TARGETARCH` 在非 BuildKit 的 `docker build` 场景下不会自动注入，需确认 CI pipeline 是否通过 `--build-arg TARGETARCH=arm64` 传入该参数；若未传入，JDKARCH 变量将为空，导致 JDK 下载 URL 构造错误。
+- 若失败与**模式03**（JDK 版本 404）同类：JDK 版本 `17.0.19_10` 可能在镜像站已下架，需确认 `mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/aarch64/linux/` 下该版本是否仍可用。
 
 ## 需要进一步确认的点
-1. **获取完整 CI 构建日志**：当前日志仅包含脚本执行前 1172 字节的下载和"清理缓存"输出，Docker 构建阶段的全部输出（包括 `RUN` 命令的 stdout/stderr）完全缺失。需要从 Jenkins 的 aarch64 构建 job（`multiarch/openeuler/aarch64/openeuler-docker-images`）获取完整控制台输出。
-2. **确认 JDK 17.0.19_10 在清华镜像站是否可用**：两种架构（x64 / aarch64）均需确认。
-3. **确认 spring-cloud-commons v5.0.2 仓库的 Maven 构建要求**：是否需要特定 Maven 版本（类似模式07的 Maven enforcer 约束），当前 Dockerfile 通过 `dnf install maven` 安装系统默认版本。
-4. **检查 CI 是否包含 image-list.yml 完整性校验**：若该校验存在，需要确认 `Others/image-list.yml` 是否需要同步添加新镜像条目。
-5. **确认 x86-64 架构构建 job 的状态**：若 x86-64 job 也失败且有完整日志，可交叉比对确定是架构相关问题还是通用问题。
+1. **获取完整日志**：当前提供的 CI 日志仅包含 trigger 层 shell 脚本的输出，**缺失实际的 Docker 构建日志**。需要获取 aarch64 架构 Docker build 步骤的完整输出（包括 `docker build` 或 `docker buildx` 的所有层输出），才能定位真正的错误。
+2. **确认 x86-64 架构构建结果**：当前仅提供了 aarch64 节点的日志，需确认 x86-64 架构是否同样失败，以及其日志中是否包含错误信息。
+3. **确认 CI Pipeline 的 Docker 构建方式**：该 Jenkins job 使用的是 `docker build` 还是 `docker buildx build`？是否传入了 `TARGETARCH`/`BUILDARCH` 等 `--build-arg`？
+4. **确认 JDK 版本可用性**：验证 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/aarch64/linux/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.19_10.tar.gz` 是否返回 200，排除 JDK 版本下架导致 404 的可能性（模式03）。
+5. **确认 5.0.2 上游源码可构建性**：`spring-cloud-commons` 的 v5.0.2 tag 是否存在且可通过 `git clone -b v5.0.2` 获取。Maven 版本（系统 `dnf install maven`）是否满足项目 `maven-enforcer-plugin` 的最低版本要求（模式07）。
