@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建在 `pip3 install sglang` 下载 `nvidia_cusparse` (145.9 MB wheel) 时发生网络连接中断（`IncompleteRead`），属于 CI 基础设施层面的暂时性网络故障，与代码无关。
+无需代码修改。该 CI 失败为基础设施错误（infra-error）：Docker 构建过程中 `pip install sglang` 下载 `nvidia-cusparse` (145.9 MB) 时网络连接中断，触发 `IncompleteRead` 异常。
 
 ## 修改的文件
-无代码修改。
+无。此错误与 PR 代码逻辑无关，属于 CI 构建环境的网络瞬时故障。
 
 ## 修复逻辑
-CI 失败分析报告判定为 `infra-error`：构建过程中 PyPI 到 CI 构建环境的网络连接被意外断开，导致大文件下载不完整。Dockerfile 结构（多阶段构建、依赖声明、路径引用）均正确，PR 变更内容本身没有问题。根据修复原则，`infra-error` 类型的失败无需代码修改，重新触发 CI 构建即可恢复。
+CI 分析报告判定失败类型为 `infra-error`，根因是 PyPI 下载链路不稳定导致大文件（~146 MB）传输中断。这是纯粹的 CI 基础设施网络问题，不在代码层面可修复的范围内。建议重试 CI 构建流水线即可通过。
 
 ## 潜在风险
-无。
+无
