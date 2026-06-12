@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施问题（infra-error），构建日志被严重截断（仅 14 行），未捕获到任何实际错误信息，无法定位根因。
+无需代码修改。CI 分析报告判定失败类型为 **infra-error（证据不足）**，CI 日志中无可定位的源代码级错误。
 
 ## 修改的文件
-无
+无。根据任务指令，`infra-error` 不应强行修改代码。
 
 ## 修复逻辑
-CI 分析报告将该失败归类为 `infra-error`（置信度：低）。aarch64 架构构建 job 在执行 Shell 脚本时失败，但日志中仅有脚本下载（1172 字节）和"清理缓存..."输出，没有任何 Docker 构建阶段的错误信息。PR 引入的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）经过审阅，未发现明显的代码缺陷，Dockerfile 结构与历史版本（5.0.1）一致。根据任务规范，infra-error 不应强行修改代码，需要先获取完整的构建日志才能进一步定位问题。
+CI 日志显示构建在 Jenkins shell 脚本执行"清理缓存..."步骤后直接失败（`Build step 'Execute shell' marked build as failure`），Docker 构建本身的输出（如 `dnf install`、`wget` 下载 JDK、`git clone`、`mvnw` 构建等）完全没有出现。这表明失败发生在 CI 基础设施层的预检脚本中，而非 Dockerfile 或 PR 的代码变更导致的。
+
+三个低置信度修复方向均被排除：
+1. **Copyright/SPDX 头缺失**：已存在的 5.0.1 Dockerfile 同样无此头且通过了 CI。
+2. **JDK 版本 17.0.19_10 不可用**：5.0.1 使用相同的 JDK 版本且通过了 CI。
+3. **预检脚本自身失败**：这是最可能的原因，属于 CI 基础设施问题，不是代码问题。
 
 ## 潜在风险
-无 — 未修改任何代码。
+无。未修改任何代码。
