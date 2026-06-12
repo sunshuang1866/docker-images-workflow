@@ -3,17 +3,18 @@
 ## 基本信息
 - PR: #2579 — 【自动升级】sglang容器镜像升级至0.5.13版本.
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: pip下载连接中断
-- 新模式症状关键词: IncompleteRead, Connection broken, ProtocolError, pip install, nvidia-cusparse
+- 新模式症状关键词: IncompleteRead, Connection broken, ProtocolError, pip install, nvidia_cusparse
 
 ## 根因分析
 
 ### 直接错误
 ```
+#12 444.5 Downloading nvidia_cusparse-12.6.3.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (145.9 MB)
+#12 453.1    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸                       64.3/145.9 MB 7.5 MB/s eta 0:00:11
 #12 453.1 ERROR: Exception:
-#12 453.1 Traceback (most recent call last):
 #12 453.1   File "/usr/local/lib/python3.11/site-packages/pip/_vendor/urllib3/response.py", line 897, in _error_catcher
 #12 453.1     yield
 #12 453.1   File "/usr/local/lib/python3.11/site-packages/pip/_vendor/urllib3/response.py", line 1043, in _raw_read
@@ -21,30 +22,32 @@
 #12 453.1 pip._vendor.urllib3.exceptions.IncompleteRead: IncompleteRead(64337044 bytes read, 81605893 more expected)
 #12 453.1 ...
 #12 453.1 pip._vendor.urllib3.exceptions.ProtocolError: ('Connection broken: IncompleteRead(64337044 bytes read, 81605893 more expected)', IncompleteRead(64337044 bytes read, 81605893 more expected))
-#12 ERROR: process "/bin/sh -c pip3 install --no-cache-dir --break-system-packages         --upgrade pip setuptools wheel &&     pip3 install --no-cache-dir --break-system-packages         sglang" did not complete successfully: exit code: 2
-------
+```
+
+```
 Dockerfile:49
+--------------------
+  49 | >>> RUN pip3 install --no-cache-dir --break-system-packages \
+  50 | >>>         --upgrade pip setuptools wheel && \
+  51 | >>>     pip3 install --no-cache-dir --break-system-packages \
+  52 | >>>         sglang
 ```
 
 ### 根因定位
-- 失败位置: `AI/sglang/0.5.13/24.03-lts-sp3/Dockerfile`:49（`pip3 install ... sglang` 命令）
-- 失败原因: 在下载 `nvidia-cusparse` (145.9 MB wheel) 过程中网络连接中断，仅下载了 64.3 MB / 145.9 MB (约 44%)，触发 `IncompleteRead` 异常导致 pip 安装失败
+- 失败位置: `AI/sglang/0.5.13/24.03-lts-sp3/Dockerfile:49`
+- 失败原因: `pip install sglang` 下载 `nvidia_cusparse-12.6.3.3` (145.9 MB) 时 PyPI 连接中断，仅完成 64.3/145.9 MB 后发生 `IncompleteRead` 异常，属于临时性网络基础设施故障。
 
 ### 与 PR 变更的关联
-PR 新增了 sglang 0.5.13 的 Dockerfile。该 Dockerfile 中 `pip3 install sglang` 需要从 PyPI 下载大量 NVIDIA CUDA 相关依赖包（单个包可达数百 MB，日志显示已成功下载了 torch 530MB、nvidia-cublas 423MB、flashinfer_cubin 447MB 等大型包），下载过程中网络连接不稳定导致中途断开。此错误与 PR 代码逻辑无关，属于 CI 构建环境网络基础设施问题。
+本次 PR 新增了 sglang 0.5.13 的 Dockerfile，构建过程中首次触发 `pip install sglang`，该命令需要从 PyPI 下载大量 CUDA 相关依赖包（总计数 GB），在下载大型 wheel 包 `nvidia_cusparse` 时遭遇网络连接中断。**CI 失败与 PR 代码质量无关，属于基础设施层临时性网络故障。**
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-重试构建。`Connection broken: IncompleteRead` 是典型的网络瞬时故障，通常重试即可成功。如果在 CI 流水线中频繁复现，可考虑：
-- 在 pip install 命令中添加 `--retries 5 --timeout 120` 等重试参数
-- 引入 PyPI 镜像源（如清华镜像 `https://pypi.tuna.tsinghua.edu.cn/simple`）提高下载稳定性
-- 将 pip install 失败后的 retry 逻辑写入 Dockerfile（如 `for i in 1 2 3; do pip install ... && break || sleep 30; done`）
+### 方向 1（置信度: 高）
+**重新触发 CI 构建**。`IncompleteRead` 是典型的临时网络中断，通常重试即可成功。无需修改任何代码。
 
 ### 方向 2（置信度: 低）
-如果重试始终失败且始终卡在同一个包（`nvidia-cusparse`），可能是 PyPI 上该包的分发 CDN 存在区域性问题。此时可考虑临时指定其他 PyPI 镜像源。
+如果反复出现同样的网络中断问题，可考虑在 Dockerfile 的 `pip install` 步骤中增加 `--retries` 参数提高下载容错性，或为 pip 配置国内 PyPI 镜像源加速下载。但当前日志仅显示一次性中断，不建议针对单次网络抖动做出修改。
 
 ## 需要进一步确认的点
-- 该构建失败是偶发还是每次触发都复现？需要查看同一 PR 的多次重试结果
-- CI 构建环境与 PyPI 之间的网络链路是否存在限速或代理问题
-- `nvidia-cusparse-12.6.3.3` 这个特定版本在 PyPI CDN 上是否完整可用（可手动 `curl -I` 验证 Content-Length 头）
+- 该 CI runner 到 PyPI CDN 的网络稳定性情况（可通过重试确认是否为偶发中断）。
+- `nvidia_cusparse` 等 CUDA 专用包被安装到标注"CPU 版本"的 Dockerfile 中。虽然这不是本次失败的直接原因，但建议确认：如果目标是 CPU-only 镜像，`pip install sglang` 应当使用 CPU 版本的 PyTorch 索引（如 `--index-url https://download.pytorch.org/whl/cpu`），否则镜像体积会因引入无用 CUDA 依赖而膨胀；如果确实需要 CUDA 支持，则 Dockerfile 注释中的"CPU 版本"表述需要修正。
