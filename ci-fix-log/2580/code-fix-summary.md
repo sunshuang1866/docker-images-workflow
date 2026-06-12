@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 日志严重截断，无法定位代码级根因，判为 CI 基础设施问题（infra-error），无需代码修改。
+无需代码修改 — CI 失败为基础设施问题（infra-error）。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告将失败类型归类为 `infra-error`，日志仅包含 Jenkins wrapper 脚本输出（下载 1172 字节文件后执行"清理缓存"即失败），完全缺少 Docker 构建层输出、预检步骤详情及任何实际错误信息。四个可能的修复方向置信度均为低，无法确认根因与 PR 代码变更直接相关。按照任务指令中"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"的要求，不做代码修改。
+CI 分析报告确认失败类型为 `infra-error`，日志显示构建在 aarch64 节点上的前置 Shell 脚本阶段（"清理缓存..."）即告失败，Docker 构建阶段尚未启动。PR 涉及的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）内容语法正确，与失败之间无直接因果关系。失败根因大概率是 aarch64 构建节点环境异常（磁盘空间、网络、权限等），属于 Jenkins 基础设施问题，不应通过修改源码来"修复"。
 
 ## 潜在风险
-- 若后续获取完整 CI 日志后确认预检失败（如 meta.yml 末尾缺少换行符、Dockerfile 缺少 Copyright+SPDX 头），需进行对应修复。
-- 若后续确认 JDK 版本 `17.0.19_10` 在镜像站不可用，需更新 `Dockerfile` 中的 `JDK_VERSION`。
-- 若后续确认 Maven 版本不满足构建要求，需在 `Dockerfile` 中安装指定版本的 Maven。
+无（未修改任何代码）。建议运维排查 aarch64 构建节点 `ecs-build-docker-aarch64-03` 的状态。
