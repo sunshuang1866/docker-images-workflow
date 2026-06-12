@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：`pip3 install sglang` 下载依赖包 `nvidia-cusparse` 时因网络中断导致 `IncompleteRead` / `ProtocolError` 异常，属于瞬时网络故障，非代码缺陷。
+修复 Dockerfile 第 56 行 `find` 命令中的 Shell 语法错误：多余的 `$` 字符导致 `find` 无法正确解析 `-o`（OR）条件表达式。
 
 ## 修改的文件
-无。此失败为 `infra-error`，与 PR 代码逻辑无关。
+- `AI/sglang/0.5.13/24.03-lts-sp3/Dockerfile`: 将 `find` 命令中无效的 `$` 替换为正确的 shell 转义括号 `\( ... \)`。
 
 ## 修复逻辑
-CI 构建环境中从 PyPI 下载大体积 CUDA 相关 Python 包（`nvidia-cusparse` 145.9 MB）时网络连接中断，导致构建失败。这是瞬时网络波动问题，重新触发 CI 构建即可通过。根据规范，`infra-error` 类型的失败不应强行修改代码。
+分析报告指出两个问题：
+1. **主要失败（infra-error）**：`pip3 install sglang` 下载大文件时网络中断导致 `IncompleteRead`，属于暂时性基础设施问题，重试 CI 即可，无需代码修改。
+2. **代码缺陷（置信度: 高）**：`find` 命令中 `$` 不是有效的 shell/find 语法元素，无法正确分组 `-name "*.so" -o -name "*.a"` 条件。修复为标准的 `\( ... \)` 转义括号语法，确保 find 能正确匹配 `.so` 或 `.a` 文件。
+
+当前构建因网络问题提前失败，未执行到第 56 行，但一旦网络恢复，该行将直接导致 `find` 报错并使构建失败，因此必须修复。
 
 ## 潜在风险
-无。
+无。修复仅改变 `find` 条件的语法形式，语义不变——仍然是查找 `.so` 或 `.a` 文件。
