@@ -1,17 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改：CI 分析报告将此失败归类为 `infra-error`（CI 基础设施问题），CI 日志仅 14 行且无具体错误信息，脚本在 Docker 构建启动前的预检阶段静默失败。
+无需代码修改。CI 分析报告将该失败归类为 `infra-error`（CI 基础设施问题）。
 
 ## 修改的文件
-无
+无。
 
 ## 修复逻辑
-1. CI 分析报告明确将失败类型标注为 `infra-error`，置信度低。
-2. 日志极其有限（仅 14 行），未进入 `docker build` 阶段，失败发生在 CI 预检 shell 脚本中。
-3. 报告中修复方向 1（添加 Copyright/SPDX 头）与仓库现有规范不符：同目录下所有已有 Dockerfile（`5.0.1/24.03-lts-sp3/Dockerfile`、`5.0.0/24.03-lts-sp3/Dockerfile`、`4.3.0/24.03-lts-sp1/Dockerfile`）均无 Copyright/SPDX 头，直接从 `ARG BASE=...` 开始。
-4. 修复方向 2（检查 `Others/image-list.yml`）已确认不适用：该文件中已存在 `spring-cloud: spring-cloud` 条目。
-5. 此为 CI 基础设施/预检脚本问题，非代码缺陷，强行修改代码无法修复根因。
+1. CI 分析报告明确指出失败类型为 `infra-error`，置信度为低。
+2. CI 日志极不完整：仅记录了 1172 字节的文件下载和"清理缓存"操作，随后构建步骤直接标记为失败。**具体的错误信息完全缺失**，Docker 构建过程（`RUN`、`COPY`、`dnf install` 等）均未出现在日志中，说明实际构建可能尚未启动就已失败。
+3. 对比同仓库中已有的 `spring-cloud/5.0.1` 和 `5.0.0` 版本 Dockerfile，新 PR 中的 `5.0.2` Dockerfile 结构与现有版本一致，`meta.yml`、`doc/image-info.yml`、`README.md` 的更新格式也符合项目约定。
+4. 项目规范中 Copyright/SPDX 头并非 Dockerfile 的必需项（仓库中 85%+ 的 Dockerfile 均无此类头部），因此该方向不构成代码层面的修复需求。
+5. 根据修复原则中的规定：**"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"**，本次不做代码变更。
 
 ## 潜在风险
-无需代码修改，无风险。建议从 Jenkins 获取完整控制台日志以定位 CI 预检脚本的实际失败原因。
+这不是代码层面的问题，CI 基础设施（预检脚本、Jenkins job 配置、网络等）才是需要排查的方向。建议：
+- 获取完整的 CI 执行日志（临时脚本 `/tmp/jenkins13668292807163518311.sh` 的源码和错误输出）
+- 确认 CI 流水线是否存在临时性故障（如网络超时、磁盘空间不足、权限问题）
+- 尝试触发重新构建以排除偶发性基础设施问题
