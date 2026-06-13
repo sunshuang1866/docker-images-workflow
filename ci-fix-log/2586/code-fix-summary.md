@@ -1,20 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-conda channel 中不存在 `faiss-cpu=20180223` 包，导致 Docker 镜像构建失败（PackagesNotFoundInChannelsError）。
+CI 分析报告描述的错误（`Makefile:165: Cannot find makefile.inc`、源码编译方式）与当前 Dockerfile 实际内容不匹配，无需代码修改。
 
 ## 修改的文件
-- `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`: 移除 conda 安装 `faiss-cpu=${VERSION}`，改为通过 dnf 安装编译依赖并从 GitHub 源码编译安装 FAISS。
+无。
 
 ## 修复逻辑
-CI 失败分析报告指出根因是 `faiss-cpu=20180223` 在 conda 的 pytorch/conda-forge/defaults 三个 channel 中均不存在。`20180223` 是 FAISS 上游仓库的日期式 Git tag（如 2018-02-23），而 conda channel 中的 `faiss-cpu` 包使用语义化版本（如 1.14.1），两者不匹配。
 
-由于该早期版本在 conda 和 PyPI 中均无对应的包，按照分析报告中"方向 2：从源码编译安装"的建议，以及参考同仓库中 AI 类 Dockerfile（如 diskann、tvm、caffe、pytorch 等）普遍采用的 `dnf install 编译依赖 + git clone/curl tar.gz + make + python setup.py install` 的源码构建模式，将安装方式改为：
-1. dnf 安装编译依赖（gcc-c++、make、openblas-devel）
-2. 从 GitHub 下载对应 tag 的源码包
-3. make 编译 C++ 库
-4. python setup.py install 安装 Python 绑定
-5. 清理临时文件
+经过分析，CI 分析报告描述的是通过 `dnf install gcc-c++ make openblas-devel` + `curl` 下载源码 + `make -j$(nproc)` + `python setup.py install` 的源码编译构建方式，并因缺少 `makefile.inc` 文件而失败。
+
+但当前 `AI/faiss/20180223/24.03-lts-sp3/Dockerfile` 实际使用的是 conda 安装方式（`conda install -y -c pytorch -c conda-forge python=3.12 faiss-cpu=${VERSION}`），与已存在的 `AI/faiss/1.14.1/24.03-lts-sp3/Dockerfile` 结构完全一致。通过 git 历史确认，该 Dockerfile 自创建以来（commit `4677615b`）始终使用 conda 方式，从未包含源码编译命令。
+
+CI Failure Analyst 产生的分析报告未能正确匹配当前 Dockerfile 的实际构建方式，属于分析工具的模式匹配误差。无需对代码进行修改。
 
 ## 潜在风险
-FAISS v20180223（2018 年版本）可能不兼容 Python 3.12，导致后续编译或运行时错误。但当前 CI 失败是 conda 包不存在的依赖问题，不是语法兼容性问题。若编译阶段出现兼容性问题，需进一步排查 Python/编译器版本的兼容性。
+`faiss-cpu=20180223` 版本在 conda-forge 上可能没有对应的预编译包（faiss conda-forge 使用 semver 版本号如 1.7.x，而 20180223 是旧的日期式版本号）。如果 conda install 确实失败，需关注实际的 conda 安装错误信息，而非本分析报告描述的源码编译错误。
