@@ -5,36 +5,42 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: numpy C头文件缺失
-- 新模式症状关键词: numpy/arrayobject.h, No such file or directory, fatal error, make py
+- 新模式标题: 跨架构编译标志不兼容
+- 新模式症状关键词: `unrecognized command-line option`, `-m64`, `-mavx`, `-msse4`, `-mpopcnt`, `aarch64`, `g++: error`, `makefile.inc`
 
 ## 根因分析
 
 ### 直接错误
 ```
-python/swigfaiss_wrap.cxx:3228:10: fatal error: numpy/arrayobject.h: No such file or directory
- 3228 | #include <numpy/arrayobject.h>
-      |          ^~~~~~~~~~~~~~~~~~~~~
-compilation terminated.
-make: *** [Makefile:84: python/_swigfaiss.so] Error 1
+#9 106.4 g++ -fPIC -m64 -Wall -g -O3 -mavx -msse4 -mpopcnt -fopenmp -Wno-sign-compare -std=c++11 -fopenmp -c hamming.cpp -o hamming.o  
+#9 106.4 g++: error: unrecognized command-line option '-m64'
+#9 106.4 g++: error: unrecognized command-line option '-mavx'
+#9 106.4 g++: error: unrecognized command-line option '-msse4'
+#9 106.4 g++: error: unrecognized command-line option '-mpopcnt'
+#9 106.4 make: *** [Makefile:43: hamming.o] Error 1
 ```
 
 ### 根因定位
-- 失败位置: AI/faiss/20180223/24.03-lts-sp3/Dockerfile:14 (RUN 指令)
-- 失败原因: `make py` 编译 faiss Python SWIG 绑定时，编译器找不到 numpy C 头文件 `numpy/arrayobject.h`。指令中硬编码的 include 路径 `-I/opt/conda/lib/python3.12/site-packages/numpy/core/include` 下不存在该文件。
+- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`:19 (RUN 命令内的 make 步骤)
+- 失败原因: faiss v20180223 的 `example_makefiles/makefile.inc.Linux` 硬编码了 x86_64 专属 CPU 标志（`-m64`、`-mavx`、`-msse4`、`-mpopcnt`），在 aarch64 架构上构建时，aarch64 的 g++ 编译器不认识这些选项，直接报错退出。
 
 ### 与 PR 变更的关联
-PR 新增了整个 Dockerfile（此前不存在 faiss 20180223 的构建文件）。**日志中实际执行的 RUN 命令与 PR diff 中的 RUN 命令存在显著差异**——diff 显示仅通过 conda 安装 faiss-cpu 预编译包，但日志显示实际执行的是从 GitHub 源码编译 faiss 的完整流程（包含 dnf 安装 gcc-c++/make/openblas-devel/swig、下载源码、make、make py 等）。该差异表明 CI 构建的 Dockerfile 与 PR diff 内容可能不一致。无论何种情况，失败均由本次 PR 新增内容引入。
+PR 新增了一个从头编译 faiss v20180223 的 Dockerfile。Dockerfile 第 19 行的 `RUN` 命令中：
+
+```
+cp example_makefiles/makefile.inc.Linux makefile.inc
+```
+
+直接复制了面向 x86_64 Linux 的 Makefile 配置模板，未根据 `TARGETARCH` 对编译标志做任何架构适配。在 aarch64 构建节点上，`-m64`、`-mavx`、`-msse4`、`-mpopcnt` 这些 x86 指令集标志无法被 aarch64 g++ 识别，导致编译失败。这是本次 PR 新增内容直接引入的问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-在 `conda install -y python=3.12 numpy` 后，使用 `python3 -c "import numpy; print(numpy.get_include())"` 动态获取 numpy C 头文件的实际安装路径，再将其传入 `make py` 的 `PYTHONCFLAGS` 以替代硬编码路径 `-I/opt/conda/lib/python3.12/site-packages/numpy/core/include`。
+### 方向 1（置信度: 高）
+在 Dockerfile 中，`cp example_makefiles/makefile.inc.Linux makefile.inc` 之后，根据 `TARGETARCH` 变量用 `sed` 移除不兼容的编译标志。当 `TARGETARCH` 为 `arm64` 时，从 makefile.inc 中删除 `-m64`、`-mavx`、`-msse4`、`-mpopcnt` 等 x86 专属标志，使编译命令仅保留架构无关的选项（`-fPIC`、`-Wall`、`-g`、`-O3`、`-fopenmp`、`-std=c++11` 等）。
 
 ### 方向 2（置信度: 低）
-如果 CI 本应按照 PR diff 中的 Dockerfile 执行，即直接通过 `conda install -y -c pytorch -c conda-forge python=3.12 faiss-cpu=${VERSION}` 安装预编译包而非从源码编译，则无需处理头文件问题。但需确认 conda-forge 频道是否存在 `faiss-cpu=20180223` 版本，以及 CI 为何执行了不同于 diff 的 Dockerfile。
+考虑 faiss v20180223 版本过于古老（2018年2月），该版本的 Makefile 构建系统可能从根本上不支持 aarch64。如果移除 x86 标志后仍出现其他架构相关编译错误，可能需要升级 faiss 到支持 aarch64 的较新版本（如已有的 1.14.1），或放弃 aarch64 构建仅支持 amd64。
 
 ## 需要进一步确认的点
-1. **Dockerfile 内容不一致**：CI 日志中实际执行的 RUN 命令（编译 faiss 源码）与 PR diff 中的 RUN 命令（conda 安装预编译包）完全不同。需要确认 CI 构建的 Dockerfile 是否与提交的 diff 一致，是否存在合并冲突或 CI 编排层面的错误。
-2. **numpy 头文件实际路径**：在目标基础镜像中执行 `conda install -y numpy` 后，需用 `find /opt/conda -name arrayobject.h` 确认 `numpy/arrayobject.h` 的实际安装路径。
-3. **conda-forge faiss-cpu 版本可用性**：若走 conda 直接安装路线，需验证 `conda-forge` 频道是否提供 `faiss-cpu=20180223` 版本。
+- aarch64 构建节点上，移除 `-m64`/`-mavx`/`-msse4`/`-mpopcnt` 后，faiss v20180223 是否还有其他 aarch64 不兼容的代码（如内联汇编、x86 intrinsic 等）
+- `example_makefiles/makefile.inc.Linux` 的完整内容，确认还有哪些标志需要按架构条件处理
