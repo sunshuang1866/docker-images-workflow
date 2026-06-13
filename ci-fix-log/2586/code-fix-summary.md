@@ -1,21 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题：CI 构建流水线使用了与 PR diff 不匹配的 Dockerfile（源码编译方式），而非 PR 中意图使用的 conda 安装方式。无需代码修改。
+faiss 20180223 版本的 Dockerfile 因 conda 无此版本的 faiss-cpu 包且源码编译时错误地假设 `python/setup.py` 存在而构建失败，改为正确的源码编译 + `make py` 方式构建 Python 绑定。
 
 ## 修改的文件
-无代码修改。
+- `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`: 将 `conda install faiss-cpu=20180223` 替换为完整的源码编译流程，使用 `make py` 构建 Python 绑定（而非不存在的 `python setup.py install`），增加构建依赖（gcc-c++、make、openblas-devel、swig），设置 LD_LIBRARY_PATH 确保共享库可被找到。
 
 ## 修复逻辑
-
-CI 分析报告明确指出：
-- 失败类型为 `build-error`，根因是旧版 faiss 20180223 源码中不包含 `python/setup.py`
-- **CI 日志中实际执行的 Dockerfile 与 PR diff 完全不一致**：CI 执行的是源码编译路径（`dnf install gcc-c++ make openblas-devel` + `curl` 下载源码 + `make` + `python setup.py install`），而 PR diff 中的 Dockerfile 使用 conda 从 conda-forge/pytorch channel 安装预编译包
-- 分析报告 Direction 1（置信度: 高）指出：如果 CI 正确执行 PR diff 中的 Dockerfile，则不应出现此错误
-
-当前仓库中 `AI/faiss/20180223/24.03-lts-sp3/Dockerfile` 使用的是 conda 安装方式（与 PR diff 一致，也与 1.14.1 版本的模式一致），因此无需对源码进行代码修改。CI 流水线需要排查为何使用了错误的代码版本/分支。
-
-补充说明：经核查，conda-forge 上 `faiss-cpu` 包的可用版本为 1.6.3~1.10.0，不包含 `20180223` 版本。即使 CI 正确使用 conda 方式的 Dockerfile，也可能因包不存在而失败。但该问题不在本次 CI 失败分析报告的范围之内。
+1. **根因**：faiss-cpu 在 conda-forge/pytorch 频道中不存在版本 20180223（最早的 faiss conda 包从 0.1/1.2.1 开始，均为语义化版本号）。即使使用源码编译，faiss v20180223 的 `python/` 目录下没有 `setup.py`，其 Python 绑定通过 SWIG + Makefile 构建，应使用 `make py` 命令。
+2. **修复方案**：保留 miniconda 提供的 Python 3.12/numpy 环境，通过 dnf 安装编译工具，从 GitHub 下载 faiss v20180223 源码，使用正确的构建流程（`make` 编译 C++ 库 + `make py` 构建 Python 绑定），将生成的 `_swigfaiss.so`、`faiss.py`、`swigfaiss.py` 复制到 conda 的 site-packages 目录，并将 `libfaiss.so` 复制到 conda lib 目录并设置 LD_LIBRARY_PATH。
 
 ## 潜在风险
-无。当前未对任何文件进行代码修改。
+- 源码编译增加了构建时间和层大小，且依赖网络下载 GitHub 源码（可能受网络波动影响）。
+- `makefile.inc.Linux` 模板中的 CFLAGS 原本包含 x86_64 特定标志（`-m64 -mavx -msse4 -mpopcnt`），已被通用标志替代以满足跨架构兼容，但未在 ARM64 上实际验证。
+- 若 faiss v20180223 源码的 Makefile 对 Python 3.12 存在兼容性问题，构建仍可能失败。
