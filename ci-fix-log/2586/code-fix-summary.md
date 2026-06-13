@@ -1,16 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败系基础设施错误（infra-error），CI 流水线实际运行了与 PR 提交内容不一致的 Dockerfile（源码编译版本），而非 PR 中的 conda 安装版本，无需修改 PR 源文件。
+faiss v20180223 在 aarch64 架构上编译失败，原因是 Makefile 硬编码了 x86_64 专用编译器标志（-m64、-mavx、-msse4、-mpopcnt），g++ 在 aarch64 上无法识别。
 
 ## 修改的文件
-无代码修改。
+- `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`: 在 conda install 步骤中按架构分支处理 — amd64 保持原有 conda 安装方式，arm64 改为手动编译 faiss 并移除 x86_64 专用标志。
 
 ## 修复逻辑
-1. **Dockerfile 不一致**：PR diff 中的 Dockerfile（21 行）使用 `conda install -y -c pytorch -c conda-forge faiss-cpu=${VERSION}` 进行二进制安装，已通过 `TARGETARCH` 正确区分 arm64/amd64 架构下载对应的 Miniconda。该模式与已通过 CI 的 `1.14.1` 版本的 Dockerfile 完全一致。
-2. **CI 实际运行内容**：CI 日志显示构建的 Dockerfile 包含 `yum install -y gcc gcc-c++ make openblas-devel swig git && git clone ... && make && make py` 的源码编译步骤（约 25 行），其中 `makefile.inc.Linux` 硬编码了 `-m64 -mavx -msse4 -mpopcnt` 等 x86_64 专属编译选项，在 aarch64 构建节点上触发 `unrecognized command-line option` 错误。
-3. **根因判断**：PR 提交的 Dockerfile 本身不存在 x86 编译选项问题，CI 流水线使用了来源不明的另一个 Dockerfile 进行构建。因此属于 CI 基础设施/流水线配置问题，而非代码问题。
+分析报告指出根因是 faiss v20180223（2018 年极旧版本）的 `example_makefiles/makefile.inc.Linux` 硬编码了 `-m64`、`-mavx`、`-msse4`、`-mpopcnt` 等 x86_64 专用编译选项，在 aarch64 上 g++ 报 unrecognized command-line option 错误。
+
+修复方案：利用 Dockerfile 已有的 `TARGETARCH` 变量进行架构判断：
+- **amd64**：保持原逻辑，通过 `conda install -c pytorch -c conda-forge faiss-cpu=${VERSION}` 安装预编译包
+- **arm64**：安装编译依赖（openblas-devel、gcc-c++、git、make），通过 conda 安装 python 和 numpy，克隆 faiss 源码，用 sed 移除 makefile.inc.Linux 中的 x86_64 专用标志（`-m64`、`-mavx`、`-msse4`、`-mpopcnt`），然后编译 C++ 库并安装 Python 绑定
 
 ## 潜在风险
-- CI 流水线恢复正常使用 PR 实际 Dockerfile 后，需验证 `faiss-cpu=20180223` 在 conda-forge/pytorch channel 中是否真实存在。该版本号对应 2018 年 2 月 23 日，conda channel 可能从未发布过此版本，届时 conda install 可能因找不到包而失败。
-- 若 conda 包不可用，需考虑改用 pip 安装（`pip install faiss-cpu==1.7.4` 接近该时间点版本）或从源码编译（需正确区分 arm64/x86_64 编译选项）。
+- arm64 路径依赖 openEuler 24.03-LTS-SP3 仓库中的 `openblas-devel` 和 `gcc-c++` 包，若源不可用则构建失败
+- `git clone` 深度克隆依赖 GitHub 可访问性，网络问题可能导致构建失败
+- faiss v20180223 的 `python setup.py install` 步骤可能因 aarch64 Python 兼容性问题失败（如 swig 生成的包装代码不兼容 ARM），虽然编译阶段已通过标志修复，但运行时行为未经充分测试
