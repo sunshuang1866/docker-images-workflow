@@ -11,22 +11,23 @@
 ## 根因分析
 
 ### 直接错误
-CI 日志未提供（`ci.logs` 标记为 `not available — analyze based on PR diff only`），无法从日志中提取任何错误信息。
+CI 日志不可用，无法获取直接错误信息。上下文 JSON 中 `ci.logs` 字段明确标注为 `"not available — analyze based on PR diff only"`。
 
 ### 根因定位
-- 失败位置: 无法确定（日志缺失）
-- 失败原因: 无法确定（日志缺失）
+- 失败位置: 未知（日志缺失）
+- 失败原因: 证据不足，无法从 PR diff 推断 CI 失败根因
 
 ### 与 PR 变更的关联
-PR 仅将 `AI/cuda/README.md` 中的一个词从 `cann` 修正为 `cuda`（`Start a cann instance` → `Start a cuda instance`），属于纯文档 typo 修正，无任何代码、Dockerfile、配置或依赖变更。此类更改本身不会触发编译、测试或构建失败。CI 失败几乎可以确定与本次 PR 改动无关，很可能是 CI 基础设施问题或并行 job 中的既有 flaky 失败。
+PR 仅修改了 `AI/cuda/README.md` 中的一处文本：将 `Start a cann instance` 修正为 `Start a cuda instance`（单行变更，1 增 1 删）。这是纯文档修正，不涉及任何 Dockerfile、构建脚本、依赖配置或代码逻辑，理论上不可能触发编译错误、测试失败或依赖类问题。
+
+CI 失败极大概率为基础设施问题（如 runner 网络波动、磁盘空间不足、Jenkins 调度异常等），与本次 PR 变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-由于无日志可分析，无法给出具体修复方向。建议重新触发 CI 运行（re-run），观察是否复现。若复现，需获取失败 job 的具体日志后再做分析。
+触发 CI 重跑（retry）。若失败为基础设施临时性问题，重跑后大概率通过。若重复失败，需要获取下游架构构建 job 的完整日志进一步排查。
 
 ## 需要进一步确认的点
-1. **获取失败 job 的实际日志**：当前上下文中 `ci.logs` 为空，无法进行任何实质性分析。需要获取 Jenkins 或 CI 流水线中实际失败 job 的完整日志。
-2. **确认失败的 job 名称**：需要知道是哪个具体 job 失败（如架构构建 job、镜像扫描 job、license 检查 job 等），以判断是否与 README 文件修改有关。
-3. **检查是否有并行 CI 检查**：纯 README 修改可能触发某些文档格式校验（如 Copyright/SPDX 头检查 — 见模式17），若 `AI/cuda/README.md` 缺少 Copyright 和 SPDX-License-Identifier 声明，可能导致该类检查失败。
-4. **确认是否为 flaky infra 失败**：PR 改动与 CI 失败之间无逻辑关联，大概率是 CI 基础设施的偶发问题（runner 异常、网络波动、资源竞争等），建议先 re-run 验证。
+1. **获取 CI 完整日志**：当前 `ci.logs` 不可用，需从 Jenkins 获取本次运行的实际构建日志，确认失败发生在哪个 job/阶段。
+2. **确认是否为下游架构 job 失败**：若提供的日志来自编排层且显示成功，则需获取 x86-64、aarch64 等下游构建 job 的日志。
+3. **排除基础设施偶发故障**：检查构建节点的磁盘、网络、Docker daemon 状态等。
