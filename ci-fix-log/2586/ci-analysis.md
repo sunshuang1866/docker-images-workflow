@@ -5,40 +5,38 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 旧版源码缺setup.py
-- 新模式症状关键词: No such file or directory, setup.py, python, faiss, 20180223
+- 新模式标题: 源码构建路径错误
+- 新模式症状关键词: No such file or directory, setup.py, faiss, python
 
 ## 根因分析
 
 ### 直接错误
 ```
 #8 138.5 python: can't open file '/tmp/faiss-20180223/python/setup.py': [Errno 2] No such file or directory
-#8 ERROR: process "/bin/sh -c conda tos accept ... dnf install -y gcc-c++ make openblas-devel && ... curl -fSL .../faiss/archive/v${VERSION}.tar.gz && ... make -j$(nproc) && cd python && python setup.py install ..." did not complete successfully: exit code: 2
+#8 ERROR: process "/bin/sh -c conda tos accept ... && cd python && python setup.py install ..." did not complete successfully: exit code: 2
 ------
 Dockerfile:14
 ```
 
 ### 根因定位
-- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile:14`（`RUN` 指令中 `cd python && python setup.py install` 步骤）
-- 失败原因: faiss 20180223 是 2018 年的历史版本，其源代码目录中**不包含 `python/setup.py` 文件**。CI 实际执行的 Dockerfile 试图从 GitHub 下载源码后运行 `make` 编译 C++ 库，再通过 `cd python && python setup.py install` 安装 Python 绑定，但该旧版本中 `python/` 目录下不存在 `setup.py`，导致 Python 模块安装步骤失败（exit code: 2）。
+- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile:14`（第2个 RUN 命令中 `cd python && python setup.py install` 这一步）
+- 失败原因: faiss 20180223 是 2018 年的早期版本，其源码 `python/` 目录下不存在 `setup.py` 文件。C++ 库（`libfaiss.a`）编译成功，但 Python 绑定安装步骤因目标文件缺失而失败。
 
 ### 与 PR 变更的关联
-**存在关键不一致**：PR diff 中的 Dockerfile 使用 `conda install -c pytorch -c conda-forge python=3.12 faiss-cpu=${VERSION}` 从 conda 仓库安装预编译包（纯 conda 方式，无源码编译步骤），而 CI 日志中实际执行的 Dockerfile 采用了完全不同的构建路径——通过 `dnf install gcc-c++ make openblas-devel`、`curl` 下载源码、`make` 编译 C++、再 `python setup.py install` 安装 Python 绑定（源码编译方式）。CI 构建的 Dockerfile 内容与 PR diff 不匹配。
-
-此外，日志中编译阶段（`make -j$(nproc)`）和静态库打包（`ar r libfaiss.a ...`）均成功完成，仅有若干无害的 C++ 编译器 warning，失败仅发生在最后的 Python 安装步骤。
+本次 PR 新增了 faiss 20180223 的 Dockerfile。CI 构建日志中实际执行的 RUN 命令内容（conda 安装 python+numpy + dnf 安装编译工具 + 从源码编译 faiss + `python setup.py install`）与 PR diff 中展示的 Dockerfile（conda 直接安装 faiss-cpu 预编译包）存在明显差异。无论以哪个版本的 Dockerfile 为准，错误均发生在构建流程的 Python 安装阶段。若以 CI 实际执行的逻辑为准，问题直接源于 Dockerfile 对 faiss 老版本源码结构的假设错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-确认 CI 构建是否使用了正确的代码版本。PR diff 意图使用 conda 一键安装预编译的 `faiss-cpu` 包，无需源码编译。如果 CI 正确执行 PR diff 中的 Dockerfile，则不应出现此错误。需排查 CI 流水线是否拉取了错误的代码分支/提交。
+faiss 20180223 的 `python/` 目录不包含 `setup.py`。需确认该版本实际的 Python 绑定构建方式：
+- 若该目录下有 `Makefile`，改用 `make -C python install`
+- 若该版本通过 SWIG 生成绑定，需先 `make swig` 再安装
+- 若该版本根本没有 Python 绑定，移除 `cd python && python setup.py install` 步骤
 
 ### 方向 2（置信度: 中）
-如果确实需要保留源码编译方式，需针对 faiss 20180223 版本调整 Python 绑定安装步骤。faiss 20180223 的 Python 模块可能通过 Makefile 直接编译安装（使用 `make -C python` 或 `python setup.py build` 的不同变体），而非现代版的 `pip install .` / `python setup.py install`。需查阅 faiss 20180223 源码中 `python/` 目录下实际的构建方式（如是否存在 `Makefile`，或需使用 `swig` 等方式）。
-
-### 方向 3（置信度: 低）
-如果 conda-forge / pytorch channel 不提供 `faiss-cpu=20180223` 的预编译包，可考虑将 PR diff 中的 conda 安装方式与源码编译方式结合：保留 `make` 编译 C++ 库，但用 `pip install .` 替换 `python setup.py install`（如果该版本 `python/` 目录下有 `pyproject.toml` 或兼容的打包文件），或改用 `make -C python` 根据该版本的 Makefile 规则安装。
+改用 conda 从 pytorch/conda-forge channel 直接安装 faiss-cpu 预编译包，避免源码编译。但需先确认 `faiss-cpu=20180223` 在 conda 仓库中是否可用——早期版本可能未被收录。
 
 ## 需要进一步确认的点
-1. CI 日志中执行的 Dockerfile（源码编译方式）与 PR diff 中的 Dockerfile（conda 安装方式）完全不一致，需确认 CI 是否使用了正确的代码。可能当前 CI 构建的 Dockerfile 是另一个版本或尚未被 PR diff 替换的旧版本。
-2. faiss 20180223 源码（`https://github.com/facebookresearch/faiss/archive/v20180223.tar.gz`）中 `python/` 目录的实际文件列表，确认该版本 Python 绑定的真实构建方式。
-3. conda-forge / pytorch channel 中是否存在 `faiss-cpu=20180223` 版本——若无，则 PR diff 中的纯 conda 方案本身也可能失败，需综合评估。
+1. faiss v20180223 源码 `python/` 目录的实际内容（`Makefile` / `setup.py` / 空目录）
+2. CI 实际构建的 Dockerfile 是否与 PR diff 一致——日志中的 RUN 命令比 diff 多出大量源码编译步骤
+3. 若 CI 实际执行的 Dockerfile 与 diff 不同，需确认来源（是否被其他提交覆盖或 CI 使用了错误版本的 Dockerfile）
