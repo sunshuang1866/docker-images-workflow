@@ -5,32 +5,31 @@
 - 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 模式19
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 新模式标题: —
+- 新模式症状关键词: —
 
 ## 根因分析
 
 ### 直接错误
-**CI 日志不可用**。上下文 JSON 中 `ci.logs` 字段为 `"not available — analyze based on PR diff only"`，无法提取任何错误信息。
+CI 日志不可用，无法获取直接错误信息。
 
 ### 根因定位
 - 失败位置: 未知
 - 失败原因: 证据不足，无法确定
 
-PR 变动仅涉及 `AI/cuda/README.md` 中的一处文档修正：将 "cann" 修正为 "cuda"（修正了产品名称的笔误）。该改动不涉及 Dockerfile、构建脚本、依赖配置或元数据文件，从 diff 自身无法推断出任何会导致 CI 构建/测试失败的逻辑。
-
 ### 与 PR 变更的关联
-PR 变更为纯文档修正（README 中 1 个词的拼写修正），**极不可能**直接触发 CI 失败。CI 失败更可能是基础设施问题（如 runner 故障、网络超时）或与 PR 无关的预存问题。
+PR 变更仅涉及 `AI/cuda/README.md` 中一处文案修正（`Start a cann instance` → `Start a cuda instance`），属于纯文档修正，不涉及 Dockerfile、构建逻辑、依赖或测试代码的变更。从 diff 内容看，此改动本身不应触发任何构建或测试失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-CI 失败与 PR 代码变更无关，建议 **re-run CI job** 观察是否可通过重试恢复（infra-error 的典型处理方式）。
-
-### 方向 2（置信度: 低）
-如果重试后仍然失败，可能是 CI 的提交校验环节（如 commit message 格式检查、签名验证等）触发了非代码层面的失败，需获取 CI 日志后进一步判断。
+当前提供的 CI 日志为空，无法判断真正的失败原因。需要获取 CI 实际失败 job 的完整日志后再做分析。可能的情况包括：
+- CI 基础设施临时故障（runner 异常、网络超时）
+- 预检脚本对 README 文件的格式或路径有额外校验要求
+- 与本次 PR 无关的预存问题
 
 ## 需要进一步确认的点
-1. **获取 CI 失败 job 的完整日志**：当前无法确切知晓 CI 在哪一步失败，需要拿到对应 job 的日志输出才能定位真正的错误。
-2. 确认 CI 流水线中是否有针对 README 文件的校验规则（如 SPDX/Copyright 头检查），但当前 README.md 是存量修改而非新增文件，此可能性较低。
-3. 确认 PR commit message 格式是否符合仓库 CI 要求（如 conventional commits 规范）。
+1. 获取 CI 实际失败 job 的完整日志（当前 logs 标注为 `not available`）
+2. 确认 CI pipeline 中是否存在针对 README 文件的路径校验规则（参考历史模式19中 PR #2512 的 `.claude/agents/README.md` 路径校验问题）
+3. 确认失败是否发生在下游架构构建 job（如 x86-64、aarch64）中，若当前日志来自 trigger 层且显示成功，则需获取下游 job 日志
+4. 检查 CI 编排层面的 `image-list.yml` 是否包含 `AI/cuda` 相关条目，以及该文档变更是否触发了 CI 预检阶段的一致性校验
