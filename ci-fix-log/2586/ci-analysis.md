@@ -5,31 +5,40 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 旧版faiss缺少makefile.inc
-- 新模式症状关键词: Cannot find makefile.inc, example_makefiles, faiss, make
+- 新模式标题: 旧版源码缺setup.py
+- 新模式症状关键词: No such file or directory, setup.py, python, faiss, 20180223
 
 ## 根因分析
 
 ### 直接错误
 ```
-#9 139.6 Makefile:165: *** Cannot find makefile.inc. Did you forget to copy the relevant file from ./example_makefiles?.  Stop.
-#9 ERROR: process "/bin/sh -c dnf install -y gcc-c++ make openblas-devel &&     dnf clean all &&     curl -fSL -o /tmp/faiss.tar.gz \"https://github.com/facebookresearch/faiss/archive/v${VERSION}.tar.gz\" &&     tar -xzf /tmp/faiss.tar.gz -C /tmp &&     cd /tmp/faiss-${VERSION} && make -j$(nproc) &&     cd python && python setup.py install &&     cd / && rm -rf /tmp/faiss.tar.gz /tmp/faiss-${VERSION}" did not complete successfully: exit code: 2
+#8 138.5 python: can't open file '/tmp/faiss-20180223/python/setup.py': [Errno 2] No such file or directory
+#8 ERROR: process "/bin/sh -c conda tos accept ... dnf install -y gcc-c++ make openblas-devel && ... curl -fSL .../faiss/archive/v${VERSION}.tar.gz && ... make -j$(nproc) && cd python && python setup.py install ..." did not complete successfully: exit code: 2
 ------
-Dockerfile:19
+Dockerfile:14
 ```
 
 ### 根因定位
-- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`:19-25（`make -j$(nproc)` 步骤）
-- 失败原因: faiss v20180223 的旧版构建系统要求在执行 `make` 之前，先从 `./example_makefiles/` 目录复制对应的平台 `makefile.inc` 到项目根目录，但 Dockerfile 中缺少这一步骤，直接调用了 `make`。
+- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile:14`（`RUN` 指令中 `cd python && python setup.py install` 步骤）
+- 失败原因: faiss 20180223 是 2018 年的历史版本，其源代码目录中**不包含 `python/setup.py` 文件**。CI 实际执行的 Dockerfile 试图从 GitHub 下载源码后运行 `make` 编译 C++ 库，再通过 `cd python && python setup.py install` 安装 Python 绑定，但该旧版本中 `python/` 目录下不存在 `setup.py`，导致 Python 模块安装步骤失败（exit code: 2）。
 
 ### 与 PR 变更的关联
-PR 新增的 Dockerfile（`AI/faiss/20180223/24.03-lts-sp3/Dockerfile`）在 `RUN` 指令中直接从 GitHub 下载 faiss 源码并执行 `make`，但遗漏了 faiss 旧版构建流程中必需的 `cp example_makefiles/makefile.inc.Linux makefile.inc` 步骤。这与后续 PR 变更（README、meta.yml、image-info.yml）无关，问题仅出现在 Dockerfile 的构建步骤中。
+**存在关键不一致**：PR diff 中的 Dockerfile 使用 `conda install -c pytorch -c conda-forge python=3.12 faiss-cpu=${VERSION}` 从 conda 仓库安装预编译包（纯 conda 方式，无源码编译步骤），而 CI 日志中实际执行的 Dockerfile 采用了完全不同的构建路径——通过 `dnf install gcc-c++ make openblas-devel`、`curl` 下载源码、`make` 编译 C++、再 `python setup.py install` 安装 Python 绑定（源码编译方式）。CI 构建的 Dockerfile 内容与 PR diff 不匹配。
+
+此外，日志中编译阶段（`make -j$(nproc)`）和静态库打包（`ar r libfaiss.a ...`）均成功完成，仅有若干无害的 C++ 编译器 warning，失败仅发生在最后的 Python 安装步骤。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 Dockerfile 的 `RUN` 指令中，在 `make -j$(nproc)` 之前增加一步：从 `./example_makefiles/` 复制对应平台的 makefile.inc 到工作目录。对于 Linux x86_64/aarch64，通常应复制 `example_makefiles/makefile.inc.Linux`。示例逻辑：`cd /tmp/faiss-${VERSION} && cp example_makefiles/makefile.inc.Linux makefile.inc && make -j$(nproc) && ...`
+确认 CI 构建是否使用了正确的代码版本。PR diff 意图使用 conda 一键安装预编译的 `faiss-cpu` 包，无需源码编译。如果 CI 正确执行 PR diff 中的 Dockerfile，则不应出现此错误。需排查 CI 流水线是否拉取了错误的代码分支/提交。
+
+### 方向 2（置信度: 中）
+如果确实需要保留源码编译方式，需针对 faiss 20180223 版本调整 Python 绑定安装步骤。faiss 20180223 的 Python 模块可能通过 Makefile 直接编译安装（使用 `make -C python` 或 `python setup.py build` 的不同变体），而非现代版的 `pip install .` / `python setup.py install`。需查阅 faiss 20180223 源码中 `python/` 目录下实际的构建方式（如是否存在 `Makefile`，或需使用 `swig` 等方式）。
+
+### 方向 3（置信度: 低）
+如果 conda-forge / pytorch channel 不提供 `faiss-cpu=20180223` 的预编译包，可考虑将 PR diff 中的 conda 安装方式与源码编译方式结合：保留 `make` 编译 C++ 库，但用 `pip install .` 替换 `python setup.py install`（如果该版本 `python/` 目录下有 `pyproject.toml` 或兼容的打包文件），或改用 `make -C python` 根据该版本的 Makefile 规则安装。
 
 ## 需要进一步确认的点
-- 确认 `example_makefiles/` 目录中是否存在 `makefile.inc.Linux` 文件（faiss v20180223 的源码包中），以及该模板是否需要针对 openEuler 环境做额外调整（如 BLAS 库路径指向 openblas）。
-- 确认该版本 faiss 的 Python 绑定安装（`python setup.py install`）是否需要额外的 Python 依赖（如 numpy），如需则应在 `dnf install` 或 `pip install` 中补充。
+1. CI 日志中执行的 Dockerfile（源码编译方式）与 PR diff 中的 Dockerfile（conda 安装方式）完全不一致，需确认 CI 是否使用了正确的代码。可能当前 CI 构建的 Dockerfile 是另一个版本或尚未被 PR diff 替换的旧版本。
+2. faiss 20180223 源码（`https://github.com/facebookresearch/faiss/archive/v20180223.tar.gz`）中 `python/` 目录的实际文件列表，确认该版本 Python 绑定的真实构建方式。
+3. conda-forge / pytorch channel 中是否存在 `faiss-cpu=20180223` 版本——若无，则 PR diff 中的纯 conda 方案本身也可能失败，需综合评估。
