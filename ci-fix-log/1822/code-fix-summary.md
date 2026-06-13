@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 infra-error（基础设施故障），与 PR 变更无关。
+无需代码修改。CI 失败分析报告判定为 `infra-error`（CI 基础设施问题），与本次 PR 的代码变更无关。
 
 ## 修改的文件
-无。`AI/cuda/README.md` 的 typo 修正 (`cann` → `cuda`) 本身正确且不会触发任何构建/测试失败。
+无
 
 ## 修复逻辑
-CI 分析报告将本次失败归类为 `infra-error`，置信度低，日志不可用。PR #1822 仅修改了一处文档 typo，属于 trivial 变更，不存在代码逻辑错误、依赖问题或配置问题。CI 失败极大概率为 transient infrastructure 问题，建议重新触发 CI 运行。不需要对源代码做任何修改。
+本次 PR 仅修改了 `AI/cuda/README.md` 中的一行文本（"cann instance" → "cuda instance" 的 typo 修复），属于纯文档级别的修改，不涉及任何 Dockerfile、构建脚本、测试代码或依赖配置。CI 日志不可用，无法定位具体错误，但极大概率属于 CI 基础设施临时故障（如 runner 资源不足、网络超时等），或该分支合入了一个已存在 CI 失败的上游分支。建议重新触发 CI 运行以确认是否为临时故障。
 
 ## 潜在风险
-无。
+无
