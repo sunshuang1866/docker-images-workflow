@@ -5,8 +5,8 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: Faiss缺少编译配置文件
-- 新模式症状关键词: `Cannot find makefile.inc`, `example_makefiles`, `faiss`, `Makefile:165`
+- 新模式标题: 旧版faiss缺少makefile.inc
+- 新模式症状关键词: Cannot find makefile.inc, example_makefiles, faiss, make
 
 ## 根因分析
 
@@ -19,20 +19,17 @@ Dockerfile:19
 ```
 
 ### 根因定位
-- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`:19（RUN 命令中的 `make -j$(nproc)` 步骤）
-- 失败原因: Faiss 的构建系统要求在运行 `make` 之前，先从 `./example_makefiles/` 目录复制对应的 `makefile.inc` 模板文件到项目根目录并配置。Dockerfile 中直接执行 `make -j$(nproc)` 时缺少该预处理步骤，导致 Makefile 第 165 行检测到 `makefile.inc` 不存在而报错终止。
+- 失败位置: `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`:19-25（`make -j$(nproc)` 步骤）
+- 失败原因: faiss v20180223 的旧版构建系统要求在执行 `make` 之前，先从 `./example_makefiles/` 目录复制对应的平台 `makefile.inc` 到项目根目录，但 Dockerfile 中缺少这一步骤，直接调用了 `make`。
 
 ### 与 PR 变更的关联
-PR 新增了 `AI/faiss/20180223/24.03-lts-sp3/Dockerfile` 文件。该 Dockerfile 在编译步骤（第 4 步 RUN 命令）中遗漏了 Faiss 构建系统必需的 `makefile.inc` 配置文件准备步骤——对于 Linux + openblas 编译场景，通常需要执行 `cp ./example_makefiles/makefile.inc.Linux ./makefile.inc`（或类似命令）来初始化编译配置。
+PR 新增的 Dockerfile（`AI/faiss/20180223/24.03-lts-sp3/Dockerfile`）在 `RUN` 指令中直接从 GitHub 下载 faiss 源码并执行 `make`，但遗漏了 faiss 旧版构建流程中必需的 `cp example_makefiles/makefile.inc.Linux makefile.inc` 步骤。这与后续 PR 变更（README、meta.yml、image-info.yml）无关，问题仅出现在 Dockerfile 的构建步骤中。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 `make -j$(nproc)` 之前，增加一步 `cp ./example_makefiles/makefile.inc.Linux ./makefile.inc`（或该版本 Faiss 对应的模板文件路径），使 Faiss 构建系统能找到编译配置文件。具体模板文件名需确认 `faiss-20180223/example_makefiles/` 目录下的实际可用文件（通常为 `makefile.inc.Linux` 或 `makefile.inc.generic`）。
-
-### 方向 2（置信度: 中）
-如果 `example_makefiles/` 下没有现成可用的 Linux 模板，可参考 Faiss 官方文档在 Dockerfile 中手动创建 minimal `makefile.inc`，指定 OpenBLAS 头文件和库路径（`/usr/include/openblas` 和 `/usr/lib64`），使编译能够找到已通过 `dnf` 安装的 `openblas-devel`。
+在 Dockerfile 的 `RUN` 指令中，在 `make -j$(nproc)` 之前增加一步：从 `./example_makefiles/` 复制对应平台的 makefile.inc 到工作目录。对于 Linux x86_64/aarch64，通常应复制 `example_makefiles/makefile.inc.Linux`。示例逻辑：`cd /tmp/faiss-${VERSION} && cp example_makefiles/makefile.inc.Linux makefile.inc && make -j$(nproc) && ...`
 
 ## 需要进一步确认的点
-- faiss v20180223 源码中 `example_makefiles/` 目录下具体有哪些模板文件可用（确认准确的 `cp` 源路径）
-- openEuler 24.03-LTS-SP3 上 openblas 的安装路径是否与标准 Linux 一致（`/usr/include/openblas`、`/usr/lib64`）
+- 确认 `example_makefiles/` 目录中是否存在 `makefile.inc.Linux` 文件（faiss v20180223 的源码包中），以及该模板是否需要针对 openEuler 环境做额外调整（如 BLAS 库路径指向 openblas）。
+- 确认该版本 faiss 的 Python 绑定安装（`python setup.py install`）是否需要额外的 Python 依赖（如 numpy），如需则应在 `dnf install` 或 `pip install` 中补充。
