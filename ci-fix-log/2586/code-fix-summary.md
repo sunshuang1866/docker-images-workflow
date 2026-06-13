@@ -1,19 +1,21 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中缺少 faiss v20180223 旧版构建系统所需的 `cp example_makefiles/makefile.inc.Linux makefile.inc` 步骤，且 conda 未提供该旧版本的预编译包，需从源码构建。
+CI 基础设施问题：CI 构建流水线使用了与 PR diff 不匹配的 Dockerfile（源码编译方式），而非 PR 中意图使用的 conda 安装方式。无需代码修改。
 
 ## 修改的文件
-- `AI/faiss/20180223/24.03-lts-sp3/Dockerfile`: 将 conda 安装 faiss-cpu 替换为源码构建方式，添加构建依赖、makefile.inc 复制步骤及编译安装流程。
+无代码修改。
 
 ## 修复逻辑
-CI 分析报告指出根因为旧版 faiss 构建系统要求在 `make` 前从 `./example_makefiles/` 复制平台对应的 `makefile.inc` 到项目根目录。修改后的 RUN 指令：
-1. 通过 conda 安装 python=3.12 和 numpy（保留 conda 提供 Python 运行时）
-2. 通过 dnf 安装 gcc-c++、make、openblas-devel 等编译依赖
-3. 下载 faiss 源码包并解压
-4. **在 `make` 前执行 `cp example_makefiles/makefile.inc.Linux makefile.inc`**（核心修复）
-5. 编译 faiss 库并安装 Python 绑定
-6. 清理临时文件
+
+CI 分析报告明确指出：
+- 失败类型为 `build-error`，根因是旧版 faiss 20180223 源码中不包含 `python/setup.py`
+- **CI 日志中实际执行的 Dockerfile 与 PR diff 完全不一致**：CI 执行的是源码编译路径（`dnf install gcc-c++ make openblas-devel` + `curl` 下载源码 + `make` + `python setup.py install`），而 PR diff 中的 Dockerfile 使用 conda 从 conda-forge/pytorch channel 安装预编译包
+- 分析报告 Direction 1（置信度: 高）指出：如果 CI 正确执行 PR diff 中的 Dockerfile，则不应出现此错误
+
+当前仓库中 `AI/faiss/20180223/24.03-lts-sp3/Dockerfile` 使用的是 conda 安装方式（与 PR diff 一致，也与 1.14.1 版本的模式一致），因此无需对源码进行代码修改。CI 流水线需要排查为何使用了错误的代码版本/分支。
+
+补充说明：经核查，conda-forge 上 `faiss-cpu` 包的可用版本为 1.6.3~1.10.0，不包含 `20180223` 版本。即使 CI 正确使用 conda 方式的 Dockerfile，也可能因包不存在而失败。但该问题不在本次 CI 失败分析报告的范围之内。
 
 ## 潜在风险
-- `example_makefiles/makefile.inc.Linux` 模板可能需要针对 openEuler 环境的 BLAS 库路径做调整（如 openblas 路径），如果编译成功但运行时链接失败，需进一步修改 makefile.inc 中的 BLAS 路径配置。
+无。当前未对任何文件进行代码修改。
