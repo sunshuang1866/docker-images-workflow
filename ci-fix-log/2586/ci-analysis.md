@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2586 — 【自动升级】faiss容器镜像升级至20180223版本.
 - 失败类型: build-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: x86编译选项在ARM上不兼容
-- 新模式症状关键词: unrecognized command-line option, -mavx, -msse4, -mpopcnt, -m64, aarch64, faiss
+- 新模式标题: 编译标志架构不兼容
+- 新模式症状关键词: unrecognized command-line option, -m64, -mavx, -msse4, -mpopcnt, aarch64, g++
 
 ## 根因分析
 
@@ -21,33 +21,26 @@
 ```
 
 ### 根因定位
-- 失败位置: `/tmp/faiss/Makefile:43` → 实际根因在 `example_makefiles/makefile.inc.Linux`
-- 失败原因: faiss 项目的 `example_makefiles/makefile.inc.Linux` 硬编码了 x86_64 专属的编译器选项（`-m64`、`-mavx`、`-msse4`、`-mpopcnt`），这些选项在 aarch64 架构的 g++ 上不被识别。CI 在 aarch64 构建节点上编译 faiss 源码时触发此错误。
+- 失败位置: `/tmp/faiss/Makefile:43`
+- 失败原因: faiss v20180223 的 Makefile（基于 `example_makefiles/makefile.inc.Linux`）硬编码了 x86_64 专用编译器标志（`-m64`、`-mavx`、`-msse4`、`-mpopcnt`），在 aarch64 架构上编译时 g++ 无法识别这些选项，导致编译失败。
 
 ### 与 PR 变更的关联
+PR #2586 新增了 faiss 20180223 版本的 Dockerfile。虽然 PR diff 显示的 Dockerfile 采用 conda 直接安装预编译包的方式（`conda install faiss-cpu=${VERSION}`），但 CI 实际执行的构建包含从 GitHub 克隆 faiss v20180223 源码并手动编译的步骤。faiss v20180223 是 2018 年的极旧版本，其构建系统从未考虑过 ARM/AARCH64 架构支持，`makefile.inc.Linux` 的编译器标志完全面向 x86_64。
 
-**存在严重不一致**：PR diff 中的 Dockerfile（共 21 行）使用 `conda install -y -c pytorch -c conda-forge python=3.12 faiss-cpu=${VERSION}` 通过 conda 安装预编译包，不涉及任何源码编译。但 CI 日志显示构建的 Dockerfile 包含 `yum install -y gcc gcc-c++ make openblas-devel swig git && git clone ... && make && make py` 等从源码编译的步骤（共 25 行，报错位于 Dockerfile:19）。
-
-这两种构建方式截然不同，说明 CI 实际运行的 Dockerfile 与 PR 提交的 Dockerfile 不一致。可能的原因包括：
-- CI 流水线在构建前对 Dockerfile 进行了模板化生成/替换
-- CI 运行了错误的 commit 或分支
-- 日志中的 `Dockerfile:19` 指向了一个生成后的中间产物
-
-无论原因为何，该 PR 新增的 `20180223-oe2403sp3` 构建目标声明支持 amd64 和 arm64 双架构（见 `image-info.yml` 和 `meta.yml`），而 CI 实际运行的 Dockerfile 在 aarch64 上编译 faiss 源码时因架构不兼容的编译选项而失败。
+**注意**：PR diff 中的 Dockerfile 内容与 CI 日志中实际执行的构建步骤存在显著差异——diff 显示的是 conda 安装方式（无编译环节），而 CI 日志显示的是 `git clone` + `make` 的源码编译流程。此差异需要在仓库中进一步确认实际被构建的 Dockerfile 内容。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**若 CI 实际运行的是 conda 版本的 Dockerfile**（与 PR diff 一致）：需确认 `faiss-cpu=20180223` 在 pytorch/conda-forge channel 中是否存在。20180223 是五年前的版本号，conda-forge 可能从未发布过该版本，导致 conda install 失败后 CI 回退到源码编译。需验证 conda 包可用性，或改用其他安装方式。
+### 方向 1（置信度: 高）
+faiss 官方 conda channel（pytorch / conda-forge）提供的 `faiss-cpu=20180223` 预编译包可能已经包含 aarch64 版本，且 conda 会自动处理平台兼容性。优先确保 Dockerfile 使用 conda 安装方式，避免手动编译老旧 faiss 源码。如果 conda channel 中 `faiss-cpu=20180223` 没有可用的 aarch64 预编译包，则需要考虑以下两种替代策略：
 
 ### 方向 2（置信度: 中）
-**若 CI 实际运行的是源码编译版本的 Dockerfile**（与 CI 日志一致）：需修改 `example_makefiles/makefile.inc.Linux` 中的编译选项，根据 `TARGETARCH` 区分 x86_64 和 aarch64，在 aarch64 上移除 `-m64`、`-mavx`、`-msse4`、`-mpopcnt` 等 x86 专属 flag。可在 `cp makefile.inc` 后用 `sed` 条件性去除这些选项。
+如果必须通过源码编译 faiss v20180223，需要在 `make` 前修改 `makefile.inc`，移除或条件化 x86 专用标志。具体做法：在 bash -c 块中，在 `make` 之前加入 sed 命令，根据目标架构（`TARGETARCH`）移除 `-m64`、`-mavx`、`-msse4`、`-mpopcnt` 等 x86-only 标志。
 
 ### 方向 3（置信度: 低）
-CI 流水线配置问题，导致 PR 提交的 Dockerfile 未被正确使用。需检查 CI 流程中的 Dockerfile 生成/覆盖逻辑。
+考虑放弃 faiss v20180223 这一极旧版本，改用已有成功构建记录的版本（如已存在的 1.14.1）。v20180223 是 2018 年的版本，代码早已停更，在 ARM 架构上的兼容性风险高，维护成本远超其价值。
 
 ## 需要进一步确认的点
-1. **PR diff 与 CI 日志中的 Dockerfile 内容完全不一致**：diff 显示 conda 安装（21行），CI 日志显示源码编译（25行）。需确认 CI 流水线是否存在 Dockerfile 模板生成步骤，以及该模板是否覆盖了 PR 提交的内容。
-2. 需确认 `faiss-cpu=20180223` 在 conda-forge/pytorch channel 是否真实存在。该版本号对应 2018 年 2 月 23 日，极可能不在任何 conda channel 中。
-3. 需获取 CI 流水线中实际使用的 Dockerfile 完整内容，确认是流水线生成产物还是 PR 提交的原始文件。
-4. 需确认该 CI 失败是仅在 aarch64 架构上出现，还是 amd64 也失败（日志只显示了 aarch64 构建过程）。
+1. CI 实际执行的构建步骤与 PR diff 不一致：diff 中 Dockerfile 仅 21 行且使用 conda 安装，但 CI 日志显示执行的是包含 `yum install` 和 `git clone` + `make` 的源码编译 Dockerfile。需要确认仓库中 `AI/faiss/20180223/24.03-lts-sp3/Dockerfile` 的实际内容。
+2. 确认 conda 官方 channel 中 `faiss-cpu=20180223` 是否提供 aarch64/linux-aarch64 预编译包，可使用 `conda search faiss-cpu=20180223 --info` 验证。
+3. 该失败是否同时发生在 amd64 架构——当前日志仅显示 aarch64 构建过程，x86_64 架构可能编译成功（因为 `-m64 -mavx -msse4 -mpopcnt` 在 x86_64 上是合法选项）。
