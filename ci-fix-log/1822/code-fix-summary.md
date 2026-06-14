@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败为基础设施问题（`infra-error`），变更仅为 README.md 中的单词勘误修正（`cann` → `cuda`），与 CI 失败无关。无需代码修改。
+无需代码修改。CI 失败为基础设施问题（infra-error），与本次 PR 的 README 文档变更无关。
 
 ## 修改的文件
-- 无代码修改
+无
 
 ## 修复逻辑
-CI 失败分析报告指出：失败类型为 `infra-error`，置信度低；CI 日志不可用；PR 变更仅为 `AI/cuda/README.md` 的单词语义修正，不涉及任何 Dockerfile、构建脚本或测试代码。此类纯文档改动理论上不应触发构建或测试类 CI 失败，最可能为 CI 基础设施瞬时故障（runner 异常、网络超时等）。建议重新触发 CI 运行确认。
+CI 失败分析报告判定失败类型为 `infra-error`，CI 日志不可用。PR #1822 仅修改了 `AI/cuda/README.md` 一行文本（将 "Start a cann instance" 更正为 "Start a cuda instance"），此变更不涉及任何 Dockerfile、构建脚本、配置文件或源代码，在逻辑上不可能触发 CI 构建/测试失败。CI 失败极大概率是基础设施间歇性故障或下游架构构建 job 中与本次 PR 无关的预存问题。
 
 ## 潜在风险
 无
