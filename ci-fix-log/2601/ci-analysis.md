@@ -4,49 +4,40 @@
 - PR: #2601 — 【自动升级】3dslicer容器镜像升级至5.10.0版本.
 - 失败类型: build-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: Shell脚本缺少执行权限
-- 新模式症状关键词: Permission denied, exit code 126, ./build-CTKAppLauncher.sh, 100644
+- 知识库匹配: 模式08
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-#14 [8/8] RUN ./build-CTKAppLauncher.sh &&     ./build-tbb.sh &&     if [ "amd64" = "arm64" ]; then         BRANCH="main";     fi &&     ./build-Slicer.sh v5.10.0 /opt/zlib.patch
-#14 0.068 /bin/sh: line 1: ./build-CTKAppLauncher.sh: Permission denied
-#14 ERROR: process "/bin/sh -c ./build-CTKAppLauncher.sh && ..." did not complete successfully: exit code: 126
-------
-Dockerfile:21
---------------------
-  20 |     WORKDIR /opt/
-  21 | >>> RUN ./build-CTKAppLauncher.sh && \
-  22 | >>>     ./build-tbb.sh && \
-  23 | >>>     if [ "$TARGETARCH" = "arm64" ]; then \
-  24 | >>>         BRANCH="main"; \
-  25 | >>>     fi && \
-  26 | >>>     ./build-Slicer.sh ${BRANCH} /opt/zlib.patch
-  27 |     
---------------------
-ERROR: failed to solve: process "/bin/sh -c ..." did not complete successfully: exit code: 126
+#15 56.25 source_dir [/opt/Slicer]
+#15 56.25 build_dir  [/opt/Slicer-Release]
+#15 56.87 error: patch failed: SuperBuild/External_zlib.cmake:48
+#15 56.87 error: SuperBuild/External_zlib.cmake: patch does not apply
+#15 ERROR: process "/bin/sh -c ./build-CTKAppLauncher.sh && ./build-tbb.sh && ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:21
-- 失败原因: 三个新增的 Shell 脚本（`build-CTKAppLauncher.sh`、`build-tbb.sh`、`build-Slicer.sh`）提交时文件模式为 `100644`（无执行权限），Docker 构建时无法直接执行 `./build-CTKAppLauncher.sh`，返回 exit code 126。
+- 失败位置: `build-Slicer.sh:57-59`（`git apply zlib.patch` 步骤），补丁目标文件为 `SuperBuild/External_zlib.cmake:48`
+- 失败原因: `zlib.patch` 中第二个 hunk（`@@ -48,7 +53,7 @@`）无法应用到 v5.10.0 标签检出的 `SuperBuild/External_zlib.cmake` 上——上游源码该文件第 48 行附近的实际内容与 patch 期望的上下文不匹配，说明补丁并非基于 v5.10.0 实际源码生成。
 
 ### 与 PR 变更的关联
-PR 新增了 3 个 shell 脚本（通过 COPY 指令拷入镜像并在 RUN 中直接执行），但所有脚本的 git 文件模式均为 `100644`（缺少 execute 位）。Dockerfile 在 RUN 指令中直接以 `./build-CTKAppLauncher.sh` 方式调用，未通过 `bash` 显式解释执行，因此触发 `Permission denied`。失败直接由本次 PR 的变更引起。
+本次 PR 新增了 `zlib.patch` 文件，该补丁预期修改 Slicer v5.10.0 源码中的 `SuperBuild/External_zlib.cmake`，用于：
+1. 在 64 位平台上为 zlib 编译添加 `-fPIC` 标志
+2. 将 `CMAKE_C_FLAGS` 从硬编码的 `${ep_common_c_flags}` 改为引用第一步定义的 `${proj}_CMAKE_C_FLAGS` 变量
+
+该补丁是 PR 引入的，也是造成失败的**直接原因**——补丁内容与目标源码不匹配。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 Dockerfile 中，于 COPY 之后、RUN 执行脚本之前，添加 `RUN chmod +x /opt/build-CTKAppLauncher.sh /opt/build-tbb.sh /opt/build-Slicer.sh`，赋予脚本可执行权限。
+针对 Slicer v5.10.0 的实际源码**重新生成 zlib.patch**。具体做法：clone v5.10.0 分支，手动对 `SuperBuild/External_zlib.cmake` 做所需修改，然后用 `git diff` 生成新的 patch 文件替换现有 `zlib.patch`。特别注意：如果上游在 v5.10.0 中该文件的行号或上下文已有变动（例如 `-DCMAKE_C_FLAGS` 行不在第 48 行附近），需在补丁中调整 hunk 的行号和上下文以匹配。
 
-### 方向 2（置信度: 高）
-在 Dockerfile 的 RUN 指令中改用 `bash ./build-CTKAppLauncher.sh` 方式调用，通过 `bash` 显式解释执行，绕过执行权限检查。
-
-### 方向 3（置信度: 中）
-确保在 git 仓库中将这三个脚本文件提交为可执行模式（`100755`），从根本上解决权限问题。但这依赖于仓库的工作流和文件提交机制是否支持。
+### 方向 2（置信度: 中）
+补丁的第一个 hunk（`@@ -19,6 +19,11 @@`）也可能存在行号偏移问题，只是第二个 hunk 先触发了失败。重新生成 patch 时应一并验证两个 hunk 都能正确应用到目标版本。
 
 ## 需要进一步确认的点
-- 无需进一步确认，日志证据完整且明确。
+- Slicer v5.10.0 的 `SuperBuild/External_zlib.cmake` 实际内容——当前日志未提供该文件内容，无法判断行号偏移的具体数值
+- 该 patch 逻辑是否正确（`${proj}_CMAKE_C_FLAGS` 变量在 cmake 上下文中是否能正确展开）——需在代码库中审阅 patch 的设计意图
