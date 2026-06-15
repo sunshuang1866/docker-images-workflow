@@ -1,14 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-Slicer v5.10.0 上游 `SuperBuild/External_zlib.cmake` 已内置 `-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON`，无需再通过 `zlib.patch` 手动添加 `-fPIC` 支持，移除 patch 应用步骤以修复构建失败。
+三个构建脚本（`build-CTKAppLauncher.sh`、`build-tbb.sh`、`build-Slicer.sh`）通过 `COPY` 指令复制到镜像后缺少可执行权限，导致 `RUN` 中直接执行 `./build-CTKAppLauncher.sh` 时返回 `Permission denied`（exit code 126）。
 
 ## 修改的文件
-- `HPC/3dslicer/5.10.0/24.03-lts-sp3/Dockerfile`: 移除 `COPY zlib.patch /opt/` 及 `build-Slicer.sh` 调用中的 `/opt/zlib.patch` 参数
-- `HPC/3dslicer/5.10.0/24.03-lts-sp3/build-Slicer.sh`: 移除 `zlib_patch=$2` 变量和 `git apply zlib.patch` 的逻辑块
+- `HPC/3dslicer/5.10.0/24.03-lts-sp3/Dockerfile`: 在 RUN 指令开头添加 `chmod +x` 为三个脚本赋予可执行权限
 
 ## 修复逻辑
-Slicer v5.10.0 的 `External_zlib.cmake` 中已经通过 `-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON` 实现了 `-fPIC` 支持，这是 CMake 原生的位置无关代码设置方式。而 `CMAKE_C_FLAGS` 变量化的部分在没有 `-fPIC` 追加需求后相当于空操作（仅将 `${ep_common_c_flags}` 赋值给变量再引用回去）。因此整个 patch 不再必要，直接移除 patch 应用步骤即可。
+在 Dockerfile 第 21 行 `RUN` 指令的最前面插入 `chmod +x ./build-CTKAppLauncher.sh ./build-tbb.sh ./build-Slicer.sh &&`，在执行脚本之前先为其添加可执行权限。这是 CI 分析报告推荐的方向 1（置信度: 高），改动最小，仅新增一行命令，不改变原有执行逻辑。
 
 ## 潜在风险
-无。v5.10.0 的 `CMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON` 是 CMake 标准方式，效果与手动添加 `-fPIC` 等价，且覆盖范围更全面（同时影响 C 和 CXX）。
+无。`chmod +x` 仅影响容器内 `/opt/` 目录下的脚本文件权限，不改变任何构建逻辑或依赖，不会对最终镜像产物产生副作用。
