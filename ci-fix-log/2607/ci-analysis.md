@@ -3,54 +3,64 @@
 ## 基本信息
 - PR: #2607 — 【自动升级】fbthrift容器镜像升级至2026.06.15.00版本.
 - 失败类型: build-error
-- 置信度: 高
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: 上游归档URL返回HTML非预期内容
-- 新模式症状关键词: pagure.io, Content-Type: text/html, tar.gz, Set-Cookie, anubis, anti-bot, libaio, getdeps.py, download
+- 新模式标题: libaio构建阶段失败
+- 新模式症状关键词: Assessing libaio, exit code: 1, getdeps.py, libaio, fbthrift
 
 ## 根因分析
 
 ### 直接错误
 ```
-#11 338.1 Assessing libaio...
-#11 338.1 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
-#11 338.1 .. 2238 of (Unknown) [Complete in 1.201315 seconds]
-#11 338.1 Content-Type: text/html; charset=utf-8
-#11 338.1 Set-Cookie: techaro.lol-anubis-auth=; Path=/; Expires=Tue, 16 Jun 2026 15:43:16 GMT; ...
-#11 338.1 Connection: close
-#11 338.1 Transfer-Encoding: chunked
+#11 332.5 Building googletest...
+#11 332.5 Assessing libaio...
 #11 ERROR: process "/bin/sh -c git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build && ... && ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift" did not complete successfully: exit code: 1
+------
+Dockerfile:18
+--------------------
+  18 | >>> RUN git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build && \
+  19 | >>>     cd /build && \
+  ...
+  23 | >>>     ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift
+--------------------
+ERROR: failed to solve: process "/bin/sh -c ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Dockerfile:18` — `getdeps.py build fbthrift` 命令
-- 失败原因: `pagure.io` 对 libaio 归档文件的下载请求返回了 HTML 页面（Content-Type: text/html，仅 2238 字节）而非二进制 tar.gz 包，getdeps.py 后续无法解压这个无效文件导致构建退出码 1
+- 失败位置: `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/Dockerfile:18`（RUN 命令）
+- 失败原因: `getdeps.py build fbthrift` 在执行到 libaio 依赖的评估/构建阶段时失败（exit code 1），但日志被截断，libaio 构建的具体错误信息未出现在提供的日志中。
 
-## 与 PR 变更的关联
+### 日志信息分析
+日志显示 getdeps 构建链路中以下依赖均已**成功构建**：
+- ninja、benchmark、zlib、zstd、fmt、boost、fast_float、gflags、glog、googletest
 
-PR 新增了 fbthrift v2026.06.15.00 的 Dockerfile 及配套文件，包括：
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/Dockerfile` — 新的构建文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py` — 补丁脚本
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/libaio-libaio-0.3.113.tar.gz` — 本地备份的 libaio 归档
+失败点出现在 `Assessing libaio...` 之后，此后无任何 cmake 配置输出或编译错误信息，直接跳至 Docker build 整体失败。说明 libaio 的评估/构建阶段发生了错误，但真正的错误行被截断。
 
-PR 作者已预见到 libaio 的下载问题，并尝试通过两个手段绕过：
-1. 用 `cp` 将本地 `libaio.tar.gz` 预置到 getdeps 的 downloads 目录
-2. 通过 `fix_getdeps.py` 修补 `_verify_hash` 为空操作，跳过哈希校验
+### 与 PR 变更的关联
 
-**但工作不完整**：`fix_getdeps.py` 只修补了哈希校验步骤，未阻止 getdeps.py 从网络重新下载 libaio。预置在 downloads 目录中的本地归档被 getdeps.py 的网络下载覆盖，下载到的 HTML 页面无法解压，导致构建失败。
+**直接关联**。本次 PR 新增了 3 个文件：
+1. `Dockerfile` — 包含完整的 fbthrift 构建流程
+2. `fix_getdeps.py` — 两个关键 patch：① 将 "openeuler" 加入 getdeps 的发行版识别列表；② 将 `_verify_hash` 方法替换为空操作以跳过 libaio 哈希校验
+3. `libaio-libaio-0.3.113.tar.gz` — 自定义 libaio 源码包（二进制文件）
+
+失败发生在 `fix_getdeps.py` 执行后、getdeps 处理 libaio 依赖的阶段。可能的原因包括：
+- **libaio 源码编译失败**：自定义 tarball 中的 libaio 源码在 openEuler 24.03-lts-sp3 + GCC 12.3.1 环境下编译出错（可能是缺少编译依赖、架构不兼容、或源码本身有问题）
+- **`_verify_hash` 补丁失效**：`fix_getdeps.py` 中的正则表达式替换可能未能匹配 fbthrift v2026.06.15.00 版本 `fetcher.py` 中的实际代码结构，导致哈希校验未被跳过，自定义 tarball 因哈希不匹配而被拒绝
+- **getdeps manifest 文件名不匹配**：cp 目标文件名为 `libaio-libaio-libaio-0.3.113.tar.gz`，若 fbthrift 新版本的 manifest 中 libaio 对应的文件名格式有变化，getdeps 可能无法识别该文件而重新下载或报错
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-在 `fix_getdeps.py` 中增加对 libaio 下载逻辑的修补：让 getdeps.py 在检测到 downloads 目录中已存在 libaio 归档文件时跳过网络下载，直接使用本地文件。可参考 getdeps.py 的下载缓存机制，确保预置的 tar.gz 被正确识别和使用，而非被覆盖。
+### 方向 1（置信度: 低）
+检查 `fix_getdeps.py` 中的 `_verify_hash` 正则替换是否与 fbthrift v2026.06.15.00 版本的 `build/fbcode_builder/getdeps/fetcher.py` 实际代码结构匹配。在上游代码更新后，`_verify_hash` 方法的缩进或上下文可能发生变化，导致正则无法命中。需要对照目标版本的实际源码验证补丁的正确性。
 
-### 方向 2（置信度: 中）
-将 libaio 的来源从 `pagure.io` 替换为其他可靠的镜像源或归档站（如 GitHub releases、软件所镜像等），避免 pagure.io 的 anti-bot 防护拦截 CI 环境请求。但此方向依赖找到与当前版本完全一致的外部源，可能引入额外复杂度。
+### 方向 2（置信度: 低）
+libaio 源码包（`libaio-libaio-0.3.113.tar.gz`）在 openEuler 24.03-lts-sp3 上编译可能需要额外的构建依赖（如 `libaio-devel` 本身或其它工具链包）。检查 libaio 的 cmake/configure 输出以确认是否因缺少依赖而导致配置失败。
 
 ### 方向 3（置信度: 低）
-完全绕过 getdeps.py 的 libaio 自动化构建，改为在 Dockerfile 中手动编译安装 libaio（解压预置的 tar.gz → configure → make → make install），然后在 getdeps.py 调用时使用 `--allow-system-packages` 让 fbthrift 使用系统级别的 libaio。但需确认 fbthrift 的构建系统能否识别系统安装的 libaio。
+fbthrift v2026.06.15.00 的 getdeps manifest 可能变更了 libaio 依赖的定义（如 URL、文件名格式、版本要求等），导致自定义 tarball 的文件名 `libaio-libaio-libaio-0.3.113.tar.gz` 不再匹配新版本 manifest 的预期。需要对比新旧版本的 manifest 差异。
 
 ## 需要进一步确认的点
-1. `pagure.io` 返回 HTML 的具体原因：是 anti-bot 验证页面、登录重定向，还是该归档版本确实已下架。可通过在非 CI 环境（浏览器）访问该 URL 验证。
-2. 其他依赖（如 benchmark、zlib、zstd、fmt、boost、gflags、glog、googletest）的下载源（如 GitHub）未出现同类问题，是否只有 pagure.io 对 CI 环境有此类阻断。
-3. 确认 libaio-libaio-0.3.113.tar.gz（PR 中作为二进制文件提交的本地备份）本身是否为合法有效的 tar.gz 归档，能否在 docker build 上下文中被正确 COPY 到镜像内。
+- **关键缺失信息**：需要获取完整的 Docker 构建日志（特别是 `Assessing libaio...` 之后的部分），包含 libaio 的 cmake 配置输出、编译错误或哈希校验错误信息。当前日志在关键错误处被截断，无法确定具体失败原因。
+- 确认 fbthrift v2026.06.15.00 中 `fetcher.py` 的 `_verify_hash` 方法实际代码结构，验证 `fix_getdeps.py` 正则替换是否能正确命中。
+- 确认 fbthrift v2026.06.15.00 的 getdeps manifest 中 libaio 依赖的定义是否与之前版本一致。
+- 确认 `libaio-libaio-0.3.113.tar.gz` 源码包内容完整性及其在目标平台上的可编译性。
