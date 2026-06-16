@@ -1,67 +1,39 @@
 # CI 失败分析报告
 
-## PR 信息
-- **PR 编号**: #2607
-- **PR 描述**: fbthrift 容器镜像升级至版本 2026.06.15.00
-- **新增文件**:
-  - `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/Dockerfile`
-  - `fix_getdeps.py`
-  - `libaio-libaio-0.3.113.tar.gz`
-  - README.md, meta.yml 更新
-
-## Dockerfile 构建流程
-1. 从 GitHub 克隆 fbthrift（tag v2026.06.15.00）
-2. 预先将 libaio tarball 放入 getdeps 的下载目录
-3. 运行 `fix_getdeps.py` 进行补丁：
-   - 发行版检测（将 "openeuler" 加入 Fedora 系列列表）
-   - fetcher.py 中的哈希校验（将 `_verify_hash` 替换为 `pass`）
-4. 运行 `getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift`
-
-## CI 日志分析
-- Docker 构建在步骤 [5/5]（构建 fbthrift 的 RUN 命令）失败
-- 退出码: 1
-- getdeps 构建过程成功下载并构建: ninja, zstd, benchmark, zlib, fmt, boost, fast_float, gflags, glog, googletest
-- 到 libaio 评估时，尝试从 `https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz` 下载
-- 下载返回 HTML（Content-Type: text/html; charset=utf-8），而非 tar.gz
-- 仅下载 2238 字节（大小为 "(Unknown)"，无 Content-Length）
-- 响应包含 Set-Cookie 头部，提示可能为认证/重定向页面
-- 下载失败后构建终止，无后续 libaio 相关输出
+## 基本信息
+- PR: #2607 — 【自动升级】fbthrift容器镜像升级至2026.06.15.00版本.
+- 失败类型: build-error
+- 置信度: 高
+- 知识库匹配: 新模式
+- 新模式标题: getdeps缓存文件名不匹配
+- 新模式症状关键词: libaio, getdeps, downloads, filename mismatch, pagure.io, text/html, Content-Type
 
 ## 根因分析
-直接错误为从 pagure.io 下载 libaio 失败。PR 的策略是预先放置 tarball 并跳过哈希校验，但未能阻止 getdeps 尝试下载。
 
-两个可能的因素：
+### 直接错误
+```
+#11 336.1 Assess libaio...
+#11 336.1 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
+#11 336.1 .. 2238 of (Unknown)  [Complete in 1.222425 seconds]
+#11 336.1 Content-Type: text/html; charset=utf-8
+#11 336.1 Set-Cookie: techaro.lol-anubis-auth=; Path=/; Expires=...
+#11 336.1 Transfer-Encoding: chunked
+...
+#11 ERROR: process "/bin/sh -c git clone -b ${VERSION} --depth 1 https://github.com/facebook/fbthrift.git /build &&     cd /build &&     mkdir -p /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads &&     cp /tmp/libaio.tar.gz /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-0.3.113.tar.gz &&     python3 /tmp/fix_getdeps.py &&     ./build/fbcode_builder/getdeps.py --allow-system-packages --install-prefix /usr/local build fbthrift" did not complete successfully: exit code: 1
+```
 
-1. **主要原因**: pagure.io URL 不可达，或 CI 环境访问时返回错误（返回 HTML 而非二进制文件）。这是一个基础设施/依赖源问题。
+### 根因定位
+- 失败位置: Dockerfile:18（`RUN` 构建步骤）
+- 失败原因: Dockerfile 中 `cp` 的目标文件名 `libaio-libaio-0.3.113.tar.gz` 与 getdeps 框架期望的缓存文件名 `libaio-libaio-libaio-0.3.113.tar.gz` 不匹配，导致预置的本地 tarball 未被命中，getdeps 回退到网络下载 pagure.io 上的 libaio 源码包。而 pagure.io 对该 URL 返回了 HTML 页面（`Content-Type: text/html`，含 `Set-Cookie`），下载到的内容并非有效的 tar.gz 归档，getdeps 解压/校验失败，最终 `exit code: 1`。
 
-2. **次要原因**: `fix_getdeps.py` 中用于修补 `_verify_hash` 的正则表达式可能在 `_verify_hash` 是 Fetcher 类中最后一个方法时匹配失败（正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 要求后面有一个 4 空格缩进的方法定义）。如果正则未匹配，哈希校验未被修补，getdeps 将因哈希不匹配拒绝预先放置的文件，并尝试从失效的 pagure.io URL 重新下载。
-
-预先放置文件的方案可能无效，因为 getdeps 仍会尝试从源 URL 下载，原因可能为：
-- 在使用缓存文件前先验证 URL 可达性
-- 哈希校验补丁失败（正则问题），导致重新下载
-- getdeps 的下载方法在获取前未检查本地文件是否存在
-
-## 失败类型
-`dependency-error` — 构建依赖（libaio）无法从其官方源（pagure.io）下载，且绕过方案（预置 tarball + 跳过哈希）未能阻止下载尝试。
-
-## 置信度
-中等 — 日志明确显示 pagure.io 下载返回 HTML，但 getdeps 尽管存在预置文件仍尝试下载的确切原因无法仅从日志完全确认。
-
-## 历史模式匹配
-**新模式** — 没有现有模式匹配 pagure.io 下载失败 + getdeps 预置文件绕过的组合。
-
-- **新模式标题**: "getdeps预置文件绕过失败"
-- **新模式关键词**: pagure.io, libaio, getdeps, text/html, pre-placed, _verify_hash
+### 与 PR 变更的关联
+- 本次 PR 新增了 `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/Dockerfile`，其中在 RUN 步骤中向 getdeps downloads 目录拷贝 libaio 源码包时，使用的目标文件名 `libaio-libaio-0.3.113.tar.gz` 与 getdeps 实际下载时构造的本地缓存文件名 `libaio-libaio-libaio-0.3.113.tar.gz` 相差一个 `libaio-` 前缀（getdeps 在缓存文件名前额外拼接了包名 `libaio-`）。这是本次 PR 引入的构建逻辑缺陷，文件名由 PR author 手动指定，拼写与 getdeps 内部规则不一致。
 
 ## 修复方向
 
-### 方向 1（中等置信度）
-修补 getdeps 的 `Fetcher` 类下载方法，当本地文件已存在时跳过下载。需要在 `fix_getdeps.py` 中修改 `build/fbcode_builder/getdeps/fetcher.py`，在下载函数之前添加文件存在性检查。
+### 方向 1（置信度: 高）
+将 Dockerfile 第 21 行 `cp` 命令的目标文件名从 `libaio-libaio-0.3.113.tar.gz` 修正为 `libaio-libaio-libaio-0.3.113.tar.gz`（在 `libaio-` 前缀与版本号之间补一个 `libaio-`），使预置的本地 tar.gz 与 getdeps 缓存查找路径一致，从而跳过失败的 pagure.io 网络下载。
 
-### 方向 2（低置信度）
-为 libaio 使用替代下载源。pagure.io URL 在 CI 环境中似乎不可靠。可替换为 GitHub 镜像，或使用多阶段 Docker 构建从已知可靠源提供 libaio。
-
-## 待进一步确认项
-- `fix_getdeps.py` 中的正则表达式是否实际匹配 fbthrift v2026.06.15.00 getdeps fetcher.py 中的 `_verify_hash` 方法（如果该方法是类中最后一个方法，正则可能失败）
-- getdeps 的下载方法在网络下载前是否有文件存在性检查
-- pagure.io 是暂时宕机还是永久阻止 CI 访问
+## 需要进一步确认的点
+- 确认 pagure.io 上 `libaio-0.3.113` 归档是否仍然可用（本次下载返回 HTML 说明该端点可能已失效或需认证），若已永久失效则依赖本地预置文件的策略是正确的，仅需修正文件名匹配。
+- 确认 `fix_getdeps.py` 中跳过 `_verify_hash` 的 patch 是否完全生效——本次失败发生在下载/解压阶段而非哈希校验阶段，故该 patch 本身不是根因，但需验证修好文件名后哈希跳过逻辑仍正常工作。
