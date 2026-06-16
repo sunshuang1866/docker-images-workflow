@@ -2,30 +2,33 @@
 
 ## 基本信息
 - PR: #1822 — 【轻量级 PR】：update: 更新文件 README.md
-- 失败类型: infra-error
+- 失败类型: infra-error（证据不足）
 - 置信度: 低
 - 知识库匹配: 模式19
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 新模式标题: (N/A — 匹配已有模式)
+- 新模式症状关键词: (N/A)
 
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用（`ci.logs` 字段为 `not available`），无法从日志中提取直接错误信息。
+CI 日志不可用。上下文 JSON 中 `ci.logs` 字段明确标注为 `"(not available — analyze based on PR diff only)"`，无法从日志中提取任何错误信息。
 
 ### 根因定位
-- 失败位置: 未知
-- 失败原因: 无法确定 — CI 日志缺失，PR diff 仅包含 README 文档修正，无任何可触发构建/测试失败的代码变更
+- 失败位置: 未知（无日志）
+- 失败原因: 无法确定（证据不足）
 
 ### 与 PR 变更的关联
-PR 的唯一变更是将 `AI/cuda/README.md` 中的 "Start a cann instance" 修正为 "Start a cuda instance"（排版/用词修正，`+1/-1` 行）。这是一次纯文档修改，改动本身不具备触发构建失败的能力。失败极可能与 PR 变更无关，属于 CI 基础设施问题或并发构建队列中其他因素导致。
+
+PR 变更仅为 `AI/cuda/README.md` 中的一行文档修正：将 "Start a cann instance" 改为 "Start a cuda instance"（`cann` → `cuda` 拼写修正）。这是一个典型的轻量级文档修复 PR，仅涉及 `AI/cuda/README.md` 文件。
+
+从 diff 内容来看，修改的是一行纯文本描述（非代码、非构建配置），理论上不应触发任何构建或测试失败。如果 CI 确实失败，更大可能与此 PR 无关而是 CI 基础设施问题，或是 README.md 文件的版权头/格式校验未通过（如模式17）——但缺乏日志无法确认。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-重新触发 CI job（retry）。由于 PR 改动仅为 README 中的单行文字修正，且无 CI 日志可追溯，最可能的根因是 CI runner 瞬时故障、资源争抢或编排层调度异常。重试后大概率可以通过。
+CI 日志缺失，无法给出针对性修复方向。如果 CI 失败与本次 PR 相关，最可能的原因是 README 文件的 Copyright/SPDX 头校验（参考模式17），但本 PR 修改的是已有文件而非新增文件，概率较低。
 
 ## 需要进一步确认的点
-- 获取本次 CI 运行的实际失败日志（目前 `ci.logs` 不可用），以确认是构建 job 失败还是 CI 编排层/pre-check 阶段失败
-- 确认该 README 修正是否触发了项目某个预检脚本（如 YAML 元数据校验、文件路径校验），若有则需要获取预检脚本的实际输出
-- 确认 CI 平台（Jenkins）该次构建的状态详情页是否有更多信息（如 runner 状态、超时标记等）
+1. **获取 CI 失败 job 的完整日志**：这是确定根因的前提，缺少日志时无法做出有意义的诊断。需要从 Jenkins 流水线中获取失败 job（可能是架构专属的下游构建 job）的完整输出。
+2. 检查 `AI/cuda/README.md` 是否包含正确的 Copyright 和 SPDX-License-Identifier 头（如果 CI 有此类检查）。
+3. 确认 PR #1822 对应的 Jenkins 运行是否确实失败了（`ci.logs` 标注为 not available，不排除实际并未失败而是数据采集环节的问题）。
