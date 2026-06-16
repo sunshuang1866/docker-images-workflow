@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中 `_verify_hash` 补丁的正则表达式无法匹配 fbthrift v2026.06.15.00 版本 `fetcher.py` 中的方法签名（含返回类型注解 `-> None`），导致哈希校验未被跳过，自定义 libaio tarball 因 SHA256 不匹配被拒绝。
+`fix_getdeps.py` 中跳过 libaio 哈希校验的正则表达式无法匹配 `_verify_hash` 是该类最后一个方法的情况，导致 hash 校验未被跳过，构建在 "Assessing libaio..." 阶段失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 将正则 `def _verify_hash\(self\):` 改为 `def _verify_hash\(self\).*?:`，使其能兼容带返回类型注解的方法签名
+- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 将正则替换的结束边界从仅 `(?=\n    def )` 扩展为 `(?=\n    def |\nclass |\Z)`，覆盖方法为类/文件末尾方法的场景。
 
 ## 修复逻辑
-fbthrift `fetcher.py` 中 `_verify_hash` 方法的实际签名为 `def _verify_hash(self) -> None:`，但原正则要求严格匹配 `def _verify_hash(self):`（不含类型注解）。正则无法命中，`re.sub` 返回原文不变，导致 `_verify_hash` 未被替换为 `pass`。构建时 getdeps 对自定义 libaio 源码包执行哈希校验失败。
+CI 分析报告指出 `getdeps.py` 在 "Assessing libaio..." 时以 exit code 1 失败。原始正则 `def _verify_hash\(self\):.*?(?=\n    def )` 依赖下一个 `def ` 方法定义作为匹配终点。当 `_verify_hash` 是类中最后一个方法时（fbthrift v2026.06.15.00 可能调整了方法顺序），无法找到后续的 `def` 边界，正则匹配失败，`_verify_hash` 方法保持原样，哈希校验照常执行，预置的 libaio tarball 因哈希不匹配导致构建中断。
 
-修复在 `\(self\)` 和 `:` 之间添加 `.*?`，使其可匹配可选的方法返回类型注解（` -> None` 或无注解）。对应 CI 分析报告中的**方向 1**。
+修复方案：在正则边界中增加 `\nclass ` 和 `\Z` 两个替代终点，分别覆盖后续为类定义结尾和文件结尾的场景，确保 `_verify_hash` 方法在任何位置都能被成功替换为 no-op。
 
 ## 潜在风险
-无。正则改动仅影响 `_verify_hash` 方法的匹配逻辑，`.*?` 非贪婪匹配不会溢出到其他方法。替换结果保持原有缩进和 Python 语法正确性。
+- 如果 `_verify_hash` 和下一个类级方法之间存在 `@decorator` 装饰器，正则会吞掉该装饰器（这是原始正则也存在的问题，非本次引入）。
+- 如果 fbthrift 上游完全移除或重命名了 `_verify_hash` 方法，正则将静默不匹配，构建仍会失败（需要进一步的日志验证）。
