@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中对 `_verify_hash` 方法的正则 patch 在目标方法是类中最后一个方法时静默失败，导致 libaio 哈希校验未被跳过，getdeps 从 pagure.io 重新下载并获取到 HTML 认证页面而非二进制包。
+修复 `fix_getdeps.py` 中的正则表达式无法匹配 `_verify_hash` 方法（当其为类中最后一个方法时），导致哈希校验未被跳过，getdeps 拒绝使用本地 libaio 包而从不可用的 pagure.io 下载导致构建失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 在正则 lookahead 中添加 `|\Z` 备选，使 `_verify_hash` 位于类/文件末尾时也能正确匹配并替换。
+- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 修改第 17 行正则表达式的 lookahead 部分，增加 `\n\S` 和 `\Z` 两个备选边界
 
 ## 修复逻辑
-原正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 依赖 `_verify_hash` 方法之后存在另一个同缩进级别（4 空格）的 `def` 作为匹配终止边界。当 `_verify_hash` 是类中最后一个方法时，该 lookahead 无法满足，`re.sub` 静默返回原内容，`_verify_hash` 未被 patch。getdeps 校验预拷贝的 libaio tarball 哈希失败后从 pagure.io 下载，而 pagure.io 返回 HTML 认证页面导致构建失败。
-
-修复在 lookahead 中增加 `|\Z`（匹配字符串末尾），确保当 `_verify_hash` 后没有同级别的 `def` 时仍能匹配到文件尾部并完成替换。
+原正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 依赖下一个 `    def ` 作为 `_verify_hash` 方法体的结束边界。当 fbthrift v2026.06.15.00 源代码中 `_verify_hash` 是所在类的最后一个方法时，后续不再有 `    def ` 行，导致正则无法匹配，哈希校验未被跳过。修改后的正则增加了两个备选边界：
+- `\n\S`：匹配新行后紧跟非空白字符（即类结束后的下一顶层构造，如 `class` 或 `def`）
+- `\Z`：匹配字符串末尾（应对 `_verify_hash` 位于文件末尾的边缘情况）
 
 ## 潜在风险
-无。`\Z` 仅作为原 lookahead 无法匹配时的 fallback，当后续存在同级别 `def` 时行为与原正则完全一致。不会引入额外的匹配副作用。
+- 如果 `_verify_hash` 方法体内包含非缩进的行（如三引号字符串内的顶层文本），`\n\S` 可能提前匹配导致替换不完整。但在 `fetcher.py` 这种标准库文件中此情况极不可能发生。
+- 修改仅改变正则边界的备选方案，不影响原边界 `\n    def ` 的行为。
