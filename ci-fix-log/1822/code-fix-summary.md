@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施问题（infra-error），与 PR 变更无关。
+无需代码修改。CI 失败为 infra-error（基础设施问题），CI 日志不可用，PR #1822 仅修改了 `AI/cuda/README.md` 中一行文档描述（`cann` → `cuda` 拼写修正），此变更不涉及任何构建、测试或配置，与 CI 失败无因果关系。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告指出日志不可用（`ci.logs` 为 `not available`），PR #1822 的唯一变更是将 `AI/cuda/README.md` 中的 "Start a cann instance" 修正为 "Start a cuda instance"（纯文档文字修正）。这种改动不具备触发构建/测试失败的能力，CI 失败最可能的根因是 runner 瞬时故障或编排层调度异常。建议通过重新触发 CI job（retry）解决。
+分析报告置信度为低，直接标明为 infra-error。PR 变更仅为纯文本拼写修正，理论上不应触发任何 CI 失败。CI 失败更可能源于 Jenkins 流水线基础设施问题或数据采集环节异常，而非代码问题。在缺乏日志证据的情况下，强行修改代码无意义。
 
 ## 潜在风险
 无
