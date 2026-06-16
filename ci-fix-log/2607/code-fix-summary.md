@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-fbthrift getdeps 构建系统在 Assessing libaio 阶段失败（exit code 1），缺少 `libaio-devel` 系统包导致 libaio 依赖评估/构建失败。
+`fix_getdeps.py` 中 `_verify_hash` 的正则表达式无法匹配新版本 fetcher.py 中带类型注解 `-> None` 的函数签名，导致哈希校验跳过补丁未生效，预置的正确 tarball 被 pagure.io 返回的 HTML 内容覆盖。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/Dockerfile`: 在 `dnf install` 步骤中新增 `libaio-devel` 包
+- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 更新 `_verify_hash` 方法的匹配正则，使其兼容带返回类型注解的函数签名
 
 ## 修复逻辑
-CI 分析报告方向 1（置信度：中）指出，libaio 构建失败可能是 openEuler 缺少 libaio 编译所需的系统库。`fix_getdeps.py` 已将 openeuler 加入 RPM 发行版列表，使得 `--allow-system-packages` 标志下的 getdeps 会尝试使用系统 RPM 包。但 Dockerfile 的 `dnf install` 中未安装 `libaio-devel`，导致 getdeps 在评估 libaio 时（尝试使用系统包或构建源码）因缺少开发头文件而失败。已验证 `libaio-devel` 是 openEuler 上的有效包名（多个同仓库 Dockerfile 已使用）。
+fbthrift v2026.06.15.00 的 `fetcher.py` 中 `_verify_hash` 方法签名变更为 `def _verify_hash(self) -> None:`（增加了 `-> None` 类型注解）。原正则 `def _verify_hash\(self\):.*?(?=\n    def )` 要求 `(self)` 后紧跟 `:`，无法匹配新签名，导致该补丁静默失败。
+
+修改后的正则 `def _verify_hash\(self\)(?:\s*->\s*\w+)?:.*?(?=\n    def )` 使用可选非捕获组 `(?:\s*->\s*\w+)?` 匹配可选的 ` -> None` 部分，同时兼容旧版无类型注解的签名。
+
+当 `_verify_hash` 被正确补丁为空操作后，`ArchiveFetcher.update()` 的逻辑为：文件已存在于 downloads 目录 → 调用 `_verify_hash()`（空操作，不抛出异常）→ 文件仍存在 → 跳过下载，直接使用预置的正确 tarball。
 
 ## 潜在风险
-- 如果 `libaio-devel` 在 openEuler 24.03-lts-sp3 仓库中不可用，`dnf install` 本身会失败。但该包在 openEuler 24.03-lts-sp3 其他镜像（如 qemu、ceph）中已成功使用，风险低。
+无。此修改仅扩展了正则表达式的匹配范围以兼容新语法，不改变补丁的语义（将 `_verify_hash` 替换为空操作）。该正则同时兼容旧版本 fbthrift 的函数签名，向后兼容。
