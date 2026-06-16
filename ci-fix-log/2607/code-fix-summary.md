@@ -1,20 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 中的正则表达式无法匹配 `_verify_hash` 为类中最后一个方法或后续为装饰器方法的情况，导致哈希校验未被跳过，libaio tarball 哈希校验失败。
+`fix_getdeps.py` 中 `_verify_hash` 补丁的正则表达式与实际源码方法签名不匹配（缺少 `-> None` 类型注解），导致补丁静默失败，预置的有效 tar.gz 被删除后被 pagure.io 的 HTML 响应覆盖。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 将正则表达式从 `(?=\n    def )` 扩展为 `(?=\n    (?:def |@)|\n\S|\Z)`，增加对三种边界的匹配
+- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 修复正则表达式以匹配 `def _verify_hash(self) -> None:` 方法签名（原正则只匹配 `def _verify_hash(self):`，未匹配类型注解 `-> None`），同步更新替换文本包含类型注解。
 
 ## 修复逻辑
-原正则 `(?=\n    def )` 要求 `_verify_hash` 方法之后必须紧跟另一个 `def` 方法定义，若 `_verify_hash` 是类中最后一个方法、下一个成员是装饰器方法、或位于文件末尾，正则将静默失败（无匹配），`_verify_hash` 方法体未被替换为 `pass`，导致手动放置的 libaio tarball 哈希校验失败。
+fetcher.py 中 `_verify_hash` 方法的实际签名为 `def _verify_hash(self) -> None:`，而原有正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 中的 `\(self\):` 无法匹配 `(self) -> None:`，导致 `re.sub` 不执行替换。补丁失效后，`_verify_hash` 正常执行并检测到预置 tar.gz 的 sha256 与 manifest 期望值不匹配，随即删除文件并触发重新下载。下载的 pagure.io URL 已失效，返回的是 HTML 页面而非 tar.gz，最终因无法解压 HTML 导致构建失败。
 
-修复后的正则 `(?=\n    (?:def |@)|\n\S|\Z)` 覆盖了三种终止边界：
-1. `\n    def ` — 下一个同缩进级别的方法
-2. `\n    @` — 下一个同缩进级别的装饰器方法
-3. `\n\S` — 缩进级别减少的行（类结束或文件中的其他代码块）
-4. `\Z` — 文件末尾
+修复将正则改为 `r'def _verify_hash\(self\).*?:.*?(?=\n    def )'`，在 `\(self\)` 与 `:` 之间插入 `.*?` 以覆盖类型注解 ` -> None`，使替换正确生效。补丁生效后，`_verify_hash` 退化为 `pass`，预置的有效 tar.gz 不会被删除，`update()` 流程检测到文件存在后跳过下载，直接进入解压步骤。
 
 ## 潜在风险
-- 若 `fetcher.py` 中 `_verify_hash` 方法体内部存在与上述终止模式匹配的内容（如内部类定义），可能导致提前截断。但在 getdeps 的 `Fetcher` 类中，`_verify_hash` 是普通方法，方法体内不太可能出现同缩进级别的 `def` 或 `@` 装饰器，风险极低。
-- 若上游 fbthrift 在 `_verify_hash` 方法内使用了 `@` 装饰器（如 wrapper），也存在提前截断风险，但该方法应是简单的哈希校验逻辑，概率较低。
+无。修复仅调整正则表达式的匹配范围，替换逻辑不变（将 `_verify_hash` 替换为 `pass`）。该补丁的预期行为本就如此，原实现因正则不匹配而失效。
