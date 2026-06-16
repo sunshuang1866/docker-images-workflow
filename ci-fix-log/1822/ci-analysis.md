@@ -5,28 +5,33 @@
 - 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 模式19
-- 新模式标题: (N/A — 匹配已有模式19)
+- 新模式标题: (N/A)
 - 新模式症状关键词: (N/A)
 
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用，无法获取任何错误信息。
+（CI 日志不可用，无法提供）
 
 ### 根因定位
-- 失败位置: 未知
-- 失败原因: CI 日志缺失，无法定位根因。PR 仅含 1 行文档修正（`AI/cuda/README.md:33`，将 "Start a cann instance" 修正为 "Start a cuda instance"），此改动不应触发任何构建或测试失败。
+- 失败位置: 无法确定（CI 日志未提供）
+- 失败原因: CI 日志数据缺失，无法从日志中定位具体错误
 
 ### 与 PR 变更的关联
-PR 变更仅限于 `AI/cuda/README.md` 中的一个单词修正（`cann` → `cuda`），不涉及 Dockerfile、构建脚本或任何可执行代码。该变更是纯文档修正，理论上不可能触发编译、测试或依赖类 CI 失败。CI 失败大概率与本次 PR 改动无关，属于已存在的 CI 基础设施问题或流水线中其他并行 job 的失败。
+PR 仅修改了 `AI/cuda/README.md` 中的一行注释文字（`- Start a cann instance` → `+ Start a cuda instance`），修正了一个拼写错误（"cann" → "cuda"）。这是一个纯文档修正，从变更内容本身看不具备引发构建或测试失败的逻辑。
+
+然而，参考知识库中的 **模式11** 历史案例（PR #2512），如果该仓库的 CI 流水线包含 appstore 发布规范预检，可能会对 README 文件的路径、内容格式或元数据关联性进行校验。当前 PR 编辑的是 `AI/cuda/README.md`，如果 CI 预检要求 README 满足特定的规范约束（如必须位于特定路径、必须包含 Copyright/SPDX 头、或必须与 `image-list.yml` 中的条目对应），则有可能触发校验失败。但缺乏日志证据，无法确认。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-该 CI 失败很可能与 PR 改动无关。建议以"no-ci-fix-needed"标签关闭此诊断任务，或由 CI 管理员排查流水线基础设施问题。
+若 CI 失败与 README 路径或格式规范有关（参考模式11中 `.claude/agents/README.md` 的案例），需确认 `AI/cuda/` 目录下的 README 是否符合 CI 的规范要求（如路径格式、Copyright 头、image-list.yml 条目等）。
+
+### 方向 2（置信度: 低）
+若 CI 失败属于基础设施问题（如 runner 不可用、超时等），则与本次 PR 无关，无需修改代码。
 
 ## 需要进一步确认的点
-1. **获取 CI 日志**：当前 `ci.logs` 标记为 `not available`，必须先获取完整的失败 job 日志才能进行任何有意义的分析。
-2. **确认失败 job 名称**：需确认具体哪个 job（如 x86-64 构建、aarch64 构建、lint 检查等）失败了，以判断是否为架构特定问题或全局流水线问题。
-3. **确认是否为预先存在的 CI 问题**：对比该 PR 提交前后同一分支的其他 CI 运行记录，确认该失败是否在 PR 提交前就已存在。
-4. **检查 `AI/cuda/` 目录下的 `image-list.yml`**：根据项目规范，如果 cuda 镜像未在 `image-list.yml` 中正确注册，可能触发目录完整性校验失败——但纯文档修正不应触发此类检查。
+1. **获取 CI 日志**：当前日志标注为 "not available — analyze based on PR diff only"，无法做任何有依据的分析。必须获取本次 CI 运行的完整日志才能定位真正的失败原因。
+2. **确认失败 job 类型**：需要知道是哪个 job (job name) 失败了，以及该 job 的功能（编译？测试？预检？），才能判断 PR 变更是否相关。
+3. **检查 `AI/cuda/` 的 image-list.yml 条目**：确认该目录是否在对应场景的 `image-list.yml` 中有正确的映射条目，以及 README 是否被 CI 预检流程涉及。
+4. **确认 README 规范要求**：是否存在针对 README.md 文件的 CI 校验规则（如必须包含 Copyright/SPDX 声明头、格式要求等）。
