@@ -1,16 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-修复 `fix_getdeps.py` 中的正则表达式无法匹配 `_verify_hash` 方法（当其为类中最后一个方法时），导致哈希校验未被跳过，getdeps 拒绝使用本地 libaio 包而从不可用的 pagure.io 下载导致构建失败。
+`fix_getdeps.py` 的 `_verify_hash` 正则表达式无法匹配 fbthrift v2026.06.15.00 中带类型注解（`-> None`）的方法签名，导致哈希校验未被跳过，预置的 libaio tar.gz 被删除后从 pagure.io 下载了 HTML 错误页面。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 修改第 17 行正则表达式的 lookahead 部分，增加 `\n\S` 和 `\Z` 两个备选边界
+- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 修复了 `_verify_hash` 正则表达式以兼容类型注解，并新增 `_download` 方法补丁以在预置文件存在时跳过网络下载。
 
 ## 修复逻辑
-原正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 依赖下一个 `    def ` 作为 `_verify_hash` 方法体的结束边界。当 fbthrift v2026.06.15.00 源代码中 `_verify_hash` 是所在类的最后一个方法时，后续不再有 `    def ` 行，导致正则无法匹配，哈希校验未被跳过。修改后的正则增加了两个备选边界：
-- `\n\S`：匹配新行后紧跟非空白字符（即类结束后的下一顶层构造，如 `class` 或 `def`）
-- `\Z`：匹配字符串末尾（应对 `_verify_hash` 位于文件末尾的边缘情况）
+1. **`_verify_hash` 正则修复**：原正则 `r'def _verify_hash\(self\):.*?'` 要求 `(self)` 后紧跟 `:`，但 fbthrift v2026.06.15.00 的 fetcher.py 中该方法是 `def _verify_hash(self) -> None:`。正则不匹配导致 `re.sub` 不执行任何替换，`_verify_hash` 未被修补，正常执行哈希校验，发现预置 tar.gz 的 SHA256 与预期不符后删除文件。修复后的正则 `r'def _verify_hash\(self\).*?:.*?'` 使用 `.*?:` 兼容方法签名中的类型注解。
+
+2. **`_download` 跳过下载**：在 `_download` 方法中 `self._download_dir()` 之后插入文件存在性检查——若 `self.file_name` 已存在且大小 > 0 字节则立即返回，不发起 HTTP 下载。这作为双保险，即使未来版本中哈希校验补丁失效，也能防止预置文件被网络下载覆盖。
 
 ## 潜在风险
-- 如果 `_verify_hash` 方法体内包含非缩进的行（如三引号字符串内的顶层文本），`\n\S` 可能提前匹配导致替换不完整。但在 `fetcher.py` 这种标准库文件中此情况极不可能发生。
-- 修改仅改变正则边界的备选方案，不影响原边界 `\n    def ` 的行为。
+- `_download` 补丁使用精确字符串匹配 `def _download(self) -> None:\n        self._download_dir()`，若 fbthrift 未来版本改变该方法格式（如添加装饰器、改变缩进），补丁可能不生效。但 libaio 预置文件复制在 Dockerfile 中发生在补丁之前，此补丁为双保险措施，即使失效也不会导致功能退化。
