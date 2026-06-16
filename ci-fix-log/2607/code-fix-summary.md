@@ -1,15 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-`fix_getdeps.py` 的 `_verify_hash` 正则表达式无法匹配 fbthrift v2026.06.15.00 中带类型注解（`-> None`）的方法签名，导致哈希校验未被跳过，预置的 libaio tar.gz 被删除后从 pagure.io 下载了 HTML 错误页面。
+`fix_getdeps.py` 中的正则表达式无法匹配 `_verify_hash` 为类中最后一个方法或后续为装饰器方法的情况，导致哈希校验未被跳过，libaio tarball 哈希校验失败。
 
 ## 修改的文件
-- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 修复了 `_verify_hash` 正则表达式以兼容类型注解，并新增 `_download` 方法补丁以在预置文件存在时跳过网络下载。
+- `Others/fbthrift/2026.06.15.00/24.03-lts-sp3/fix_getdeps.py`: 将正则表达式从 `(?=\n    def )` 扩展为 `(?=\n    (?:def |@)|\n\S|\Z)`，增加对三种边界的匹配
 
 ## 修复逻辑
-1. **`_verify_hash` 正则修复**：原正则 `r'def _verify_hash\(self\):.*?'` 要求 `(self)` 后紧跟 `:`，但 fbthrift v2026.06.15.00 的 fetcher.py 中该方法是 `def _verify_hash(self) -> None:`。正则不匹配导致 `re.sub` 不执行任何替换，`_verify_hash` 未被修补，正常执行哈希校验，发现预置 tar.gz 的 SHA256 与预期不符后删除文件。修复后的正则 `r'def _verify_hash\(self\).*?:.*?'` 使用 `.*?:` 兼容方法签名中的类型注解。
+原正则 `(?=\n    def )` 要求 `_verify_hash` 方法之后必须紧跟另一个 `def` 方法定义，若 `_verify_hash` 是类中最后一个方法、下一个成员是装饰器方法、或位于文件末尾，正则将静默失败（无匹配），`_verify_hash` 方法体未被替换为 `pass`，导致手动放置的 libaio tarball 哈希校验失败。
 
-2. **`_download` 跳过下载**：在 `_download` 方法中 `self._download_dir()` 之后插入文件存在性检查——若 `self.file_name` 已存在且大小 > 0 字节则立即返回，不发起 HTTP 下载。这作为双保险，即使未来版本中哈希校验补丁失效，也能防止预置文件被网络下载覆盖。
+修复后的正则 `(?=\n    (?:def |@)|\n\S|\Z)` 覆盖了三种终止边界：
+1. `\n    def ` — 下一个同缩进级别的方法
+2. `\n    @` — 下一个同缩进级别的装饰器方法
+3. `\n\S` — 缩进级别减少的行（类结束或文件中的其他代码块）
+4. `\Z` — 文件末尾
 
 ## 潜在风险
-- `_download` 补丁使用精确字符串匹配 `def _download(self) -> None:\n        self._download_dir()`，若 fbthrift 未来版本改变该方法格式（如添加装饰器、改变缩进），补丁可能不生效。但 libaio 预置文件复制在 Dockerfile 中发生在补丁之前，此补丁为双保险措施，即使失效也不会导致功能退化。
+- 若 `fetcher.py` 中 `_verify_hash` 方法体内部存在与上述终止模式匹配的内容（如内部类定义），可能导致提前截断。但在 getdeps 的 `Fetcher` 类中，`_verify_hash` 是普通方法，方法体内不太可能出现同缩进级别的 `def` 或 `@` 装饰器，风险极低。
+- 若上游 fbthrift 在 `_verify_hash` 方法内使用了 `@` 装饰器（如 wrapper），也存在提前截断风险，但该方法应是简单的哈希校验逻辑，概率较低。
