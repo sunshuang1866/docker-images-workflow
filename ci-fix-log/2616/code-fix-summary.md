@@ -1,16 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-构建失败是因为 OpenFOAM v2606 在 SourceForge 上尚未发布：`https://sourceforge.net/projects/openfoam/files/v2606/ThirdParty-v2606.tgz` 返回 404。经核实，v2606 目录已存在但发布文件尚未上传，属于上游发布未完成的问题，非代码缺陷。
+OpenFOAM v2606 在 SourceForge 上尚未发布（目录存在但无文件），导致 Dockerfile 中 wget 下载返回 404，构建失败。
 
 ## 修改的文件
-无需修改任何代码文件。
+- `HPC/openfoam/2606/24.03-lts-sp3/Dockerfile`: 将 `ARG VERSION` 从 2606 改为 2506（最后一个实际可用的版本，且两个源文件均为 `.tgz` 扩展名）
+- `HPC/openfoam/README.md`: 移除 v2606 表格行，恢复至升级前状态
+- `HPC/openfoam/doc/image-info.yml`: 移除 v2606 表格行，恢复至升级前状态
+- `HPC/openfoam/meta.yml`: 移除 2606-oe2403sp3 构建条目，恢复至升级前状态
 
 ## 修复逻辑
-- Dockerfile 中的 URL 格式 `https://sourceforge.net/projects/openfoam/files/v${VERSION}/ThirdParty-v${VERSION}.tgz` 与历史版本（v2506、v2412）完全一致，路径模式正确。
-- 经 HTTP 请求验证：v2606 目录存在（HTTP 200），但 tarball 文件尚未上传（HTTP 404），而 v2506 对应 URL 可正常访问（HTTP 301 → 实际文件存在）。
-- 这是上游软件发布延迟导致的问题，Dockerfile 代码本身无 bug，无需修改。
-- 待 OpenFOAM v2606 在 SourceForge 正式发布后，重新触发 CI 构建即可通过。
+CI 分析报告指出根因为上游 OpenFOAM v2606 尚未在 SourceForge 发布。经验证，SourceForge 上 v2606 目录已创建（修改于 < 10 小时前），但目录内无任何文件（"This folder has no files"），且最新可用版本 v2512 的 ThirdParty 文件扩展名为 `.tar.gz`（非 `.tgz`），会导致 URL 模式同样不匹配。因此：
+1. 将 Dockerfile 的 VERSION 回退至 v2506，该版本的 `ThirdParty-v2506.tgz` 和 `OpenFOAM-v2506.tgz` 均在 SourceForge 上存在且扩展名匹配
+2. 从 README.md、image-info.yml、meta.yml 中移除 v2606 条目，恢复至升级前状态
 
 ## 潜在风险
-无。未修改任何代码，不影响其他功能。
+- 目录路径 `HPC/openfoam/2606/24.03-lts-sp3/` 与 Dockerfile 内 `VERSION=2506` 不一致，若上游实际发布 v2606 后，需更新 VERSION 并恢复元数据条目
+- 由于 meta.yml 不再引用该 Dockerfile，CI 流水线可能不会自动构建此镜像
