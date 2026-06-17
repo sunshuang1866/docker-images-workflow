@@ -225,8 +225,50 @@ def _get_commit_statuses(repo: str, sha: str, token: str) -> List[Dict]:
     return []
 
 
+_ERROR_LINE_RE = re.compile(
+    r'(?:error|exception|fatal|failed|traceback|assert|abort|panic)',
+    re.IGNORECASE,
+)
+# 这些词出现在编译过程中是正常的（CMake test、SEND_ERROR 等），不应作为错误行纳入摘要
+_ERROR_NOISE_RE = re.compile(
+    r'(?:cmake.*(?:send_error|error_variable)|checking for|test.*error|no error)',
+    re.IGNORECASE,
+)
+_ERROR_BUDGET = 5_000   # 错误行摘要最多占用字符数
+_TAIL_BUDGET = 45_000   # 末尾日志最多占用字符数
+
+
+def _extract_error_summary(lines: list) -> str:
+    """从全量日志中提取错误行（去噪后），最多取 _ERROR_BUDGET 字符。
+
+    末尾优先：倒序扫描，让最近发生的错误出现在摘要靠前位置。
+    避免早期 CMake 测试、SEND_ERROR 等噪声占满预算。
+    """
+    collected: list[str] = []
+    budget = _ERROR_BUDGET
+    for line in reversed(lines):
+        if _ERROR_LINE_RE.search(line) and not _ERROR_NOISE_RE.search(line):
+            entry = line + '\n'
+            if len(entry) > budget:
+                break
+            collected.append(entry)
+            budget -= len(entry)
+            if budget <= 0:
+                break
+    if not collected:
+        return ''
+    # 倒序 collected → 恢复时间顺序
+    return '### Error lines (newest first)\n' + ''.join(reversed(collected))
+
+
 def _fetch_external_ci_log(target_url: str) -> str:
-    """从外部 CI URL（如 Jenkins）拉取控制台日志。"""
+    """从外部 CI URL（如 Jenkins）拉取控制台日志。
+
+    策略：末尾 tail（日志最后阶段）+ 错误行摘要（全文扫描，去噪）。
+    两者拼接，总长不超过 MAX_LOG_CHARS。
+    对于超长构建日志（如 fbthrift Boost 编译），末尾 tail 可能仍在编译
+    阶段，真正的依赖错误出现在中段；错误行摘要能补充这部分关键证据。
+    """
     base = target_url.rstrip('/')
     # Jenkins: /console 是 HTML，/consoleText 是纯文本
     text_url = (base[:-8] + '/consoleText') if base.endswith('/console') else (base + '/consoleText')
@@ -236,13 +278,13 @@ def _fetch_external_ci_log(target_url: str) -> str:
             print(f"[ci-log] GET {url} → HTTP {resp.status_code}", flush=True)
             if resp.status_code == 200:
                 lines = resp.text.split('\n')
-                # 尾部优先：实际失败几乎总在日志末尾。
-                # 不再从全量日志中提取 error_lines，避免早期 CMake 测试失败、
-                # SEND_ERROR 等噪声行挤占预算、导致末尾关键段（如 Anubis 拦截）被截断。
-                tail = lines[-500:]
-                result = '\n'.join(tail)
+                tail_text = '\n'.join(lines[-500:])
+                if len(tail_text) > _TAIL_BUDGET:
+                    tail_text = tail_text[-_TAIL_BUDGET:]
+                error_summary = _extract_error_summary(lines)
+                result = (error_summary + '\n\n### Build tail\n' + tail_text
+                          if error_summary else tail_text)
                 if len(result) > MAX_LOG_CHARS:
-                    # 尾部本身超限时保留末尾（最新内容），而非截断头部
                     result = result[-MAX_LOG_CHARS:]
                 return result
         except Exception as e:

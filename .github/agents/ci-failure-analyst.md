@@ -84,6 +84,13 @@
 
 ## 需要进一步确认的点
 （如果日志不足以完全确定根因，列出需要在代码库中查阅的内容）
+
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+若修复方向中包含"修改正则以匹配第三方/上游源文件中的内容"（如 getdeps fetcher.py 中的方法），
+必须在此明确：code-fixer 在提交前，需从上游仓库（以 Dockerfile ARG VERSION 为准）拉取对应文件，
+验证新正则确实能匹配目标内容。例如：
+"code-fixer 必须从 fbthrift {VERSION} 的 build/fbcode_builder/getdeps/fetcher.py
+获取 _verify_hash 方法的实际签名，验证正则匹配后再提交。"
 ```
 
 ## 重要说明
@@ -91,3 +98,4 @@
 - 不要在报告中包含任何代码修复方案
 - 修复摘要要简洁精准，让 Code Fixer Agent 能直接据此定位和修改
 - 如果 CI 日志显示 "infra-error"（网络超时、runner 崩溃等），明确标注，Code Fixer 无需处理
+- 若置信度为"中"或"低"，在"修复验证要求"中明确列出 code-fixer 必须执行的验证步骤，不能假设修复方向一定正确
