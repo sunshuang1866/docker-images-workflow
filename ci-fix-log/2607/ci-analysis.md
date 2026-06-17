@@ -54,3 +54,35 @@ re.sub(
 - 日志在 `Assessing libaio...` 后截断，需获取该位置之后的完整日志（libaio 评估/下载/校验阶段的完整输出）以精确定位错误类型
 - 需确认 `fetcher.py` 中 `_verify_hash` 方法是否是所在类的最后一个方法，以验证方向 1 的正则失效假设
 - 需确认 libaio 的 getdeps manifest（在 fbthrift 仓库的 `build/fbcode_builder/manifests/libaio`）中记录的哈希值，以及本地提供的 tar.gz 是否与之匹配
+
+---
+
+## 第二轮分析（事后复盘，人工确认）
+
+第一轮 code-fix 提交的正则仍然失败，经人工排查确认真实根因：
+
+### 实际根因
+fbthrift v2026.06.15.00 的 `build/fbcode_builder/getdeps/fetcher.py` 中，`_verify_hash` 方法签名为：
+
+```python
+def _verify_hash(self) -> None:
+```
+
+带有 `-> None` 返回类型注解。第一轮诊断假设"该方法是类中最后一个方法导致 lookahead 失效"，该假设错误——`_verify_hash` 后面还有 `_download_dir` 方法，lookahead 本可以匹配；真正失败原因是正则开头 `def _verify_hash\(self\):` 无法匹配带注解的签名 `def _verify_hash(self) -> None:`，导致 `re.sub` 静默未替换。
+
+### 日志截断是诊断误判的根源
+CI 日志被截断于 `Assessing libaio...`，未能看到后续 `_verify_hash` 抛出的 hash mismatch 异常，导致分析只能基于 PR diff 推断，推断方向合理但结论错误。
+
+### 正确修复
+将正则改为 `def _verify_hash\([^)]*\).*?:` 加 `re.DOTALL`，可匹配任意返回类型注解：
+
+```python
+re.sub(
+    r'def _verify_hash\([^)]*\).*?:.*?(?=\n(?: {4,}|\t)(?:def |@)|\n\S|\Z)',
+    'def _verify_hash(self):\n        pass',
+    c2,
+    flags=re.DOTALL
+)
+```
+
+已从上游 v2026.06.15.00 获取 fetcher.py 实际内容验证正则匹配，修复 PR #2614 CI 通过。
