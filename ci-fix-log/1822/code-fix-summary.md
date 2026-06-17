@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败与本次 PR 变更无关，属于基础设施问题（infra-error），无需代码修改。
+CI 失败为基础设施错误（infra-error），与本次 PR 变更无关，无需代码修改。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-PR #1822 仅将 `AI/cuda/README.md` 第 33 行的一个单词从 `cann` 修正为 `cuda`（纯 Markdown 文档修正）。该变更不涉及 Dockerfile、构建脚本、依赖或任何可影响编译/测试的内容，不可能触发 CI 构建失败。CI 分析报告明确指出本次失败为 `infra-error`，失败原因大概率是下游架构构建 job 中的既存问题或基础设施临时抖动。按照修复原则，遇到 infra-error 时不强行修改代码。建议重新触发 CI 流水线或检查下游 job 日志以排查真实失败原因。
+PR #1822 仅修改了 `AI/cuda/README.md` 第 33 行的一个文档文字（"cann" → "cuda"），属于纯文档修正，不涉及任何 Dockerfile、构建脚本、依赖声明或源代码。CI 日志完全不可用（`ci.logs` 为 "not available"），无法定位实际失败原因。分析报告结论为 `infra-error`，极大概率为 CI 基础设施偶发故障（runner 崩溃、网络超时等）。根据修复原则，对于 infra-error 不应强行修改代码，建议重新触发 CI 运行。
 
 ## 潜在风险
 无
