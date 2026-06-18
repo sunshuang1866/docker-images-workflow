@@ -5,29 +5,33 @@
 - 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 模式19
-- 新模式标题: (不适用，已匹配模式19)
-- 新模式症状关键词: (不适用)
+- 新模式标题: —
+- 新模式症状关键词: —
 
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用（`ci.logs` 标注为 "not available — analyze based on PR diff only"），无法从日志中提取任何错误信息。
+CI 日志不可用（`"(not available — analyze based on PR diff only)"`），无法从日志中获取任何错误信息。
 
 ### 根因定位
-- 失败位置: 未知（缺少 CI 日志）
-- 失败原因: 日志缺失，无法定位根因
+- 失败位置: 未知（无日志）
+- 失败原因: 证据不足，无法定位根因
 
 ### 与 PR 变更的关联
-PR 变更仅涉及 `AI/cuda/README.md` 第 33 行，修改了一个单词：`Start a cann instance` → `Start a cuda instance`（1 行新增、1 行删除）。这是一个纯文档拼写修正（"cann" 应为 "cuda"），不涉及 Dockerfile、构建脚本、元数据文件或任何影响镜像构建的内容。从 diff 本身来看，该变更不应当触发任何构建失败，CI 失败很可能与 PR 改动无关，属于基础设施或 CI 流水线自身的偶发问题。
+PR 仅修改了 `AI/cuda/README.md` 中的一行注释文本（`- Start a cann instance` → `- Start a cuda instance`），属于纯文档勘误修正。从 diff 内容本身来看，该变更不太可能直接导致构建或测试失败。但由于 CI 日志完全缺失，无法确认失败是否与该 PR 变更有关，也无法排除 CI 基础设施问题、并发冲突、或其他与 PR 无关的偶发故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-CI 失败与 PR 代码变更无关联。建议：
-- 重新触发 CI 运行（retry），确认是否为 CI 基础设施的偶发故障（如网络超时、runner 异常等）。
-- 若重试后仍失败，需要获取完整的 CI 日志再进行分析。
+若 CI 失败是由于 README.md 文件缺少 Copyright + SPDX 头所致（参考模式17），则需为 `AI/cuda/README.md` 添加标准的 Copyright 声明和 SPDX-License-Identifier。但此仅为推测，无日志证据支持。
 
 ## 需要进一步确认的点
-1. **获取完整的 CI 日志**：当前日志完全不可用，无法进行任何有效诊断。至少需要获取失败 job 的错误输出。
-2. **确认 CI 失败的 job 名称和阶段**：若日志来自 trigger/编排层 job 且显示成功，需进一步获取下游架构构建 job（如 `/job/x86-64/…` 或 `/job/aarch64/…`）的日志。
-3. **确认 CI 检查的具体规则**：检查该仓库的 CI 配置，确认是否有针对 README.md 文件的特殊检查（如 appstore 路径校验、文件格式校验等），但基于 diff 仅修改一个单词的情况，此类可能性较低。
+1. **获取 CI 日志**：必须获取此次 PR 对应的 Jenkins 构建失败 job 完整日志，才能定位真正的错误信息。
+2. **确认 CI 流水线结构**：`ci.run_info` 显示 `jenkins, id=0`，需确认是否存在下游架构构建 job（如 x86-64、aarch64），日志可能发生在那些 job 中。
+3. **确认 Copyright/SPDX 检查规则**：排查 CI 是否对 `AI/cuda/` 路径下的 README.md 文件启用了 license 头检查，该文件当前是否缺少 Copyright + SPDX 声明。
+
+## 修复验证要求
+由于无法获取 CI 日志，Code Fixer 在执行任何修复前必须：
+1. 重新触发 CI 构建并获取完整日志
+2. 根据日志中的实际错误信息确定修复方案
+3. 不得仅凭 PR diff 内容推测性提交修复
