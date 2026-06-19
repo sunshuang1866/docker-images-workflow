@@ -175,12 +175,10 @@ def process_all():
                 log(f"    → Skipping: fix PR (title starts with 'fix:'), handles its own CI retries")
                 continue
 
-            existing_fix = api.find_open_ci_successful_fix_pr(repo, pr_number, token)
-            if existing_fix:
-                log(f"    → Skipping: open fix PR #{existing_fix['number']} (ci_successful) already exists for this PR")
-                continue
-
             fix_pr = api.find_any_pr_by_head_branch(repo, fix_branch, token)
+            # fallback: branch search may miss fork-originated PRs on some platforms
+            if fix_pr is None:
+                fix_pr = api.find_open_ci_successful_fix_pr(repo, pr_number, token)
 
             if fix_pr is None or fix_pr['state'] == 'closed':
                 # lookback 过滤：首次 dispatch 时检查 PR 是否在时间窗口内
