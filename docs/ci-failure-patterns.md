@@ -466,3 +466,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2546: `Others/libyuv/1948/24.03-lts-sp3/Dockerfile` — `row.h` 定义了 `HAS_RGBTOUVMATRIXROW_NEON` 但实现缺失，通过 sed 注释掉该宏定义修复 aarch64 链接失败
+
+---
+
+## 模式22：Git分支名构造错误
+
+**症状关键词**: `fatal: Remote branch`, `not found in upstream origin`, `git clone`, `exit code: 128`, `CMAQv`
+
+**根因**: - 失败位置: `HPC/cmaq/5.5.2Oct2024/24.03-lts-sp3/Dockerfile:60`
+- 失败原因: Dockerfile 中 git clone 的分支名模板 `CMAQv${VERSION}_2Oct2024` 展开为 `CMAQv5.5.2Oct2024_2Oct2024`，其中 "2Oct2024" 出现两次——VERSION 变量值 `5.5.2Oct2024` 已包含 "2Oct2024"，模板又追加了 `_2Oct2024` 后缀，导致构造出的分支名在上游仓库 `USEPA/CMAQ` 中不存在。
+
+**修复方法**: Dockerfile 中 git clone 构造的分支名 `CMAQv5.5.2Oct2024_2Oct2024` 在 USEPA/CMAQ 上游仓库中不存在，导致构建失败。
+
+**历史案例**:
+- PR #2653: `HPC/cmaq/5.5.2Oct2024/24.03-lts-sp3/Dockerfile:60` — Dockerfile 中 git clone 构造的分支名 `CMAQv5.5.2Oct2024_2Oct2024` 在
