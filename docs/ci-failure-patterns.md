@@ -495,3 +495,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2650: `AI/torchvision/0.27.1/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `TORCH_VERSION=2.12.0` 与 torchvision 0.27.1 的上游
+
+---
+
+## 模式24：注释测试后引入checkstyle违规
+
+**症状关键词**: Checkstyle, UnusedImports, Unused import, maven-checkstyle-plugin, checkstyle.xml
+
+**根因**: - 失败位置: `Dockerfile:33`（`RUN git clone ... && printf ... python3 ... && make clean install-dev` 步骤）
+- 失败原因: Dockerfile 中的 Python 脚本注释了 `LocalizedMessageHelperTest.java` 内三个测试方法（`testForEnglish`、`testForNonTranslatedLanguage`、`testForNotDefaultLanguage`），但保留了这些方法所用 import 语句。测试方法被注释后，import 变为未使用，触发 
+
+**修复方法**: Dockerfile 中 Python 脚本注释测试方法后未移除对应的未使用 import，导致 Maven checkstyle 检测到 4 个 UnusedImports 违规。
+
+**历史案例**:
+- PR #2651: `Cloud/ovirt-engine/4.5.7/24.03-lts-sp3/Dockerfile` — Dockerfile 中 Python 脚本注释测试方法后未移除对应的未使用 import，导致 Maven check
