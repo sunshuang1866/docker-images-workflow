@@ -246,6 +246,7 @@ CMake Error: Could NOT find LibXml2 (missing: LIBXML2_LIBRARY LIBXML2_INCLUDE_DI
 - PR #2162: `Cloud/nginx/1.30.0` — 缺 `pcre pcre-devel`
 - PR #1933: `Others/rsyslog/8.2602.0` — 缺 `protobuf-c-compiler protobuf-c-devel`
 - PR #2205: `Database/mysql/9.7.0` — Boost 未配置，cmake 加 `-DDOWNLOAD_BOOST=1`
+- PR #2512: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` — 修复 3FS Dockerfile 中的三个构建错误：运行时包名不存在（boost-foundation）、缺少构建依赖
 
 ---
 
