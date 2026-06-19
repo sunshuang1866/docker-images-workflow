@@ -480,3 +480,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2653: `HPC/cmaq/5.5.2Oct2024/24.03-lts-sp3/Dockerfile:60` — Dockerfile 中 git clone 构造的分支名 `CMAQv5.5.2Oct2024_2Oct2024` 在
+
+---
+
+## 模式23：PyTorch版本锁定冲突
+
+**症状关键词**: ResolutionImpossible, conflicting dependencies, torchvision depends on torch
+
+**根因**: - 失败位置: `AI/torchvision/0.27.1/24.03-lts-sp3/Dockerfile`:10（pip install 步骤）
+- 失败原因: Dockerfile 中 `TORCH_VERSION=2.12.0` 与 torchvision 0.27.1 的上游依赖 `torch==2.12.1` 不兼容，pip 依赖解析器无法满足约束。
+
+**修复方法**: Dockerfile 中 `TORCH_VERSION=2.12.0` 与 torchvision 0.27.1 的上游依赖 `torch==2.12.1` 不兼容，导致 pip 依赖解析失败。
+
+**历史案例**:
+- PR #2650: `AI/torchvision/0.27.1/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `TORCH_VERSION=2.12.0` 与 torchvision 0.27.1 的上游
