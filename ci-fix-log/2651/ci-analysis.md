@@ -2,40 +2,63 @@
 
 ## 基本信息
 - PR: #2651 — 【自动升级】ovirt-engine容器镜像升级至4.5.7版本.
-- 失败类型: build-error
-- 置信度: 高
-- 知识库匹配: 模式09
-- 新模式标题: (无)
+- 失败类型: test-failure
+- 置信度: 中
+- 知识库匹配: 新模式
+- 新模式标题: 本地化测试locale不匹配
+- 新模式症状关键词: LocalizedMessageHelperTest, expected, but was, locale, AssertionFailedError, testForEnglish, testForNonTranslatedLanguage, testForNotDefaultLanguage
 
 ## 根因分析
 
 ### 直接错误
 ```
-#9 [4/5] RUN if [ "amd64" = "amd64" ]; then       BUILDARCH="x64";     elif [ "amd64" = "arm64" ]; then       BUILDARCH="aarch64";     fi     && cd /     && wget https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jdk/amd64/linux/OpenJDK11U-jdk_amd64_linux_hotspot_11.0.27_6.tar.gz     && tar -zxvf OpenJDK11U-jdk_amd64_linux_hotspot_11.0.27_6.tar.gz     && rm -f OpenJDK11U-jdk_amd64_linux_hotspot_11.0.27_6.tar.gz
-#9 0.079 --2026-06-19 00:22:25--  https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jdk/x64/linux/OpenJDK11U-jdk_x64_linux_hotspot_11.0.27_6.tar.gz
-#9 0.126 Resolving mirrors.tuna.tsinghua.edu.cn (mirrors.tuna.tsinghua.edu.cn)... 101.6.15.130, 2402:f000:1:400::2
-#9 0.220 Connecting to mirrors.tuna.tsinghua.edu.cn (mirrors.tuna.tsinghua.edu.cn)|101.6.15.130|:443... connected.
-#9 0.409 HTTP request sent, awaiting response... 404 Not Found
-#9 0.504 2026-06-19 00:22:25 ERROR 404: Not Found.
-#9 ERROR: process "/bin/sh -c ..." did not complete successfully: exit code: 8
+#10 348.6 [ERROR] org.ovirt.engine.core.notifier.transport.smtp.LocalizedMessageHelperTest.testForEnglish -- Time elapsed: 0.015 s <<< FAILURE!
+#10 348.6 org.opentest4j.AssertionFailedError: 
+#10 348.6 expected: <Time: Dec 31, 2022, 11:59:59?PM
+#10 348.6 > but was: <Time: Dec 31, 2022, 11:59:59 PM
+
+#10 348.6 [ERROR] org.ovirt.engine.core.notifier.transport.smtp.LocalizedMessageHelperTest.testForNonTranslatedLanguage -- Time elapsed: 0.006 s <<< FAILURE!
+#10 348.6 expected: <Time: 31 d?c. 2022, 23:59:59
+#10 348.6 > but was: <Time: 31 d?c. 2022 ? 23:59:59
+
+#10 348.6 [ERROR] org.ovirt.engine.core.notifier.transport.smtp.LocalizedMessageHelperTest.testForNotDefaultLanguage -- Time elapsed: 0.005 s <<< FAILURE!
+#10 348.6 org.opentest4j.AssertionFailedError:
+#10 348.6 expected: <?????: 31 ???. 2022??., 23:59:59
+#10 348.6 > but was: <?????: 31 ???. 2022 ?., 23:59:59
+
+#10 348.6 [ERROR] Failures: 
+#10 348.6 [ERROR]   LocalizedMessageHelperTest.testForEnglish:41
+#10 348.6 [ERROR]   LocalizedMessageHelperTest.testForNonTranslatedLanguage:70
+#10 348.6 [ERROR]   LocalizedMessageHelperTest.testForNotDefaultLanguage:99
+#10 348.6 [ERROR] Tests run: 136, Failures: 3, Errors: 0, Skipped: 0
+#10 348.6 [INFO] oVirt Engine Tools ................................. FAILURE [  3.500 s]
+#10 348.6 [INFO] BUILD FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `Cloud/ovirt-engine/4.5.7/24.03-lts-sp3/Dockerfile:18` (RUN 指令中 BUILDARCH 赋值段)
-- 失败原因: `BUILDARCH` 是 BuildKit 预定义全局 ARG（值为 `amd64`/`arm64`），在 `RUN` 中对 `BUILDARCH` 重新赋值不会生效——BuildKit 会恢复内置值 `amd64`，导致下载 URL 使用了错误架构字符串 `amd64` 而非镜像站实际路径 `x64`，产生 404。
+- 失败位置: `org.ovirt.engine.core.notifier.transport.smtp.LocalizedMessageHelperTest` (ovirt-engine 上游源码，非 PR 引入)
+- 失败原因: `LocalizedMessageHelperTest` 中 3 个测试用例全部失败，测试期望的本地化日期/时间格式字符串中包含特殊 Unicode 字符（如窄不间断空格 U+202F、各 locale 特定的日期分隔符），但 JVM 在 openEuler 24.03-lts-sp3 容器环境中实际输出的格式化字符串使用了不同的空格/分隔符字符，导致断言不匹配。
 
 ### 与 PR 变更的关联
-PR 新增了 `Cloud/ovirt-engine/4.5.7/24.03-lts-sp3/Dockerfile`（全新文件），其 Dockerfile 第 18-24 行中使用了 `BUILDARCH` 变量来构造 JDK 下载 URL。该变量名与 BuildKit 预定义变量冲突，是本次失败的直接原因。
+PR 引入了全新的 `Cloud/ovirt-engine/4.5.7/24.03-lts-sp3/Dockerfile`（+37 行），以及配套的元数据更新。Dockerfile 中 `make clean install-dev` 触发了 ovirt-engine 上游源码的全量 Maven 构建（含测试）。失败的 `LocalizedMessageHelperTest` 是 ovirt-engine 4.5.7 上游源码中已有的测试，**与 PR 自身代码改动无直接因果关系**，但 PR 选择的 Dockerfile 构建流程（安装的 JDK 版本、locale 包、系统环境）导致了该测试在当前容器环境中失败。
+
+具体可能原因：
+- 容器中缺少完整的 glibc locale 数据包（如 `glibc-locale-source`、`glibc-all-langpacks`），导致 JVM 的 `java.text.DateFormat` 等 API 对特定 locale（德语 de-AT、俄语 ru-RU、英语 en-US 等）的格式化输出与测试期望不匹配
+- 当前环境未设置 `LANG` / `LC_ALL` 等 locale 环境变量，JVM 使用 fallback locale 数据
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 Dockerfile 中的变量名从 `BUILDARCH` 改为其他自定义名称（如 `JAVA_ARCH`、`MY_ARCH`），避免与 BuildKit 预定义变量冲突。需同时修改变量赋值语句（`if` 块内两处）和后续引用处（`wget` URL、`tar` 解压、`rm` 清理各一处）。
+### 方向 1（置信度: 中）
+在 Dockerfile 的 `dnf install` 步骤中补充安装 locale 相关包（如 `glibc-locale-source`、`glibc-all-langpacks` 或对应的 `glibc-langpack-*`），并在 `RUN` 中设置 `LANG=en_US.UTF-8` 和 `LC_ALL=en_US.UTF-8` 环境变量，确保 Java 在格式化不同 locale 的日期时间时能获取正确的 locale 数据。
+
+### 方向 2（置信度: 中）
+如果方向 1 无法解决（可能是 JDK 自身 locale 数据与测试期望的 CLDR 版本不一致），可在 `make` 构建时通过 Maven 参数跳过 `tools` 模块的测试：`make clean install-dev PREFIX="/usr/local/" MAVEN_OPTS="-DskipTests"` 或设置 `-Dtest=!LocalizedMessageHelperTest` 排除特定测试类。需注意：跳过测试可能掩盖其他真实问题，仅当确认这 3 个测试是已知的 locale 环境敏感测试时才考虑此方向。
+
+### 方向 3（置信度: 低）
+检查是否存在 JDK 版本冲突：Dockerfile 同时通过 `dnf install java-11-openjdk-devel` 和 `wget` 安装了两个 JDK（系统 JDK + Adoptium JDK），最终 `JAVA_HOME` 指向 Adoptium JDK。不同的 JDK 发行版可能使用不同的 locale 数据提供者（CLDR vs COMPAT），导致测试期望与实际输出不一致。可尝试只保留一个 JDK 来源（仅用 dnf 安装的系统 JDK 或仅用 Adoptium），验证测试是否通过。
 
 ## 需要进一步确认的点
-- 需确认 `JDK_VERSION=11.0.27_6` 在 Tsinghua Adoptium 镜像站 `x64/linux/` 路径下确实存在（修复变量名后，URL 将正确指向 `x64` 目录，若该版本在镜像站中也已下架，则还需同时处理模式03）。
-
-## 修复验证要求
-code-fixer 修复后，需验证：
-1. Docker build 使用的 wget URL 是否正确拼接为 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jdk/x64/linux/OpenJDK11U-jdk_x64_linux_hotspot_11.0.27_6.tar.gz`
-2. 若修复变量名后仍 404，需检查 JDK 版本 `11.0.27_6` 在镜像站是否仍可用（参考模式03）
+1. 确认 `openeuler/openeuler:24.03-lts-sp3` 基础镜像中 `glibc-locale-source` 或等价包是否可用，若不可用需查找对应的 openEuler locale 包名（可能是 `glibc-langpack-en`、`glibc-langpack-de`、`glibc-langpack-ru` 等）
+2. 确认 ovirt-engine 4.5.7 上游的 `LocalizedMessageHelperTest` 是否有已知的 JDK 版本兼容性问题（查阅 ovirt-engine GitHub issues）
+3. 确认 Adoptium JDK 11.0.27_6 与 openEuler 系统 JDK 的 `java.locale.providers` 默认值是否相同
+4. 若上述均无法解决，需在 ovirt-engine 上游源码的 `LocalizedMessageHelperTest.java:41/70/99` 中查看具体断言逻辑和期望的 Unicode 字符，判断是否为该版本 ovirt-engine 的已知测试缺陷
