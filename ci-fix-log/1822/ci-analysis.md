@@ -4,29 +4,34 @@
 - PR: #1822 — 【轻量级 PR】：update: 更新文件 README.md
 - 失败类型: infra-error（证据不足）
 - 置信度: 低
-- 知识库匹配: 模式19
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 模式19（证据不足 / 无法定位根因）
+- 新模式标题: —
+- 新模式症状关键词: —
 
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用（上下文中标明 `"not available — analyze based on PR diff only"`），无法获取任何错误信息。
+CI 日志不可用，无法获取实际错误信息。
 
 ### 根因定位
-- 失败位置: 未知
-- 失败原因: 无法确定——CI 日志缺失，仅从 PR diff 无法定位根因
+- 失败位置: 未知（CI 日志缺失）
+- 失败原因: 无法从现有信息确定。PR 仅修改 `AI/cuda/README.md` 中的一行文档文本（`cann` → `cuda`），属于纯文档修正。该改动本身不具备引发构建/测试失败的条件。
 
 ### 与 PR 变更的关联
-PR 仅修改了 `AI/cuda/README.md` 第 33 行，将 `Start a cann instance` 更正为 `Start a cuda instance`，属于纯文档修正（1 行删除 + 1 行新增），不涉及任何 Dockerfile、构建脚本、测试代码或依赖配置的变更。仅从 diff 判断，此改动不太可能是 CI 失败的根本原因。
+PR 仅修改 `AI/cuda/README.md:33`，将 "Start a cann instance" 修正为 "Start a cuda instance"（1 行删除、1 行添加）。此改动不涉及 Dockerfile、构建脚本、依赖配置或任何代码文件，**与 CI 失败极大概率无因果关系**。失败更可能源于 CI 基础设施问题或与该 PR 无关的预置失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-PR 改动本身不存在明显问题。建议重新触发 CI 运行以排除临时性基础设施故障（如网络抖动、runner 资源不足等），同时获取完整 CI 日志确认实际失败阶段。
+CI 失败与本次 PR 改动无关，可能是 CI 基础设施间歇性故障。建议重新触发 CI 运行，观察是否通过。
+
+### 方向 2（置信度: 低）
+若 CI 失败持续复现，可能触发的是某些与代码无关的元数据预检（如 `image-list.yml` 完整性校验、SPDX 头检查等），但当前 README 改动不应触发此类检查。需获取 CI 日志后才能判断。
 
 ## 需要进一步确认的点
-1. **获取 CI 日志**：当前 CI 日志完全缺失，需要从 CI 系统（Jenkins）获取该 PR 对应构建 job 的完整日志。
-2. **确认失败 job 名称**：明确是哪个具体 job 失败（如 `check_package_license`、`docker-build-x86-64`、`docker-build-aarch64` 等），以便针对性分析。
-3. **排除合并冲突**：检查 PR 是否因合并了基础分支的最新变更而引入间接失败（README.md 修改理论上不会引起，但需排除偶然因素）。
-4. **验证 README 格式**：确认 `AI/cuda/README.md` 是否缺少 Copyright 和 SPDX-License-Identifier 头（参考模式17），但这属于预防性检查而非根因确认。
+1. **获取 CI 日志**：当前提供的 `ci.logs` 字段显示 `(not available — analyze based on PR diff only)`，没有任何可用于诊断的错误信息。必须获取失败 job 的实际日志才能定位根因。
+2. **确认 CI 流水线结构**：确认触发此 PR 的 pipeline 包含哪些 stage/job，判断失败是否发生在与 PR 改动无关的 job 中（如并行执行的 x86-64 / aarch64 架构专属构建 job）。
+3. **检查是否为已知 flaky 失败**：确认同类仓库中是否频繁出现与 PR 改动无关的 CI 失败（如 runner 资源不足、网络波动等）。
+
+## 修复验证要求
+不适用（仅 README 改动，日志缺失，无法确定根因）。
