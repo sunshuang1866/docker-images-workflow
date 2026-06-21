@@ -509,3 +509,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2651: `Cloud/ovirt-engine/4.5.7/24.03-lts-sp3/Dockerfile` — Dockerfile 中 Python 脚本注释测试方法后未移除对应的未使用 import，导致 Maven check
+
+---
+
+## 模式25：容器启动后立即退出
+
+**症状关键词**: No such object, failed to start container, Spark did not start within the allocated time, container_status: false
+
+**根因**: - 失败位置: `Bigdata/spark/4.1.2/24.03-lts-sp3/Dockerfile` + `entrypoint.sh`（运行时阶段）
+- 失败原因: Docker 镜像构建成功（10/10 步骤均通过），但在 CI [Check] 阶段的 `test_spark_container_startup` 测试中，容器被创建后几乎立即退出/消失，导致 check 脚本无法获取容器状态（"No such object"持续出现），最终在 60 秒超时后判定失败。
+
+**修复方法**: 容器在无参数启动时立即退出，导致 `test_spark_container_startup` 测试失败（容器 PID 1 退出、`docker ps` 不可见）。
+
+**历史案例**:
+- PR #2674: `Bigdata/spark/4.1.2/24.03-lts-sp3/Dockerfile` — 容器在无参数启动时立即退出，导致 `test_spark_container_startup` 测试失败（容器 PID 
