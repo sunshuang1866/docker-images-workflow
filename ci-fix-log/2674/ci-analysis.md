@@ -2,43 +2,53 @@
 
 ## 基本信息
 - PR: #2674 — 【自动升级】spark容器镜像升级至4.1.2版本.
-- 失败类型: dependency-error
-- 置信度: 高
+- 失败类型: runtime-error
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: tini包不存在于openEuler仓库
-- 新模式症状关键词: No match for argument, tini, dnf install, Unable to find a match
+- 新模式标题: 容器启动即退出
+- 新模式症状关键词: `container_status: false`, `No such object`, `failed to start container`, `Spark did not start within the allocated time`
 
 ## 根因分析
 
 ### 直接错误
 ```
-#8 46.29 No match for argument: tini
-#8 46.30 Error: Unable to find a match: tini
-#8 ERROR: process "/bin/sh -c set -ex &&     dnf update -y &&     ln -s /lib /lib64 &&     dnf install -y gnupg2 wget bash krb5 procps net-tools shadow dpkg java-11-openjdk tini &&     groupadd --system --gid=${spark_uid} spark &&     useradd --system --uid=${spark_uid} --gid=spark spark &&     dnf install -y python3 python3-pip &&     mkdir -p /opt/spark &&     mkdir /opt/spark/python &&     mkdir -p /opt/spark/examples &&     mkdir -p /opt/spark/work-dir &&     touch /opt/spark/RELEASE &&     chown -R spark:spark /opt/spark &&     rm /bin/sh &&     ln -sv /bin/bash /bin/sh &&     echo \"auth required pam_wheel.so use_uid\" >> /etc/pam.d/su &&     chgrp root /etc/passwd && chmod ug+rw /etc/passwd &&     rm -rf /var/cache/dnf/*" did not complete successfully: exit code: 1
+test_spark_container_startup
+container_status: false
+Error: No such object: 2faa4a407c70d009e34e7145f5e416cd29aeb9a2e1d3b11de791c6d81d069978
+container_status:
+Error: No such object: 2faa4a407c70d009e34e7145f5e416cd29aeb9a2e1d3b11de791c6d81d069978
+...（重复多次）
+ASSERT:ERROR, failed to start container 2faa4a407c70d009e34e7145f5e416cd29aeb9a2e1d3b11de791c6d81d069978 in 60 seconds
+ASSERT:Spark did not start within the allocated time.
+shunit2:ERROR test_spark_container_startup() returned non-zero return code.
+FAILED (failures=3)
+[Check] test failed
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/spark/4.1.2/24.03-lts-sp3/Dockerfile`:22（`dnf install -y ... tini ...` 步骤）
-- 失败原因: `tini` 包在 openEuler 24.03-LTS-SP3 的默认 dnf 仓库（OS/EPOL）中不存在
+- 失败位置: `Bigdata/spark/4.1.2/24.03-lts-sp3/Dockerfile` + `entrypoint.sh`（组合问题）
+- 失败原因: 容器启动测试中，容器被创建后立即退出（`container_status: false`），随后被 Docker 清理（`Error: No such object`），导致 60 秒超时检测失败。根因极可能是 Dockerfile 仅有 `ENTRYPOINT` 而**缺少 `CMD` 指令**，entrypoint.sh 在无参数时走到 `*) exec "$@"` 分支，`$@` 为空导致脚本立即结束、容器退出。
 
 ### 与 PR 变更的关联
-PR 新增了完整的 `Dockerfile` 和 `entrypoint.sh`。Dockerfile 在 `dnf install` 命令中直接尝试安装 `tini` 包，但该包在 openEuler 的 dnf 软件源中不可用。此外 `entrypoint.sh` 中硬编码引用 `/usr/bin/tini`（第 93、111 行），意味着 `tini` 是该镜像的必要运行时依赖。PR 的 Dockerfile 编写方式直接导致了此构建失败。
+本次 PR 新增了完整的 Spark 4.1.2 Dockerfile 和 entrypoint.sh。Dockerfile 中仅声明了 `ENTRYPOINT ["/opt/entrypoint.sh"]` 而未声明 `CMD`。entrypoint.sh 的 case 分支在无参数时执行 `exec "$@"`（空操作），脚本随即退出，容器无法保持运行状态。
+
+此外，日志中出现了一个值得注意的差异：构建日志显示 step 4/10 安装了 tini（`/usr/bin/tini`），但 PR diff 中的 Dockerfile 并未包含 tini 安装步骤。这意味着 CI 流水线可能对 Dockerfile 有额外的注入/模板化处理，或提供的 diff 与实际构建版本不完全一致。不过该差异不是本次失败的直接原因——启动失败发生在 [Check] 阶段（容器启动测试），而 [Build] 和 [Push] 阶段均已成功。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 `tini` 从 `dnf install` 中移除，改为从 GitHub Releases 下载预编译二进制（与 Dockerfile 中安装 `gosu` 的模式一致）。参考 Dockerfile 中已有的 `gosu` 安装模式（第 42-43 行），在安装 `gosu` 的同一 RUN 层或新增 RUN 层中通过 `wget` 下载 `tini` 静态二进制并放入 `/usr/bin/tini`。`tini` 官方提供静态链接的单一二进制文件，无需通过包管理器安装。
+### 方向 1（置信度: 中）
+在 Dockerfile 中补充 `CMD` 指令，使容器在无外部参数时也有一个保持运行的默认命令。参考同仓库其他 Spark 版本（如 4.0.1、3.3.2）的 Dockerfile，确认它们是否包含 `CMD` 以及其具体值（常见为 `spark-shell` 或其他长驻命令）。同时确认 CI 容器启动测试的预期行为——是依赖 Dockerfile 的 CMD 还是向容器传参。
 
-### 方向 2（置信度: 中）
-将 `tini` 替换为 openEuler 仓库中可用的等效工具（如 `dumb-init`，包名可能为 `dumb-init`），并相应修改 `entrypoint.sh` 中引用路径和启动方式。注意需要验证 `dumb-init` 在 openEuler 24.03-LTS-SP3 仓库中的实际可用性及其 CLI 参数兼容性。
+### 方向 2（置信度: 低）
+entrypoint.sh 中的 JAVA_HOME 自动探测逻辑使用了 `set -eo pipefail` 组合，若 `grep 'java.home'` 未匹配到 java 输出（可能因 aarch64 环境 Java 输出格式差异），脚本会在此处提前退出。需在 aarch64 环境中验证 `java -XshowSettings:properties -version 2>&1 > /dev/null | grep 'java.home'` 是否能正确匹配输出。
 
 ## 需要进一步确认的点
-1. `tini` 在 openEuler 24.03-LTS-SP3 的 EPOL 仓库中是否有其他包名（如 `tini-static`、`tiny-init`），需要查阅 openEuler 软件包列表确认
-2. `entrypoint.sh` 中 `tini` 的调用方式 `tini -s -- "${CMD[@]}"` 是否与 `dumb-init` 兼容（dumb-init 默认行为与 `tini -s` 类似）
-3. 若选择下载二进制方式，需确认下载源 URL 的稳定性和架构适配（`tini` 官方 Release 提供 amd64/arm64 静态二进制）
+1. **CI 容器启动测试的传参方式**：测试 `test_spark_container_startup` 在启动容器时是否传参？若传参（如 `driver`），entrypoint 的 case 分支应能正确进入 exec 逻辑，则根因在其他处。需获取测试代码或日志中 `docker run` 的完整命令行。
+2. **同仓库其他 Spark 版本的 Dockerfile 对比**：检查 `Bigdata/spark/4.0.1/24.03-lts-sp2/Dockerfile` 和 `Bigdata/spark/3.3.2/22.03-lts/Dockerfile` 是否声明了 `CMD`，以及 entrypoint.sh 是否相同。这有助于确认当前是否为 "缺失 CMD" 问题。
+3. **tini 安装步骤的差异**：PR diff 中不含 tini 安装，但构建日志包含。需确认 CI 流水线是否自动注入 tini 步骤，还是 diff 未反映最终提交的完整 Dockerfile。若 CI 有自动注入，需确认注入逻辑无误。
+4. **aarch64 环境下 JAVA_HOME 探测**：在 aarch64 容器内手动运行 `java -XshowSettings:properties -version 2>&1 > /dev/null | grep 'java.home' | awk '{print $3}'`，确认能否正确提取 Java 安装路径。
 
 ## 修复验证要求
-若选择方向 1（下载 tini 二进制），code-fixer 必须：
-- 确认 `https://github.com/krallin/tini/releases` 的下载链接格式，确保对 amd64 和 arm64 架构均有效
-- 在提交前从 Tini GitHub Releases 获取对应架构的二进制文件 URL，验证 wget 下载和 chmod +x 后二进制可正常执行（`/usr/bin/tini --version`）
-- 确认 `entrypoint.sh` 中所有引用 `/usr/bin/tini` 的路径与 Dockerfile 中的安装路径一致
+1. 修复后，在 aarch64 和 amd64 环境下分别执行 `docker run -d <image>` 验证容器能保持运行 ≥ 60 秒。
+2. 对比同仓库已有 Spark 版本的 Dockerfile（4.0.1-oe2403sp2、3.3.2-22.03-lts），确保 entrypoint.sh 和 CMD 配置保持一致。
+3. 若 CI 确有 Dockerfile 模板注入逻辑，需在注入后的完整 Dockerfile 上验证修复。
