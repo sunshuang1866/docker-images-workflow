@@ -11,21 +11,25 @@
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用。上下文仅提供 `"logs": "(not available — analyze based on PR diff only)"`，无法获取任何构建或测试阶段的实际错误输出。
+CI 日志不可用，无法获取实际错误信息。上下文仅提供了 `ci.logs: "(not available — analyze based on PR diff only)"`。
 
 ### 根因定位
-- 失败位置: 无法确定（日志缺失）
-- 失败原因: 无法从 PR diff 推断根因——PR 仅修改了 `AI/cuda/README.md` 中的一行文档内容（"cann" → "cuda"），属于纯文档修正，不可能触发编译错误、测试失败或依赖问题。
+- 失败位置: 未知（日志缺失）
+- 失败原因: CI 日志未提供，无法从 PR diff 推断失败根因。PR 变更仅为 `AI/cuda/README.md` 中的文档措辞修正（1 行改动：将 `Start a cann instance` 改为 `Start a cuda instance`），该改动极不可能触发构建或测试失败。
 
 ### 与 PR 变更的关联
-PR 变更与 CI 失败无直接关联。本次改动仅将 README.md 第 33 行的 `Start a cann instance` 修正为 `Start a cuda instance`（1 行增删），此部分为 Markdown 文档文本，不参与任何构建、编译或测试流程。CI 失败原因在 PR 变更范围之外，属于基础设施或 CI 流水线本身的问题。
+PR 仅修改 `AI/cuda/README.md`（纯文档文件，1 行改动），不涉及 Dockerfile、构建脚本、依赖配置或任何与 CI 构建流程相关的文件。该 PR 变更本身**与 CI 失败无直接关联**，失败很可能由基础设施问题或其他并行 PR 的真实构建失败导致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-CI 失败极可能与本次 PR 无关。建议重新触发 CI 流水线（re-run），观察是否通过。若多次 re-run 均失败，需获取失败 job 的完整日志进一步排查。
+CI 失败与本次 PR 改动无关。建议重新触发 CI 运行（re-run），排除 CI 基础设施瞬态故障。若重试后仍失败，需获取下游架构构建 job 的实际日志进一步排查。
 
 ## 需要进一步确认的点
-1. **获取完整 CI 日志**：当前日志完全缺失，必须先获取失败 job 的实际构建日志（如 Jenkins console output），才能判断真正失败原因。
-2. **确认失败 job 名称**：需明确是哪个 job 失败（如基础镜像构建、x86-64 架构构建、aarch64 架构构建、或 CI 编排层 job），以便定位问题域。
-3. **重新触发验证**：该 PR 为纯文档修正，建议 re-run CI 验证是否为偶发性 infra 问题（如 runner 资源不足、网络超时等）。
+1. 获取实际 CI 失败 job 的完整日志（当前日志完全缺失）。
+2. 确认 CI 失败发生在哪个具体 job（架构构建 job、预检 job、还是编排层 job）。
+3. 检查该 PR 对应的 CI workflow 是否有其他并行 job（如 x86-64、aarch64 架构构建）失败，这些 job 的日志是定位真实根因的关键。
+4. 确认 CI 基础设施（Jenkins runner、网络、镜像站可达性）在 PR 触发时是否正常。
+
+## 修复验证要求
+不适用（证据不足，无法给出可验证的修复方向）。
