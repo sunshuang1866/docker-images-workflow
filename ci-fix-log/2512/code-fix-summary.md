@@ -1,28 +1,24 @@
 # 修复摘要
 
 ## 修复的问题
-FoundationDB RPM 包在 openEuler 24.03 上因 glibc 符号版本不兼容导致依赖检查失败，构建中断。
+Dockerfile 中 clang 运行时库符号链接硬编码了 `aarch64` 架构路径，导致 x86_64 构建时找不到正确的库文件。将其改为根据容器实际架构（`uname -m`）动态选择路径。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 改用多阶段构建从 FoundationDB 官方 Docker 镜像提取客户端二进制，替代 RPM 下载安装方式
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 在构建 RUN 中新增架构感知的 clang library 符号链接逻辑（第 34-39 行），用 `ARCH=$(uname -m)` 替代硬编码的 `aarch64`。
 
 ## 修复逻辑
+CI 分析报告指出以下三个问题及其修复状态：
 
-采用 CI 分析报告推荐的方向 1（高置信度）——多阶段构建绕过 RPM 依赖冲突。
+1. **方向 1 — FoundationDB RPM 架构硬编码**：已在先前提交（`beb06627`）中通过多阶段构建修复，用 `COPY --from=fdb` 替代 RPM 安装，消除了架构依赖。
 
-**具体改动：**
-1. 将 `ARG FDB_VERSION=7.3.77` 提升到第一个 `FROM` 之前（全局 ARG），使其可用于 fdb 镜像拉取
-2. 新增第一阶段：`FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb`，拉取 FoundationDB 官方镜像（支持 amd64/arm64 双架构，Docker 自动选择匹配平台）
-3. 移除原有的 RPM 下载/安装步骤（原第 22-26 行），替换为 `COPY --from=fdb` 直接复制二进制文件和库：
-   - `/usr/bin/fdbcli` → 客户端CLI
-   - `/usr/lib/libfdb_c.so` → `/usr/lib64/libfdb_c.so`（C 客户端库，放在标准库路径供 3FS cmake 链接）
+2. **方向 2 — Clang library 符号链接路径硬编码**（本次修复）：先前提交在修复方向 1 时将 clang library 符号链接整个移除。本次修复将其重新加入，并使用 `ARCH=$(uname -m)` 动态获取当前容器架构：
+   - x86_64 上路径为 `/usr/lib/clang/17/lib/x86_64-openEuler-linux-gnu/`
+   - aarch64 上路径为 `/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/`
+   
+   符号链接创建在 `mkdir -p /usr/lib64/clang/17/lib/linux` 目录下，使 linker 能在统一路径找到 clang 运行时库（如 `libclang_rt.builtins-${ARCH}.a`）。glob 匹配失败时（路径不存在）`for` 循环静默跳过，不会中断构建。
 
-**为什么这样修复有效：**
-- CI 失败根因是 FoundationDB 为 RHEL9/CentOS9 构建的 `.rpm` 包声明了 `libm.so.6(GLIBC_2.17)(64bit)` 依赖，而 openEuler 24.03 的 glibc 采用不同的符号版本管理方案，无法满足该 RPM 的依赖声明
-- FoundationDB 官方 Docker 镜像（`foundationdb/foundationdb:7.3.77`，基于 Rocky Linux 9.4）不使用 RPM，而是直接从 GitHub Releases 下载 raw 二进制文件（`fdbcli.x86_64`、`libfdb_c.x86_64.so` 等），完全绕过了 RPM 的依赖检测机制
-- 已通过 HEAD 请求验证 FoundationDB 7.3.77 的 raw 二进制文件在 GitHub Releases 上对 x86_64 和 aarch64 两种架构均可用（HTTP 200）
-- Docker 多阶段构建会自动根据构建平台拉取匹配的 FoundationDB 镜像（linux/amd64 或 linux/arm64），正确选择对应架构的二进制文件
+3. **方向 3 — Git shallow clone 不兼容**：已在先前提交中修复，移除了 `--depth 1` 参数。
 
 ## 潜在风险
-- 从 FoundationDB 官方镜像复制的二进制文件基于 Rocky Linux 9.4 构建，虽然绕过 RPM 检测，但运行时仍需 openEuler 24.03 的 glibc 提供兼容的符号。FoundationDB 的二进制文件通常静态链接大部分依赖或使用受限的 glibc 符号集，在 openEuler 上直接运行的概率高，但未在 openEuler 24.03 环境中测试过实际的 `ldd /usr/bin/fdbcli` 结果。
-- 需要确认 3FS cmake 构建时能在 `/usr/lib64/` 路径下找到 `libfdb_c.so`（该路径是 x86_64 Linux 的标准库路径）。
+- 若 openEuler 未来版本中 clang 版本号变更（非 17），`/usr/lib/clang/17/lib/` 路径将失效，符号链接 step 会静默跳过（glob 无匹配），可能导致后续 cmake 构建因找不到 clang runtime 库而失败。
+- 若 openEuler 改变 library 子目录命名规则（非 `${ARCH}-openEuler-linux-gnu`），同样会导致 glob 不匹配。
