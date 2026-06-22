@@ -1,17 +1,22 @@
 # 修复摘要
 
 ## 修复的问题
-CI 预检工具在 `Database/percona/README.md` 上触发 `parse_image_prefix` 的 ValueError：`Database/image-list.yml` 缺少 percona 镜像根目录条目，同时 `Cloud/image-list.yml` 中的残留 percona 条目触发了不必要的多场景（multi-scene）校验路径。
+PR 源分支中存在误放的 `Cloud/percona/` 目录文件，导致 CI 预检工具 (eulerpublisher) 在 `Cloud/image-list.yml` 中查找 percona 条目失败，抛出 `ValueError`。
 
 ## 修改的文件
-- `Database/image-list.yml:19`: 新增 `percona: percona` 条目（与已有条目格式一致）
-- `Cloud/image-list.yml:34`: 删除残留的 `percona: percona` 条目
+- `Cloud/percona/8.4.8/24.03-lts-sp3/Dockerfile`: 删除（误放文件）
+- `Cloud/percona/8.4.8/24.03-lts-sp3/config/conf.d/my.cnf`: 删除（误放文件）
+- `Cloud/percona/8.4.8/24.03-lts-sp3/config/my.cnf`: 删除（误放文件）
+- `Cloud/percona/8.4.8/24.03-lts-sp3/entrypoint.sh`: 删除（误放文件）
+- `Cloud/percona/README.md`: 删除（误放文件）
+- `Cloud/percona/doc/image-info.yml`: 删除（误放文件）
+- `Cloud/percona/doc/picture/logo.png`: 删除（误放文件）
+- `Cloud/percona/meta.yml`: 删除（误放文件）
 
 ## 修复逻辑
-根据 CI 分析报告和 git 历史，PR #2698 初始添加 percona 到 Cloud 目录，后经 commit `757d005f`（"Fix percona category: move from Cloud to Database"）将 percona 从 Cloud 迁移到 Database。该 commit 通过 `git mv` 重命名文件并更新了两个 `image-list.yml`，但分支合并后 `Database/image-list.yml` 的变更丢失（percona 条目缺失），而 `Cloud/image-list.yml` 的 percona 条目被恢复。这导致 CI 检测到 Cloud 和 Database 两个场景下均存在 percona 文件，触发 multi-scene 严格校验，进而因 `Database/image-list.yml` 缺少 percona 条目而报错。
+CI 分析报告指出失败根因为：percona 是数据库类镜像，按项目规范应归属 `Database/` 场景目录。但 PR 源分支中残留了 `Cloud/percona/` 整个目录（8 个文件），CI 预检工具对比分支差异时检测到这些文件，要求 `Cloud/image-list.yml` 中必须有对应的 percona 条目，而该文件缺少此条目，因此抛出 `ValueError`。
 
-修复方案：在 `Database/image-list.yml` 末尾添加 `percona: percona`（与其他条目格式一致），并从 `Cloud/image-list.yml` 中删除残留的 `percona: percona` 条目。这与 commit `757d005f` 的预期行为一致：percona 归属 Database 场景。
+采用分析报告中的**方向 1**修复：删除 `Cloud/percona/` 整个目录（`git rm -r`），确保差异列表中不再出现 Cloud 路径下的 percona 文件。Database/ 下的 percona 镜像文件保持不变，Database/image-list.yml 已有对应条目（由 PR 原作者添加）。
 
 ## 潜在风险
-- `Database/image-list.yml` 不在原始 PR 的 `pr.changed_files` 列表中，但 CI 错误明确要求修改此文件。修改格式与所有已有条目一致（`镜像名: 镜像名`），无格式兼容性风险。
-- `Cloud/image-list.yml` 删除了 percona 条目，这与 commit `757d005f` 的迁移意图一致。若 Cloud 场景未来需要 percona，需重新添加并同步 `Database/image-list.yml`。
+无。修复仅删除误放目录，不影响 Database/percona/ 下的正常镜像文件及 Database/image-list.yml 中的条目。
