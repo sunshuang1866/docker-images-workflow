@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-`Database/image-list.yml` 缺少 `percona: percona` 条目，导致 CI lint 工具 `parse_image_prefix` 在处理 `Database/percona/README.md` 时无法解析出镜像根目录。
+`Database/image-list.yml` 缺少 `percona: percona` 条目，导致 CI 的 `parse_image_prefix` 函数在解析 `Database/percona/README.md` 等镜像根目录文件时抛出 ValueError。
 
 ## 修改的文件
-- `Database/image-list.yml`: 在 `milvus: milvus` 之后添加 `percona: percona` 条目，并补充文件结尾换行符以与其他 image-list.yml 保持一致。
+- `Database/image-list.yml`: 在 `milvus: milvus` 后追加 `percona: percona` 条目，与同文件中其他镜像条目（如 `cassandra: cassandra`、`mysql: mysql`）格式完全一致。
 
 ## 修复逻辑
-CI 分析报告指出 `format.py:parse_image_prefix()` 在解析变更文件 `Database/percona/README.md` 时，从 `Database/image-list.yml` 中找不到对应的镜像根目录映射。根因是 percona 文件在 fix 分支上被移动到 `Database/percona/` 目录后，`Database/image-list.yml` 漏掉了 `percona: percona` 条目（该条目格式与同文件中 `tidb: tidb`、`milvus: milvus` 等一致）。参照已通过 CI 的 Database 镜像（如 tidb、milvus）的目录结构与 image-list.yml 条目格式，添加缺失条目即可消除 lint 报错。同时补上文件结尾换行符以消除分析报告中方向 2 提到的潜在 YAML 解析异常风险。
+CI 分析报告定位根因为 `parse_image_prefix` 处理镜像根目录层级文件（如 `Database/percona/README.md`）时，依赖 `Database/image-list.yml` 中的条目来匹配镜像根目录。原始 PR 将 percona 文件从 `Cloud/` 移动到 `Database/`，但 `Database/image-list.yml` 未同步添加 percona 条目（pr-head 分支已有此条目，fix/2698 分支遗漏）。添加 `  percona: percona` 后，`parse_image_prefix` 能正确解析 `Database/percona/README.md`、`Database/percona/doc/image-info.yml`、`Database/percona/meta.yml` 等根目录文件。修改后与 pr-head 分支一致。
 
 ## 潜在风险
-无。该修改与 `Database/image-list.yml` 中所有现有条目格式一致，仅添加一行映射，不影响现有镜像的 CI 检查。
+无。此修改仅追加一行与同文件其他镜像条目格式完全一致的内容，不涉及任何逻辑变更，且与 pr-head 分支验证状态一致。
