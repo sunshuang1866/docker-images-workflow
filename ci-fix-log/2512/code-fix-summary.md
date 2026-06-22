@@ -1,28 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB 客户端 RPM 下载 URL 硬编码 `aarch64` 架构和 `el9` 发行版，导致 x86_64 CI 环境中 `rpm -ivh` 安装失败（`libm.so.6(GLIBC_2.17)` 依赖缺失）。同时改用 `rpm2cpio + cpio` 提取方式彻底绕开 RPM 依赖检查。
+FoundationDB 预编译 RPM 在 openEuler 24.03-lts-sp3 基础镜像上因跨发行版 RPM 依赖检查失败导致构建中断。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`:
-  1. 新增 `ARG FDB_VERSION=7.3.77` 用于版本参数化
-  2. 新增架构感知的 FoundationDB 安装步骤：通过 `uname -m` 判断架构，x86_64 使用 `el7` RPM，aarch64 使用 `el9` RPM
-  3. 用 `rpm2cpio | cpio -idm` + `cp -r usr/* /usr/` 替代 `rpm -ivh`，避免 RPM 依赖检查导致的 GLIBC 版本冲突
-  4. 在 yum install 中添加 `cpio` 包（`rpm2cpio` 提取所需）
-  5. 修复 git clone：移除 `--depth 1` 浅克隆与 `|| true`（会静默掩盖 checkout 失败），改用完整克隆
-  6. 修复运行时包：移除不存在的 `boost-foundation`，使用 `boost-filesystem boost-system boost-program-options`
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 已实施三处修复：(1) 第 22-26 行 FoundationDB RPM 安装使用 `--nodeps --noscripts` 绕过 RPM 依赖检查而非原始的 `rpm -ivh`；(2) 使用 `uname -m` 动态检测架构并针对 x86_64 选用 el7 RPM（兼容性更好）、针对 aarch64 选用 el9 RPM，替代原始硬编码的 `aarch64`；(3) 第 28-30 行使用 `git clone --recurse-submodules`（完整克隆）替代 `git clone --depth 1`（浅克隆），确保 `git checkout ${VERSION}` 能访问目标 commit。
 
 ## 修复逻辑
+CI 分析报告的三个根因均已修复：
 
-**根因**（CI 分析报告）：Dockerfile 第 22 行硬编码了 `...el9.aarch64.rpm` URL，当前 CI 构建环境为 x86_64（日志中 meson 检测到 `Host machine cpu family: x86_64`），下载的 aarch64 RPM 依赖 `libm.so.6(GLIBC_2.17)` 在 openEuler 24.03 中无法满足。
+1. **RPM 依赖检查失败**（根因 1）：FoundationDB el9 RPM 的 spec 要求 `libm.so.6(GLIBC_2.17)(64bit)`，openEuler 的 glibc RPM 未声明提供此版本化 capability，但 openEuler 的 glibc（>=2.38）实际二进制兼容所有 GLIBC_2.0 至 GLIBC_2.38 的符号。使用 `rpm -i --nodeps --noscripts` 跳过 RPM 元数据层面的依赖检查，文件正常提取到 `/usr/lib/` 和 `/usr/bin/`，运行时 ABI 兼容无问题。
 
-**修复方式**：
-1. 架构检测：`ARCH=$(uname -m)` + 条件判断 `[ "$ARCH" = "x86_64" ]` 选择 `el7` 或 `el9`
-2. 绕过 RPM 依赖检查：使用 `rpm2cpio | cpio -idm` 直接解压文件到系统，不触发 rpm 的依赖解析
-3. 已验证 FoundationDB 7.3.77 release 中确实存在 `foundationdb-clients-7.3.77-1.el7.x86_64.rpm` 和 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`，URL 构造与实际资产文件名匹配
-4. 同步修复了 CI 分析报告中提到的两个潜在问题（git 浅克隆 + `|| true`、boost 包名错误）
+2. **架构硬编码**（根因 2）：原 Dockerfile 硬编码 `aarch64`，x86_64 构建 job 会因 URL 不匹配而失败。现通过 `uname -m` 动态获取架构，x86_64 使用 `el7`（RHEL 7 级别，glibc 版本更旧、兼容性更广），aarch64 使用 `el9`。已验证两个 RPM URL 在 FoundationDB 7.3.77 发布页面上均存在并可下载。
+
+3. **git 浅克隆问题**（模式 18）：原 `git clone --depth 1` 只克隆最新 commit，后续 `git checkout ${VERSION}` 无法访问历史 commit。现使用完整克隆 `git clone --recurse-submodules`，确保任意 commit 均可 checkout。
 
 ## 潜在风险
-- `rpm2cpio | cpio` 提取方式不会记录到 RPM 数据库，后续 `yum remove` 等命令无法管理这些文件，但在容器镜像构建场景中这是可接受的
-- `uname -m` 依赖于构建节点的实际 CPU 架构，需要 CI 在对应架构的 runner 上构建
-- 无
+- `--nodeps` 跳过的依赖在运行时若实际缺失，会导致 `libfdb_c.so` 加载失败。但 FoundationDB 客户端库的核心依赖（libc、libm、libpthread、libstdc++）在 openEuler 24.03 中均已提供且 ABI 兼容，风险低。
+- 对于 aarch64 构建，el9 RPM 的二进制在 openEuler 上可能存在未知的运行时行为差异（glibc 版本不同），但概率较低。若后续出现运行时问题，可考虑方向 1（多阶段 COPY 从 foundationdb/foundationdb:7.3.77），但该镜像同样基于 Rocky Linux 9.4（el9 系列），不会改变 glibc ABI 兼容性特征。
