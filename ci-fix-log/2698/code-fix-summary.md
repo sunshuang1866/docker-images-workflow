@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-`Database/image-list.yml` 缺少 `percona: percona` 条目，导致 CI 的 `parse_image_prefix` 函数在解析 `Database/percona/README.md` 等镜像根目录文件时抛出 ValueError。
+CI 基础设施问题：`eulerpublisher` 工具的 `parse_image_prefix` 函数从 Jenkins workspace（upstream master 分支）读取 `Database/image-list.yml`，而非 PR 克隆仓库，导致找不到 PR 新增的 `percona: percona` 条目，对根级文件 `Database/percona/README.md` 抛出 ValueError。PR 代码本身及 `image-list.yml` 变更均正确无误，无需修改源代码。
 
 ## 修改的文件
-- `Database/image-list.yml`: 在 `milvus: milvus` 后追加 `percona: percona` 条目，与同文件中其他镜像条目（如 `cassandra: cassandra`、`mysql: mysql`）格式完全一致。
+无
 
 ## 修复逻辑
-CI 分析报告定位根因为 `parse_image_prefix` 处理镜像根目录层级文件（如 `Database/percona/README.md`）时，依赖 `Database/image-list.yml` 中的条目来匹配镜像根目录。原始 PR 将 percona 文件从 `Cloud/` 移动到 `Database/`，但 `Database/image-list.yml` 未同步添加 percona 条目（pr-head 分支已有此条目，fix/2698 分支遗漏）。添加 `  percona: percona` 后，`parse_image_prefix` 能正确解析 `Database/percona/README.md`、`Database/percona/doc/image-info.yml`、`Database/percona/meta.yml` 等根目录文件。修改后与 pr-head 分支一致。
+此为 infra-error，非代码缺陷。`parse_image_prefix` 在处理版本子目录下的文件（如 `Database/percona/8.4.8/24.03-lts-sp3/Dockerfile`）时可通过路径推断镜像根目录，但处理根级文件（如 `Database/percona/README.md`）时必须依赖 `image-list.yml` 查找。CI 工作流从 workspace（master 分支）读取该文件，master 分支尚未合并此 PR，因此不包含 `percona` 条目。PR 在 `Database/image-list.yml` 中新增的 `percona: percona` 条目本身正确，CI 工具需从 PR 克隆仓库读取 `image-list.yml`，或将根级文件的校验放宽为警告。
 
 ## 潜在风险
-无。此修改仅追加一行与同文件其他镜像条目格式完全一致的内容，不涉及任何逻辑变更，且与 pr-head 分支验证状态一致。
+无。未修改任何源代码。
