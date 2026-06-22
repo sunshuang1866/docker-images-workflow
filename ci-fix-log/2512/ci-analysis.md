@@ -2,16 +2,17 @@
 
 ## 基本信息
 - PR: #2512 — Add 3FS Image
-- 失败类型: build-error
+- 失败类型: dependency-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 架构硬编码
-- 新模式症状关键词: Failed dependencies, foundationdb-clients, aarch64, rpm -ivh, GLIBC_2.17
+- 新模式标题: RPM架构硬编码不匹配
+- 新模式症状关键词: Failed dependencies, GLIBC, aarch64, rpm -ivh, foundationdb-clients, el9, architecture mismatch
 
 ## 根因分析
 
 ### 直接错误
 ```
+#10 [5/9] RUN curl -sL --retry 5 -o /tmp/fdb-clients.rpm https://github.com/apple/foundationdb/releases/download/7.3.77/foundationdb-clients-7.3.77-1.el9.aarch64.rpm &&     rpm -ivh /tmp/fdb-clients.rpm &&     rm -f /tmp/fdb-clients.rpm
 #10 0.509 error: Failed dependencies:
 #10 0.509 	libm.so.6(GLIBC_2.17)(64bit) is needed by foundationdb-clients-7.3.77-1.aarch64
 #10 ERROR: process "/bin/sh -c curl -sL --retry 5 -o /tmp/fdb-clients.rpm https://github.com/apple/foundationdb/releases/download/7.3.77/foundationdb-clients-7.3.77-1.el9.aarch64.rpm &&     rpm -ivh /tmp/fdb-clients.rpm &&     rm -f /tmp/fdb-clients.rpm" did not complete successfully: exit code: 1
@@ -24,41 +25,33 @@ Dockerfile:22
   24 | >>>     rm -f /tmp/fdb-clients.rpm
   25 |     
 --------------------
-ERROR: failed to solve: process "/bin/sh -c ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`:22-24
-- 失败原因: FoundationDB RPM URL 硬编码了 `aarch64` 架构，但 CI 构建主机为 x86_64（日志 #9 中 meson 明确输出 `Host machine cpu: x86_64`，rustup 安装 `x86_64-unknown-linux-gnu`）。`rpm -ivh` 安装 aarch64 架构的 RPM 包时，依赖求解器检测到该包的 `libm.so.6(GLIBC_2.17)(64bit)` 依赖无法由 x86_64 系统上的 glibc 满足，导致安装失败。
+- 失败位置: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`:22
+- 失败原因: FoundationDB RPM 下载 URL 硬编码为 `aarch64` 架构，而本次 CI 构建运行在 `x86_64` 架构上（日志中步骤 #8 显示 `default host triple is x86_64-unknown-linux-gnu`，步骤 #9 显示 `Host machine cpu family: x86_64`），导致架构不匹配，RPM 依赖检查失败。
 
 ### 与 PR 变更的关联
-PR 新增了整个 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`（69 行全新增），FoundationDB RPM 安装步骤是该 Dockerfile 中的第 5 个 RUN 步骤。该硬编码问题仅在 x86_64 构建环境中暴露——Dockerfile 作者可能在 aarch64 环境下编写并测试，未验证 x86_64 架构兼容性。此外，Dockerfile 中其他位置也存在架构硬编码（如 clang library 路径：`aarch64-openEuler-linux-gnu`、`libclang_rt.builtins-aarch64.a`）。
+本次 PR 新增了整个 3FS Dockerfile（`Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`），其中的 FoundationDB RPM 安装步骤（第 22-24 行）直接导致了此次失败。该 Dockerfile 是全新文件，错误与 PR 变更强相关。
+
+还需注意：即使修正了架构问题，该 RPM 是为 RHEL/CentOS 9 (`el9`) 构建的，openEuler 24.03-LTS-SP3 的 glibc 版本可能与 `GLIBC_2.17` 符号版本要求不完全兼容（aarch64 平台）。这可能意味着在 aarch64 架构上该 RPM 也无法直接安装，需进一步验证。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-FoundationDB RPM URL 应根据构建架构动态选择。FoundationDB 同时提供了 x86_64 和 aarch64 的 RPM 包：
-- x86_64: `foundationdb-clients-7.3.77-1.el9.x86_64.rpm`
-- aarch64: `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`
+FoundationDB RPM URL 需根据构建架构动态选择。利用 BuildKit 内置的 `TARGETARCH` ARG（值为 `amd64` 或 `arm64`）构造条件分支：当 `TARGETARCH=amd64` 时下载 `x86_64` 架构 RPM，当 `TARGETARCH=arm64` 时下载 `aarch64` 架构 RPM。同时需验证 openEuler 的 glibc 是否满足 FoundationDB RPM 的依赖要求，若不满足则需改用从源码构建 FoundationDB 客户端库或找到 openEuler 原生包替代方案。
 
-修复思路：在 Dockerfile 中利用 BuildKit 内置 `TARGETARCH` 变量或通过 shell 条件判断，动态构造正确的 RPM 下载 URL。
-
-### 方向 2（置信度: 高 — 与方向1需同步处理）
-Dockerfile 中 clang library 符号链接路径也硬编码了 aarch64：
-```
-ln -sf /usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/...
-```
-x86_64 上的对应路径为 `/usr/lib/clang/17/lib/x86_64-openEuler-linux-gnu/...`。需与方向 1 一并按架构动态选择正确路径。
-
-### 方向 3（置信度: 中 — 当前构建未到达此步骤，但修复方向1后可能暴露）
-历史模式 18 指出该 Dockerfile 的 `git clone --depth 1` + `git checkout ${VERSION}` 组合存在浅克隆与 commit hash checkout 不兼容问题（`2>/dev/null || true` 静默掩盖错误）。若 CI 当前使用的是 x86_64 builder，修复方向 1 后构建将继续推进到该 git clone 步骤，可能触发此潜在问题。建议一并修复。
+### 方向 2（置信度: 中）
+完全绕过 FoundationDB RPM 安装，改为从 FoundationDB 源码编译客户端库（`fdb_c` 和 `libfdb_c`），确保与 openEuler 的 glibc 和系统库兼容。这需要检查 FoundationDB 7.3.77 的构建依赖（需要 cmake、OpenJDK、Mono 等），构建时间较长但架构兼容性最好。
 
 ## 需要进一步确认的点
-1. 确认 FoundationDB 7.3.77 的 x86_64 RPM 在 openEuler 24.03-LTS-SP3 x86_64 容器中是否确实可安装（`rpm -ivh` 依赖检查通过）。
-2. 确认 openEuler 24.03-LTS-SP3 x86_64 容器中 clang-17 的库文件路径是否为 `/usr/lib/clang/17/lib/x86_64-openEuler-linux-gnu/`。
-3. 确认 `boost-foundation` 包名在 openEuler 24.03-LTS-SP3 yum 仓库中是否存在（历史模式 10 提到该包名可能不存在，但当前构建未推进到该 RUN 步骤，无法从日志验证）。
+1. openEuler 24.03-LTS-SP3 aarch64 的 glibc 版本是否实际提供 `GLIBC_2.17` 符号（`libm.so.6`）——这可能仅是架构不匹配导致的第一条错误，在正确架构上可能不存在此问题
+2. FoundationDB 7.3.77 是否发布 `x86_64` 架构 RPM，以及其 URL 格式（`foundationdb-clients-7.3.77-1.el9.x86_64.rpm`）
+3. 3FS 项目是否强依赖 FoundationDB 7.3.77 客户端，以及是否有 openEuler 提供的 FoundationDB 原生包可替代 RPM 安装
+4. 知识库中已记录的该 PR 其他问题（模式10：boost-foundation 包名不存在、模式18：git 浅克隆 + commit hash checkout 不兼容）在此次构建中尚未触发（构建在步骤 5/9 已失败），后续修复时需一并处理
 
 ## 修复验证要求
-1. code-fixer 必须在 x86_64 环境中验证修复后的 Dockerfile 能否完整通过 `docker build`。
-2. code-fixer 必须从 FoundationDB GitHub releases 页面确认 `foundationdb-clients-7.3.77-1.el9.x86_64.rpm` 文件确实存在且可下载。
-3. 修复方向 1 生效后，若构建继续失败，需重新分析后续步骤（特别是 git clone 和 cmake 阶段）的错误日志。
+code-fixer 在修改 Dockerfile 后，必须：
+1. 分别对 `x86_64` 和 `aarch64` 两个架构验证 FoundationDB RPM 能否成功安装
+2. 若改用动态架构选择，需在本地同时模拟两个架构的构建验证 URL 正确性
+3. 若 RPM 安装方案在 openEuler 上存在 glibc 兼容性问题，需回退到源码编译方案并验证客户端库能正常链接
