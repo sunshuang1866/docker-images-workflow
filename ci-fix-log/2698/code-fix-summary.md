@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题：`eulerpublisher` 工具的 `parse_image_prefix` 函数从 Jenkins workspace（upstream master 分支）读取 `Database/image-list.yml`，而非 PR 克隆仓库，导致找不到 PR 新增的 `percona: percona` 条目，对根级文件 `Database/percona/README.md` 抛出 ValueError。PR 代码本身及 `image-list.yml` 变更均正确无误，无需修改源代码。
+CI 预检脚本 `parse_image_prefix` 在处理变更文件 `Database/percona/README.md` 时，因 `Database/image-list.yml` 中缺少 `percona: percona` 条目而抛出 ValueError。此失败属于 infra-error，根因在 CI 基础设施脚本，不在 PR 代码本身。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-此为 infra-error，非代码缺陷。`parse_image_prefix` 在处理版本子目录下的文件（如 `Database/percona/8.4.8/24.03-lts-sp3/Dockerfile`）时可通过路径推断镜像根目录，但处理根级文件（如 `Database/percona/README.md`）时必须依赖 `image-list.yml` 查找。CI 工作流从 workspace（master 分支）读取该文件，master 分支尚未合并此 PR，因此不包含 `percona` 条目。PR 在 `Database/image-list.yml` 中新增的 `percona: percona` 条目本身正确，CI 工具需从 PR 克隆仓库读取 `image-list.yml`，或将根级文件的校验放宽为警告。
+分析报告明确指出失败类型为 `infra-error`，根因位于 CI 预检脚本 `eulerpublisher/update/container/app/format.py:156` 的 `parse_image_prefix` 函数。该函数要求所有变更文件都能在 `Database/image-list.yml` 中找到对应的镜像根目录条目。PR 新增了 `Database/percona/` 目录下的所有文件，但 `Database/image-list.yml` 中缺少 `percona: percona` 条目（该文件不在本次 PR 的变更文件列表中）。按照任务指令中"infra-error 无需代码修改"的原则，不对 PR 源代码做任何改动。实际修复需要在 `Database/image-list.yml` 末尾追加 `percona: percona`，但这超出了当前允许修改的文件范围。
 
 ## 潜在风险
-无。未修改任何源代码。
+若其他 PR 新增数据库镜像但遗漏更新 `Database/image-list.yml`，会触发相同的 CI 预检失败。建议在 PR 提交流程或 CI 检查中添加对 `image-list.yml` 更新的校验。
