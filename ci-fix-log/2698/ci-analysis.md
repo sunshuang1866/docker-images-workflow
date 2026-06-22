@@ -5,41 +5,21 @@
 - 失败类型: lint-error
 - 置信度: 中
 - 知识库匹配: 模式11
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 新模式标题: 
+- 新模式症状关键词: 
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-06-23 00:20:27,152-.../update.py[line:356]-INFO: Difference: [
-    "Cloud/image-list.yml",
-    "Cloud/percona/8.4.8/24.03-lts-sp3/Dockerfile",
-    "Cloud/percona/8.4.8/24.03-lts-sp3/config/conf.d/my.cnf",
-    "Cloud/percona/8.4.8/24.03-lts-sp3/config/my.cnf",
-    "Cloud/percona/8.4.8/24.03-lts-sp3/entrypoint.sh",
-    "Cloud/percona/README.md",
-    "Cloud/percona/doc/image-info.yml",
-    "Cloud/percona/doc/picture/logo.png",
-    "Cloud/percona/meta.yml",
-    "Database/percona/8.4.8/24.03-lts-sp3/Dockerfile",
-    "Database/percona/8.4.8/24.03-lts-sp3/config/conf.d/my.cnf",
-    "Database/percona/8.4.8/24.03-lts-sp3/config/my.cnf",
-    "Database/percona/8.4.8/24.03-lts-sp3/entrypoint.sh",
-    "Database/percona/README.md",
-    "Database/percona/doc/image-info.yml",
-    "Database/percona/doc/picture/logo.png",
-    "Database/percona/meta.yml"
-]
-...
 Traceback (most recent call last):
-  File ".../update.py", line 365, in <module>
+  File "/.../eulerpublisher/update/container/app/update.py", line 365, in <module>
     if obj.check_code():
-  File ".../update.py", line 270, in check_code
+  File "/.../eulerpublisher/update/container/app/update.py", line 270, in check_code
     head, body, fail_count = format.check_report(self.change_files)
-  File ".../format.py", line 188, in check_report
+  File "/.../eulerpublisher/update/container/app/format.py", line 188, in check_report
     _, prefix = parse_image_prefix(change_file)
-  File ".../format.py", line 156, in parse_image_prefix
+  File "/.../eulerpublisher/update/container/app/format.py", line 156, in parse_image_prefix
     raise ValueError(
 ValueError: Missing required image root directory for multi-scene processing.
 Required action: Specify the image root directory in Database/image-list.yml.
@@ -47,39 +27,25 @@ File: Database/percona/README.md
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/format.py:156`（`parse_image_prefix` 函数）
-- 失败原因: CI `check_code` 流程检测到本次变更同时涉及 `Cloud/` 和 `Database/` 两个场景目录（多场景处理模式），在对变更文件逐一校验时，`parse_image_prefix` 无法在 `Database/image-list.yml` 中找到 `Database/percona/README.md` 所对应的镜像根目录条目。
+- 失败位置: `eulerpublisher/update/container/app/format.py:156` (`parse_image_prefix` 函数)
+- 失败原因: CI 预检工具检测到本次变更跨多个场景目录（Cloud 和 Database），触发"多场景处理"（multi-scene processing）代码路径。`parse_image_prefix` 在处理 `Database/percona/README.md` 时，在 `Database/image-list.yml` 中找不到对应 percona 的镜像根目录条目（或条目格式不符合多场景处理的要求）。
 
 ### 与 PR 变更的关联
-
-**PR diff 中已包含修复**: PR diff 明确在 `Database/image-list.yml` 中添加了 `percona: percona` 条目。然而 CI 日志仍然报"Missing required image root directory in Database/image-list.yml"，存在矛盾。
-
-可能原因分析（按可能性排序）：
-
-1. **Cloud 侧 percona 文件缺少注册（最可能，置信度: 中）**：CI Difference 列表中包含 8 个 `Cloud/percona/…` 文件，但这些文件**不在本 PR (#2698) 的 diff 中**。它们来自触发 CI 的上层 PR (#2703: `sunshuang1866:fix/2698 -> master`)。`Cloud/image-list.yml` 中未添加 percona 条目，导致多场景校验模式下报错。错误信息指向 Database 文件可能是因为 `parse_image_prefix` 遍历文件列表时，Database 文件触发了第一个失败（或因函数内部对多场景的特殊处理逻辑）。
-
-2. **CI 克隆的代码版本与 PR diff 不一致（可能性: 中）**：CI 执行 `Clone https://gitcode.com/sunshuang1866/****-docker-images.git` 从 fork 仓库克隆，克隆的 `fix/2698` 分支状态可能与本 PR 的 diff 基线不同步，导致 `Database/image-list.yml` 中实际没有 percona 条目。
-
-3. **image-list.yml 格式问题（可能性: 低）**：PR diff 显示 `Database/image-list.yml` 末尾缺少换行符（`\ No newline at end of file`）。极少数 YAML 解析器对此敏感，可能导致 percona 条目未被正确解析。
+PR 在 `Database/` 目录下新增了 percona 镜像的所有文件（Dockerfile、entrypoint.sh、config、README.md、meta.yml、image-info.yml），并在 `Database/image-list.yml` 中追加了 `percona: percona` 条目。但 CI 日志显示变更列表中还包含了 `Cloud/` 目录下的 percona 同类文件（`Cloud/percona/...`），这些 Cloud 目录下的文件**不在本次提供的 PR diff 中**——可能由上游 fix 分支（`fix/2698`, PR #2703）额外携带。这导致 CI 检测到一个镜像同时出现在两个场景目录中，触发了 multi-scene 校验路径，该校验对 `image-list.yml` 条目格式可能有更严格的要求（如需要完整场景路径而非仅镜像名），导致 `parse_image_prefix` 无法正确解析 `percona: percona` 这个条目。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**补充 Cloud/image-list.yml 的 percona 条目**。在 `Cloud/image-list.yml` 中添加 `percona: percona`（类似 Database 侧的修改），使 Cloud 和 Database 两个场景目录的 image-list.yml 均包含 percona 镜像的根目录注册。这是最直接的修复方向，因为 CI 触发了多场景处理模式，要求所有涉及场景的 image-list.yml 都完整注册。
+### 方向 1（置信度: 中）
+检查 `fix/2698` 分支上 `Database/image-list.yml` 的实内容，确认 percona 条目格式是否与已有条目（如 `tidb: tidb`）一致。如果一致但仍失败，则 multi-scene 校验路径可能要求 image-list.yml 中的值必须包含场景路径前缀（如 `percona: Database/percona` 或 `percona: Database/percona/`），而非仅镜像名。可在 `eulerpublisher` 仓库中查看 `parse_image_prefix` 的实现确认要求。
 
-### 方向 2（置信度: 中）
-**验证 CI 克隆的分支状态**。确认 `sunshuang1866:fix/2698` 分支上 `Database/image-list.yml` 是否确实包含 `percona: percona` 条目。如果已包含但仍失败，则问题大概率出在 Cloud 侧；如果未包含，则需确认该分支上的 commit 是否与本 PR diff 一致。
+### 方向 2（置信度: 低）
+排查为何 `fix/2698` 分支携带了 `Cloud/` 目录下的 percona 文件。如果这些 Cloud 文件是无意引入的（如错误合入或重复提交），移除它们可消除 multi-scene 触发条件。如果 Cloud 和 Database 双场景部署是有意设计，则两个场景的 `image-list.yml` 均需正确配置 percona 条目。
 
 ## 需要进一步确认的点
-
-1. **确认 Cloud/percona 文件的来源**：PR #2698 的 diff 中不包含任何 `Cloud/percona/` 文件，但 CI 差异列表中出现了 8 个 Cloud percona 文件。需要确认这些文件是否由上游 PR #2703 引入，以及它们是否应该随同本 PR 一起提交。
-2. **确认 CI 克隆的实际 branch/commit**：日志显示从 `sunshuang1866/****-docker-images.git` 克隆，需要确认实际 checkout 的 commit hash，排查是否与 PR diff 所指的代码状态一致。
-3. **检查 Cloud/image-list.yml 当前内容**：确认是否缺少 percona 条目，因为 Cloud 侧的 percona 文件也需要在对应的 image-list.yml 中注册。
-4. **查看 format.py 的 parse_image_prefix 函数实现**：理解多场景处理模式下对 image-list.yml 的具体查找逻辑，确认错误报告的文件名（`Database/percona/README.md`）与实际上缺失条目的场景（可能是 Cloud/）之间的关系。
+1. **`fix/2698` 分支的完整 diff**：当前提供的 PR diff 仅包含 `Database/` 变更，但 CI 日志显示还存在 `Cloud/` 变更。需要获取 `fix/2698` 相对于 master 的完整 diff 确认 Cloud 文件来源。
+2. **`parse_image_prefix` 的多场景逻辑**：需要在 `eulerpublisher` 仓库中查看 `format.py:156` 附近代码，确认 multi-scene 校验对 `image-list.yml` 条目的具体格式要求（是否需要全路径、是否需要尾随 `/` 等）。
+3. **Cloud 目录的 percona 文件是否预期存在**：确认 Cloud/percona 文件是有意部署还是误提交，决定是移除 Cloud 文件还是补全 Cloud/image-list.yml 条目。
 
 ## 修复验证要求
-
-code-fixer 在修改后必须验证：
-1. `Database/image-list.yml` 和 `Cloud/image-list.yml` 均包含 `percona: percona` 条目
-2. 两个 image-list.yml 文件均为合法的 YAML 格式
-3. 确认 percona 镜像在 Cloud/ 和 Database/ 两个场景目录下的存在方式符合项目规范（避免重复文件，或明确两个场景各自独立的 Dockerfile 路径）
+1. 修复后需确认 `check_report` 不再为任何变更文件报 `parse_image_prefix` 的 ValueError。
+2. 如果修改涉及 `image-list.yml` 的条目格式，需在所有受影响的场景目录中保持一致。
