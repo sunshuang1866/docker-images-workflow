@@ -5,45 +5,51 @@
 - 失败类型: lint-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: image-list条目与文件路径不匹配
-- 新模式症状关键词: Missing required image root directory, multi-scene processing, parse_image_prefix, image-list.yml, README.md
+- 新模式标题: 多场景镜像根目录解析失败
+- 新模式症状关键词: Missing required image root directory, multi-scene processing, parse_image_prefix, image-list.yml
 
 ## 根因分析
 
 ### 直接错误
 ```
 Traceback (most recent call last):
-  File "/…/eulerpublisher/update/container/app/format.py", line 188, in check_report
+  File ".../eulerpublisher/update/container/app/update.py", line 365, in <module>
+    if obj.check_code():
+  File ".../update/container/app/update.py", line 270, in check_code
     head, body, fail_count = format.check_report(self.change_files)
-  File "/…/eulerpublisher/update/container/app/format.py", line 156, in parse_image_prefix
+  File ".../eulerpublisher/update/container/app/format.py", line 188, in check_report
+    _, prefix = parse_image_prefix(change_file)
+  File ".../eulerpublisher/update/container/app/format.py", line 156, in parse_image_prefix
     raise ValueError(
 ValueError: Missing required image root directory for multi-scene processing.
 Required action: Specify the image root directory in Database/image-list.yml.
 File: Database/percona/README.md
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
 ```
 
 ### 根因定位
 - 失败位置: `eulerpublisher/update/container/app/format.py:156`（`parse_image_prefix` 函数）
-- 失败原因: CI 预检工具在处理 `Database/percona/README.md` 时，无法根据 `Database/image-list.yml` 中 `percona: percona` 条目将该文件关联到 percona 镜像的根目录。该文件位于镜像根层级（`Database/percona/`），而非版本号子目录（`Database/percona/8.4.8/24.03-lts-sp3/`）内。`parse_image_prefix` 函数可能仅能匹配位于 Dockerfile 所在版本目录内的文件（即通过 `meta.yml` 中的 `path` 字段反查），导致根层级文件无法通过校验。
+- 失败原因: CI 预检工具在处理 `Database/percona/README.md` 时，无法从 `Database/image-list.yml` 中解析出该文件对应的镜像根目录，触发 `ValueError`。PR 已向 `image-list.yml` 追加 `percona: percona` 条目（格式与同文件中其他条目 `tidb: tidb`、`milvus: milvus` 等一致），但 `parse_image_prefix` 仍判定根目录缺失。
 
 ### 与 PR 变更的关联
-PR 新增了 percona 镜像的完整目录结构，包括：
-- 版本目录内文件（Dockerfile、config、entrypoint.sh）—— 这些通过了校验
-- 根层级文件（README.md、doc/image-info.yml、meta.yml、doc/picture/logo.png）—— `README.md` 触发了校验失败
-
-问题直接由 PR 的文件结构布局引起：将 README.md、doc/、meta.yml 放在 `Database/percona/` 根层级，而非版本子目录内，与 CI 工具的预期不符。
+PR 新增了 percona 镜像的全部文件（Dockerfile、entrypoint.sh、config、meta.yml、README.md、image-info.yml），并修改 `Database/image-list.yml` 添加 `percona: percona`。CI 失败直接由这些新增文件触发——`format.check_report()` 遍历变更文件列表，在解析 `Database/percona/README.md` 的镜像前缀时失败。entry 的格式与其他条目一致，但 CI 校验逻辑未能正确识别新条目。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-将 `README.md`、`doc/`、`meta.yml` 从 `Database/percona/` 根层级移入版本子目录 `Database/percona/8.4.8/24.03-lts-sp3/` 内，使所有非 image-list 变更文件均位于 Dockerfile 所在目录下，与 CI 预检工具的 `parse_image_prefix` 匹配逻辑一致。同时检查 `meta.yml` 中 `path` 字段是否需要同步调整。
+检查 `parse_image_prefix` 的具体实现逻辑，确认其对 `image-list.yml` 条目的期望格式。可能的原因包括：
+
+**(a)** 函数要求条目值为镜像最小目录单元的**完整相对路径**（如 `percona/8.4.8/24.03-lts-sp3` 而非仅 `percona`），或要求包含场景前缀（如 `Database/percona`）。需对照同仓库其他正常工作的场景（如 tidb、milvus）的 `image-list.yml` 条目与实际目录结构，确认其映射关系。
+
+**(b)** 函数在解析到 `percona` 条目后，可能进一步校验该根目录下是否存在必需文件（如 `meta.yml` 或 `Dockerfile`），而 README.md 位于 `Database/percona/` 层级而非版本子目录下，导致校验失败。
 
 ### 方向 2（置信度: 低）
-不移动文件，改为检查 `Database/image-list.yml` 中 `percona` 条目的值格式是否需要调整为包含完整相对路径（如 `percona/8.4.8/24.03-lts-sp3`）或包含场景前缀（如 `Database/percona`）。但对比同文件中其他条目（如 `tidb: tidb`）的格式，此方向可能性较低。
+`image-list.yml` 文件中最后一行 `percona: percona` 缺少结尾换行符（diff 中显示 `\ No newline at end of file`），可能导致部分 YAML 解析器或后续字符串匹配逻辑异常。可验证在条目末尾添加换行符是否能消除该错误。
 
 ## 需要进一步确认的点
-1. `eulerpublisher` 工具中 `parse_image_prefix` 的具体实现逻辑：它是通过 `image-list.yml` 的 value 做路径前缀匹配，还是通过读取 `meta.yml` 中 Dockerfile 路径反推
-2. 仓库中其他已有镜像（如 tidb、neo4j）的 README.md 和 doc/ 文件是放在镜像根层级还是版本子目录内——这能确定 CI 工具的实际预期布局
-3. 如果文件结构必须调整，需确认 `meta.yml`、`doc/image-info.yml` 的引用路径是否会受影响
+1. **查看 `format.py` 源码**：需要获取 `eulerpublisher/update/container/app/format.py` 中 `parse_image_prefix` 函数（第 156 行附近）和 `check_report` 函数（第 188 行附近）的完整实现，以理解其从 `image-list.yml` 解析镜像根目录的具体逻辑。
+2. **参照已成功通过的镜像**：查看 `Database/tidb` 或 `Database/milvus` 的完整目录结构（特别是 README.md、meta.yml 的位置层级）和对应的 `image-list.yml` 条目格式，作为 percona 条目格式的参考模板。
+3. **确认 README.md 的正确位置**：根据项目最小目录单元规范，确认 README.md 应放置在 `Database/percona/`（镜像级）还是 `Database/percona/8.4.8/24.03-lts-sp3/`（版本级）下。
+
+## 修复验证要求
+- code-fixer 必须首先获取 `eulerpublisher/update/container/app/format.py` 中 `parse_image_prefix` 和 `check_report` 的完整源码，理解其镜像根目录解析逻辑后再修改。
+- code-fixer 必须参照一个与 percona 目录结构相同且已通过 CI 的同仓库镜像案例（如 `Database/tidb`），确认 `image-list.yml` 条目格式、meta.yml 路径层级、README.md 位置三者的对应关系，确保修改方式与该成功案例一致。
