@@ -2,50 +2,84 @@
 
 ## 基本信息
 - PR: #2698 — Feat: add percona 8.4.8 docker image on openEuler 24.03-LTS-SP3
-- 失败类型: build-error
-- 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: Git子模块缺失
-- 新模式症状关键词: ADD_SUBDIRECTORY, does not contain a CMakeLists.txt, extra/libkmip, git submodule, GitHub archive tarball
+- 失败类型: lint-error
+- 置信度: 中
+- 知识库匹配: 模式11
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-#8 1044.3 2026-06-22 13:51:42 (10.3 MB/s) - Read error at byte 422235062 (Connection timed out).Retrying.
-
-#8 1467.5 CMake Error at CMakeLists.txt:2242 (ADD_SUBDIRECTORY):
-#8 1467.5   The source directory
-#8 1467.5
-#8 1467.5     /percona/extra/libkmip
-#8 1467.5
-#8 1467.5   does not contain a CMakeLists.txt file.
-
-#8 1474.9 -- Configuring incomplete, errors occurred!
+2026-06-23 00:20:27,152-.../update.py[line:356]-INFO: Difference: [
+    "Cloud/image-list.yml",
+    "Cloud/percona/8.4.8/24.03-lts-sp3/Dockerfile",
+    "Cloud/percona/8.4.8/24.03-lts-sp3/config/conf.d/my.cnf",
+    "Cloud/percona/8.4.8/24.03-lts-sp3/config/my.cnf",
+    "Cloud/percona/8.4.8/24.03-lts-sp3/entrypoint.sh",
+    "Cloud/percona/README.md",
+    "Cloud/percona/doc/image-info.yml",
+    "Cloud/percona/doc/picture/logo.png",
+    "Cloud/percona/meta.yml",
+    "Database/percona/8.4.8/24.03-lts-sp3/Dockerfile",
+    "Database/percona/8.4.8/24.03-lts-sp3/config/conf.d/my.cnf",
+    "Database/percona/8.4.8/24.03-lts-sp3/config/my.cnf",
+    "Database/percona/8.4.8/24.03-lts-sp3/entrypoint.sh",
+    "Database/percona/README.md",
+    "Database/percona/doc/image-info.yml",
+    "Database/percona/doc/picture/logo.png",
+    "Database/percona/meta.yml"
+]
+...
+Traceback (most recent call last):
+  File ".../update.py", line 365, in <module>
+    if obj.check_code():
+  File ".../update.py", line 270, in check_code
+    head, body, fail_count = format.check_report(self.change_files)
+  File ".../format.py", line 188, in check_report
+    _, prefix = parse_image_prefix(change_file)
+  File ".../format.py", line 156, in parse_image_prefix
+    raise ValueError(
+ValueError: Missing required image root directory for multi-scene processing.
+Required action: Specify the image root directory in Database/image-list.yml.
+File: Database/percona/README.md
 ```
 
 ### 根因定位
-- 失败位置: `Database/percona/8.4.8/24.03-lts-sp3/Dockerfile:16-17`（wget 下载源码 + tar 解压步骤）
-- 失败原因: Dockerfile 使用 `wget` 从 GitHub Archive（`/archive/refs/tags/...`）下载 percona-server 源码 tarball，但 GitHub 自动生成的归档 tarball **不包含 git submodule 内容**。`extra/libkmip` 是 percona-server 仓库的 git 子模块，tar 解压后该目录为空（仅含 `.gitmodules` 引用），cmake 在 `CMakeLists.txt:2242` 执行 `ADD_SUBDIRECTORY` 时找不到 `CMakeLists.txt`，导致配置阶段失败。
+- 失败位置: `eulerpublisher/update/container/app/format.py:156`（`parse_image_prefix` 函数）
+- 失败原因: CI `check_code` 流程检测到本次变更同时涉及 `Cloud/` 和 `Database/` 两个场景目录（多场景处理模式），在对变更文件逐一校验时，`parse_image_prefix` 无法在 `Database/image-list.yml` 中找到 `Database/percona/README.md` 所对应的镜像根目录条目。
 
 ### 与 PR 变更的关联
-PR 新增了 `Database/percona/8.4.8/24.03-lts-sp3/Dockerfile`，其中源码下载方式选择了 `wget` 下载 GitHub archive tarball。该方式无法获取 git submodule 的内容，是本次失败的**直接原因**。同时日志中出现了 `wget` 下载阶段 `Read error at byte 422235062 (Connection timed out)` 的超时重试记录，即使下载完成，大文件下载的网络不稳定性也可能导致 tarball 不完整，加剧了问题。
+
+**PR diff 中已包含修复**: PR diff 明确在 `Database/image-list.yml` 中添加了 `percona: percona` 条目。然而 CI 日志仍然报"Missing required image root directory in Database/image-list.yml"，存在矛盾。
+
+可能原因分析（按可能性排序）：
+
+1. **Cloud 侧 percona 文件缺少注册（最可能，置信度: 中）**：CI Difference 列表中包含 8 个 `Cloud/percona/…` 文件，但这些文件**不在本 PR (#2698) 的 diff 中**。它们来自触发 CI 的上层 PR (#2703: `sunshuang1866:fix/2698 -> master`)。`Cloud/image-list.yml` 中未添加 percona 条目，导致多场景校验模式下报错。错误信息指向 Database 文件可能是因为 `parse_image_prefix` 遍历文件列表时，Database 文件触发了第一个失败（或因函数内部对多场景的特殊处理逻辑）。
+
+2. **CI 克隆的代码版本与 PR diff 不一致（可能性: 中）**：CI 执行 `Clone https://gitcode.com/sunshuang1866/****-docker-images.git` 从 fork 仓库克隆，克隆的 `fix/2698` 分支状态可能与本 PR 的 diff 基线不同步，导致 `Database/image-list.yml` 中实际没有 percona 条目。
+
+3. **image-list.yml 格式问题（可能性: 低）**：PR diff 显示 `Database/image-list.yml` 末尾缺少换行符（`\ No newline at end of file`）。极少数 YAML 解析器对此敏感，可能导致 percona 条目未被正确解析。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将源码获取方式从 `wget` 下载 GitHub archive tarball 改为 `git clone --recursive`。`git clone --recursive` 会自动拉取所有子模块（包括 `extra/libkmip`），确保 cmake 配置时所需的所有子目录均包含完整的 `CMakeLists.txt`。
-
-需注意：Dockerfile 中需安装 `git` 包，且 `git clone` 时应指定 `--branch` 或直接 checkout 到 `Percona-Server-${VERSION}-${RELEASE}` tag（避免下载 tarball 时 URL 中 tag 名与 VERSION/RELEASE 变量的拼接逻辑问题）。
+**补充 Cloud/image-list.yml 的 percona 条目**。在 `Cloud/image-list.yml` 中添加 `percona: percona`（类似 Database 侧的修改），使 Cloud 和 Database 两个场景目录的 image-list.yml 均包含 percona 镜像的根目录注册。这是最直接的修复方向，因为 CI 触发了多场景处理模式，要求所有涉及场景的 image-list.yml 都完整注册。
 
 ### 方向 2（置信度: 中）
-如果必须使用 tarball 方式（例如构建环境网络限制不允许 git clone），则需要在 Dockerfile 中手动处理 `libkmip` 子模块：在解压后、cmake 前，额外下载 `libkmip` 子模块的源码并放入 `/percona/extra/libkmip/` 目录。但此方案维护成本高，不推荐。
+**验证 CI 克隆的分支状态**。确认 `sunshuang1866:fix/2698` 分支上 `Database/image-list.yml` 是否确实包含 `percona: percona` 条目。如果已包含但仍失败，则问题大概率出在 Cloud 侧；如果未包含，则需确认该分支上的 commit 是否与本 PR diff 一致。
 
 ## 需要进一步确认的点
-1. **确认子模块清单**：除 `extra/libkmip` 外，percona-server Percona-Server-8.4.8-8 是否还有其他 `extra/` 下的 git submodule 会被 `ADD_SUBDIRECTORY` 引用。验证方式：查看上游仓库 `.gitmodules` 文件，确认所有子模块路径。
-2. **确认 tag 名格式**：验证 `Percona-Server-${VERSION}-${RELEASE}` 展开为 `Percona-Server-8.4.8-8` 是否确实是上游仓库的正确 tag 名。
-3. **确认 git 包的可用性**：确认 `git` 包在 openEuler 24.03-LTS-SP3 的 dnf 仓库中可直接安装（`dnf install -y git`），无需额外配置。
+
+1. **确认 Cloud/percona 文件的来源**：PR #2698 的 diff 中不包含任何 `Cloud/percona/` 文件，但 CI 差异列表中出现了 8 个 Cloud percona 文件。需要确认这些文件是否由上游 PR #2703 引入，以及它们是否应该随同本 PR 一起提交。
+2. **确认 CI 克隆的实际 branch/commit**：日志显示从 `sunshuang1866/****-docker-images.git` 克隆，需要确认实际 checkout 的 commit hash，排查是否与 PR diff 所指的代码状态一致。
+3. **检查 Cloud/image-list.yml 当前内容**：确认是否缺少 percona 条目，因为 Cloud 侧的 percona 文件也需要在对应的 image-list.yml 中注册。
+4. **查看 format.py 的 parse_image_prefix 函数实现**：理解多场景处理模式下对 image-list.yml 的具体查找逻辑，确认错误报告的文件名（`Database/percona/README.md`）与实际上缺失条目的场景（可能是 Cloud/）之间的关系。
 
 ## 修复验证要求
-- code-fixer 修改 Dockerfile 后，必须验证 `git clone --recursive` 能完整拉取 percona-server 及所有子模块，且 cmake 配置阶段不再出现 `extra/libkmip` 缺少 `CMakeLists.txt` 的错误。
-- 若采用方向1，需验证 `git clone --recursive` 后的目录结构与当前 tarball 解压结构一致（即 `--strip-components=1` 等价替换为 clone 到 `/percona` 目录），确保后续 `cmake -S /percona -B /percona/build` 路径正确。
+
+code-fixer 在修改后必须验证：
+1. `Database/image-list.yml` 和 `Cloud/image-list.yml` 均包含 `percona: percona` 条目
+2. 两个 image-list.yml 文件均为合法的 YAML 格式
+3. 确认 percona 镜像在 Cloud/ 和 Database/ 两个场景目录下的存在方式符合项目规范（避免重复文件，或明确两个场景各自独立的 Dockerfile 路径）
