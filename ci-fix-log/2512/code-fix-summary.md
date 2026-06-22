@@ -1,28 +1,28 @@
 # 修复摘要
 
 ## 修复的问题
-修复 3FS Dockerfile 中的三个构建错误：运行时包名不存在（boost-foundation）、缺少构建依赖（libevent-devel）、git 浅克隆与 commit checkout 不兼容。
+FoundationDB RPM 安装因 EL9 依赖不兼容（`libm.so.6(GLIBC_2.17)`）和架构硬编码（aarch64 RPM 在 x86_64 CI 环境）导致失败。改用 `rpm2cpio` 提取 RPM 内容绕过依赖检查，并动态选择正确架构的 RPM。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 三处修改（见下方详情）
-
-## 修改详情
-
-### 1. 移除不存在的 boost-foundation 包（第 41 行）
-- **问题**: `boost-foundation` 在 openEuler 24.03-LTS-SP3 yum 仓库中不存在，导致 `yum install` 返回 exit code 1
-- **修复**: 从运行时 `yum install` 列表中移除 `boost-foundation`
-
-### 2. 添加 libevent-devel 构建依赖（第 6 行）
-- **问题**: folly 子模块 cmake 配置时报 `Could NOT find libevent`，缺少 `libevent-devel` 构建依赖
-- **修复**: 在 build 阶段 `yum install` 命令中追加 `libevent-devel`
-
-### 3. 修复 git 浅克隆与版本切换不兼容（第 22-24 行）
-- **问题**: `git clone --depth 1` 浅克隆仅包含最新提交，无法切换到指定的 commit `22fca04`；`2>/dev/null || true` 静默抑制了 checkout 失败
-- **修复**: 去除 `--depth 1` 和 `--shallow-submodules` 参数，使用完整克隆；去除 `2>/dev/null || true` 和 `--depth 1`，让 checkout/submodule update 失败时显式终止构建
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 
+  - 新增 `ARG FDB_VERSION=7.3.77`（第 5 行）
+  - 新增 FoundationDB 安装步骤（第 22-27 行），使用 `rpm2cpio` 替代 `rpm -ivh`
 
 ## 修复逻辑
-三个修复分别对应分析报告中的三个根因方向（置信度：高/中/中），均为 Dockerfile 内新增代码的依赖声明和构建命令错误，不涉及其他文件。
+CI 分析报告根因：`foundationdb-clients-7.3.77-1.el9.aarch64.rpm` 的 EL9 RPM 元数据在 openEuler glibc 中不被识别，且架构固定为 aarch64 与 x86_64 CI 环境不匹配。
+
+修复方案：
+1. 使用 `rpm2cpio | cpio -idm` 提取 RPM 文件内容，完全绕过 RPM 依赖检查（Direction 1 变体）
+2. 根据 `$(uname -m)` 动态选择架构：x86_64 使用 `el7.x86_64` RPM，aarch64 使用 `el9.aarch64` RPM
+3. FoundationDB 7.3.77 发布中，x86_64 仅提供 EL7 RPM（无 EL9），aarch64 提供 EL9 RPM，通过条件分支同时支持两个架构
+4. 3FS 的 `src/fdb/CMakeLists.txt` 链接 `libfdb_c`，且 `src/fdb/FDB.h` 依赖 `foundationdb/fdb_c_types.h`（不在官方 headers tarball 中但在 RPM 中），因此必须使用完整 RPM 而非仅下载 `.so` 文件
+
+**上游验证**：已从 FoundationDB 7.3.77 release 获取以下文件并验证 HTTP 200：
+- `foundationdb-clients-7.3.77-1.el7.x86_64.rpm`（x86_64 架构）
+- `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`（aarch64 架构）
+- RPM 内容通过 cpio 验证包含所有必需文件（`fdb_c.h`, `fdb_c_types.h`, `fdb_c_options.g.h`, `libfdb_c.so` 等）
 
 ## 潜在风险
-- `libevent-devel` 在 openEuler 24.03-LTS-SP3 仓库中应存在，但若其包名略有不同（如 `libevent`），可能仍需调整
-- 去除 `--depth 1` 全量克隆会增加构建时间和网络流量，但这是确保 commit checkout 正确的必要代价
+- 依赖 `rpm2cpio` 和 `cpio` 命令在 openEuler 24.03-lts-sp3 基础镜像中可用（RPM 系统标配，风险低）
+- EL7 RPM 在 openEuler 24.03 上通过 `rpm2cpio` 提取的二进制文件可能存在 glibc ABI 兼容性问题（但 openEuler 24.03 的 glibc 版本足够新，应向后兼容 EL7 二进制）
+- FoundationDB 库作为运行时依赖保留在最终镜像中（`/usr/lib64/libfdb_c.so`），体积约 23MB
