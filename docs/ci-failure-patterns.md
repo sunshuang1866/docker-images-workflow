@@ -523,3 +523,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2674: `Bigdata/spark/4.1.2/24.03-lts-sp3/Dockerfile` — 容器在无参数启动时立即退出，导致 `test_spark_container_startup` 测试失败（容器 PID 
+
+---
+
+## 模式26：Maven仓库证书过期
+
+**症状关键词**: PKIX path validation failed, CertPathValidatorException, validity check failed, NotAfter, releases.java.net, maven.java.net, txw2, jax-maven-plugin
+
+**根因**: - 失败位置: `Bigdata/oozie/5.2.1/24.03-lts-sp3/Dockerfile:16-18`（`./mkdistro.sh -DskipTests` 步骤）
+- 失败原因: Oozie 5.2.1 的 Maven 构建依赖 `org.glassfish.jaxb:txw2:jar:2.4.0-b180608.0325`，该制品的版本号含预发布后缀 `-b180608.0325`，仅托管在 `releases.java.net`（即 `maven.java.net`）仓库。该仓库的 SSL 证书已于 **2026-04-01 23:59:59 UTC** 过期，构建日
+
+**修复方法**: Oozie 5.2.1 Maven 构建因 `releases.java.net` 仓库 SSL 证书过期导致 `org.glassfish.jaxb:txw2:2.4.0-b180608.0325` 依赖解析失败。
+
+**历史案例**:
+- PR #2684: `Bigdata/oozie/5.2.1/24.03-lts-sp3/Dockerfile` — Oozie 5.2.1 Maven 构建因 `releases.java.net` 仓库 SSL 证书过期导致 `org
