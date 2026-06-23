@@ -1,28 +1,21 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB 客户端 RPM 下载 URL 硬编码 aarch64 架构，导致 x86_64 CI 构建失败；同时修复 git clone --depth 1 与 commit hash checkout 不兼容的潜伏问题，以及 clang 库路径硬编码 aarch64 的问题。
+Dockerfile 中 FoundationDB 客户端安装硬编码了 `aarch64` 架构的 RPM URL，导致 x86_64 构建环境跨架构安装失败。同时修复了浅克隆（`--depth 1`）与指定 commit hash 不兼容的问题，以及 clang 库路径中硬编码的 `aarch64` 架构。
 
 ## 修改的文件
 - `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 
-  1. 新增多阶段构建：`FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb`，通过 `COPY --from=fdb` 获取 FoundationDB 客户端二进制（`fdbcli`、`libfdb_c.so`），替代原有的 RPM 下载安装方式，彻底避免架构硬编码和 RPM 依赖冲突问题。
-  2. 移除 git clone 的 `--depth 1 --shallow-submodules` 参数，改为完整克隆，确保 `git checkout ${VERSION}`（commit hash `22fca04`）能正确检出。
-  3. 移除 `git checkout` 和 `git submodule update` 后的 `2>/dev/null || true`，让错误在 CI 中可见而非被静默掩盖。
-  4. 新增 clang 库路径架构感知逻辑：`ARCH=$(uname -m)` 动态检测架构，使 clang 库符号链接路径 `${ARCH}-openEuler-linux-gnu` 在 x86_64 和 aarch64 下均正确。
-  5. 修复运行时依赖中的包名错误：`boost-foundation` → `boost-filesystem`。
-  6. 为关键网络命令（`curl`、`wget`）添加 `--retry` 重试参数提高构建鲁棒性。
+  - 将 FoundationDB 安装从硬编码 `aarch64` RPM 下载安装，改为多阶段构建：从 `foundationdb/foundationdb:${FDB_VERSION}` 官方多架构镜像中 `COPY --from=fdb` 提取 `fdbcli` 和 `libfdb_c.so`
+  - 移除 `git clone` 的 `--depth 1` 参数，避免浅克隆无法 checkout 指定 commit hash
+  - 将 clang 库路径中硬编码的 `aarch64` 替换为 `ARCH=$(uname -m)` 动态推导
 
 ## 修复逻辑
+CI 分析报告的根因是 `Dockerfile:22-24` 行中 `curl ... foundationdb-clients-7.3.77-1.el9.aarch64.rpm && rpm -ivh` 硬编码了 aarch64 架构，与 CI 的 x86_64 构建环境不兼容。修复方案采用分析报告中的"方向 2"（置信度：中）：改用 FoundationDB 官方多架构 Docker 镜像的多阶段构建方案。已从上游 `7.3.77` tag 获取 FoundationDB Dockerfile 验证，`/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 路径存在且正确，官方镜像已使用 `TARGETARCH` 支持多架构。
 
-CI 分析报告的三个问题均已修复：
+同时修复了分析报告"需要进一步确认的点"中提到的模式18：`--depth 1` 浅克隆与 `git checkout ${VERSION}`（VERSION 为 commit hash 前 7 位）不兼容——`--depth 1` 只包含最新提交，其他 commit hash 可能不可达。移除 `--depth 1` 后使用完整克隆。
 
-- **根因 1（直接错误 — 架构特定 URL）**：改为从 FoundationDB 官方多架构 Docker 镜像（`foundationdb/foundationdb:7.3.77`）通过 `COPY --from=fdb` 复制二进制文件。Docker 构建时自动拉取与目标平台匹配的镜像版本，无需手动构造架构特定的 URL。已从上游 `7.3.77` tag 的 FoundationDB Dockerfile 验证 `/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 路径存在且正确，正则/路径匹配无需调整。
-
-- **根因 2（潜伏问题 — git clone 浅克隆）**：去掉 `--depth 1` 进行完整历史克隆，确保 commit hash `22fca04` 可被 `git checkout` 检出。同时移除错误掩码 `2>/dev/null || true`，使 checkout 失败时构建明确报错。
-
-- **根因 3（潜伏问题 — aarch64 硬编码路径）**：通过 `ARCH=$(uname -m)` 动态获取架构，clang 库符号链接路径使用变量插值 `${ARCH}-openEuler-linux-gnu`，同时支持 x86_64 和 aarch64。
+clang 库路径中 `/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/` 的 `aarch64` 也已替换为 `${ARCH}` 变量，通过 `uname -m` 动态推导，确保跨架构兼容。
 
 ## 潜在风险
-- FoundationDB COPY --from=fdb 方案依赖 `foundationdb/foundationdb` 官方镜像的多架构支持（amd64 + arm64），需确认该镜像在 CI 构建环境中可正常拉取。若该镜像不再维护或 tag 变更，需同步更新 `FDB_VERSION` ARG。
-- 完整 git clone（无 --depth 1）会显著增加构建时间和网络流量（3fs 仓库较大），但这是 commit hash checkout 的必要前提。
-- 无其他风险。
+- 多阶段构建依赖 `foundationdb/foundationdb:7.3.77` 镜像的可用性——该镜像已在 Docker Hub 上发布且支持 amd64/arm64 多架构，风险较低
+- 移除 `--depth 1` 后 `git clone --recurse-submodules` 会下载完整仓库历史，增加构建时间和网络消耗，但不影响构建正确性
