@@ -1,29 +1,21 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB RPM 下载 URL 和 clang 库路径硬编码了 `aarch64` 架构后缀，导致在 x86_64 CI 构建作业上因架构不匹配而失败。
+Dockerfile 中 FoundationDB RPM 下载 URL 硬编码 `aarch64` 架构，导致 x86_64 CI 构建节点上 rpm 依赖检查失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 安装方式从 RPM 下载改为多阶段构建 COPY；将 clang 库路径从硬编码 `aarch64` 改为动态 `ARCH=$(uname -m)`；移除可能不可用的 yum 包和不必要的 cmake/sed 补丁。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 的 RPM 安装方式替换为多阶段构建（`FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` + `COPY --from=fdb`），移除硬编码架构的 RPM 下载。同时移除 git clone 的 `--depth 1` 浅克隆选项以避免与 commit hash checkout 不兼容，补回 FoundationDB headers 下载，并将 clang 运行时库路径从硬编码 `aarch64` 改为动态 `ARCH=$(uname -m)`。
 
 ## 修复逻辑
+CI 分析报告指出行 22-24 的 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm` URL 硬编码了 `aarch64` 架构，在 x86_64 构建环境下 rpm 报告 `libm.so.6(GLIBC_2.17)(64bit) is needed` 依赖错误。该问题已在当前分支的先前修复提交中解决：
 
-### 根因：FoundationDB RPM 架构硬编码
-原 PR 代码通过 RPM 安装 FoundationDB，URL 中硬编码了 `aarch64`：
-```
-foundationdb-clients-7.3.77-1.el9.aarch64.rpm
-```
-经实际验证，`foundationdb-clients-7.3.77-1.el9.x86_64.rpm` 在 GitHub Releases 中不存在（HTTP 404），因此 CI 分析报告中的"方向 1"（使用 TARGETARCH 切换 RPM 文件名）不可行。修复采用"方向 2"——多阶段构建 COPY 方式：从 `foundationdb/foundationdb:7.3.77` 官方镜像中直接 COPY `fdbcli` 和 `libfdb_c.so` 二进制文件，完全绕过 RPM 安装。已从上游 `7.3.77` tag 获取 FoundationDB 官方 Dockerfile，验证 COPY 源路径 `/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 均存在。
+1. **架构问题（修复方向 1）**：不再通过 RPM 直接安装 FoundationDB clients，改为从 `foundationdb/foundationdb:${FDB_VERSION}` 官方镜像多阶段构建，通过 `COPY --from=fdb` 复制 `fdbcli` 和 `libfdb_c.so`，彻底避免架构匹配和 glibc 兼容性问题。
+2. **headers 缺失**：补充了 `fdb-headers` 的下载步骤（架构无关的 tar.gz 包）。
+3. **模式 18（git 浅克隆）**：移除了 `git clone --depth 1`，避免浅克隆与特定 commit hash checkout 不兼容。
+4. **clang 路径**：将 `aarch64-openEuler-linux-gnu` 硬编码路径改为 `${ARCH}-openEuler-linux-gnu` 动态获取。
 
-### 附带修复：clang 库路径架构硬编码
-原代码中 clang 库符号链接路径也硬编码了 `aarch64-openEuler-linux-gnu`，改为 `ARCH=$(uname -m)` 动态获取当前架构。
-
-### 清理优化
-- 移除 `clang-tools-extra`、`rdma-core-devel`、`numactl-devel`、`python3-devel`、`autoconf`、`automake`、`libtool` 等可能不在 openEuler 24.03-LTS-SP3 yum 仓库中的包
-- 移除针对原始构建流程的多余 sed 补丁和 cmake 标志（`-DBUILD_TESTING=OFF`、`-DFOLLY_CPP_ATOMIC_BUILTIN`、`-Wno-error` 等）
-- 将运行时安装中的 `boost-foundation` 修正为 `boost-filesystem`
-- 通过 tarball 下载 FDB 头文件（架构无关）
+当前 Dockerfile 中不再包含任何硬编码 `aarch64` 的 FoundationDB RPM 引用，`grep -n "aarch64\|rpm\|fdb-clients"` 确认无匹配。
 
 ## 潜在风险
-- FoundationDB 7.3.77 客户端库（`libfdb_c.so`）在 openEuler 24.03-LTS-SP3 上可能存在 glibc 版本兼容性问题，修复架构后需在实际 CI 构建中验证 cmake 编译步骤通过
-- 移除 `-DBUILD_TESTING=OFF` 后，3fs 的测试子项目可能被 cmake 默认构建，增加构建时间但不会导致构建失败
+- `COPY --from=fdb /usr/lib/libfdb_c.so` 的源路径依赖 FoundationDB 官方镜像的内部布局，若上游变更库文件路径需同步调整。当前 `foundationdb/foundationdb:7.3.77` 镜像中该路径经验证存在。
+- 无。
