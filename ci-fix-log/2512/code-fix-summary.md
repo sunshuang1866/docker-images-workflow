@@ -1,22 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-FoundationDB RPM 下载 URL 硬编码 `aarch64` 架构导致 x86_64 CI 构建失败（`libm.so.6(GLIBC_2.17)` 依赖错误），同时修复 git clone 浅克隆 + `|| true` 静默忽略 checkout 失败的潜伏问题，以及 clang 库路径硬编码为单一架构的问题。
+FoundationDB 客户端 RPM 下载 URL 硬编码 `aarch64` 架构，导致 x86_64 CI 构建失败；同时修复了 `git clone --depth 1` 导致 `git checkout` 静默失败的问题。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 多项修复
-  - FoundationDB 安装：从硬编码 aarch64 RPM 安装（`rpm -ivh`）改为多阶段构建 `COPY --from=fdb` 从官方镜像提取 fdbcli 和 libfdb_c.so + curl 下载头文件
-  - 新增 `ARG FDB_VERSION=7.3.77` 和 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 多阶段构建
-  - git clone 从 `--depth 1 --shallow-submodules` 改为完整克隆，移除 checkout 后的 `|| true` 静默容错
-  - clang 库路径从硬编码 `aarch64-openEuler-linux-gnu` 改为 `ARCH=$(uname -m)` 动态适配
-  - 移除构建时不必要的 `sed` CMakeLists.txt 修改、clang-tools-extra、rdma-core-devel、numactl-devel、python3-devel 等依赖
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 安装从架构硬编码的 RPM 下载改为多阶段构建 `COPY --from=fdb`；移除 `git clone --depth 1` 和 `git checkout ... 2>/dev/null || true` 静默失败模式；将 clang 运行时库路径从硬编码 `aarch64` 改为 `$(uname -m)` 动态检测。
 
 ## 修复逻辑
-CI 分析报告指出三个根因：
-1. **直接错误（方向1/2）**：FoundationDB RPM URL 硬编码 `aarch64`，x86_64 平台无法解析依赖。采用方向2方案——通过多阶段构建从 FoundationDB 官方 Docker 镜像复制客户端二进制文件，彻底消除 RPM 架构依赖问题。
-2. **潜伏问题（方向3/模式18）**：`git clone --depth 1` 浅克隆无法访问 commit hash `22fca04`，`|| true` 静默掩盖失败。改为完整克隆并移除容错逻辑，确保 checkout 到正确版本。
-3. **架构硬编码**：clang 库路径中 `aarch64-openEuler-linux-gnu` 改为 `${ARCH}-openEuler-linux-gnu`，通过 `uname -m` 动态获取。
+CI 分析报告指向的两个根因均已修复：
+
+1. **架构 URL 硬编码**：Dockerfile 原先通过 `rpm -ivh` 安装 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`，URL 中硬编码了 `aarch64`。修复方案为使用多阶段构建：`FROM foundationdb/foundationdb:7.3.77 AS fdb` 拉取官方 FoundationDB Docker 镜像（本身已含正确架构的二进制），然后通过 `COPY --from=fdb` 提取 `fdbcli` 和 `libfdb_c.so`。头文件通过 `curl` 从 GitHub Releases 下载架构无关的 tarball。此方案对 aarch64 和 x86_64 均适用，无需架构判断。
+
+2. **git checkout 静默失败**：原 PR 使用 `git clone --depth 1 --shallow-submodules` 配合 `git checkout ${VERSION} 2>/dev/null || true`，在浅克隆中 checkout 一个不在浅历史中的 commit 时会静默失败，导致构建出错误版本的 3FS 二进制。修复移除了 `--depth 1`（完整克隆）和 `2>/dev/null || true`（让失败显式报错）。
+
+3. **clang 路径硬编码**（附加修复）：原先 clang 运行时库路径硬编码 `aarch64-openEuler-linux-gnu`，改为 `ARCH=$(uname -m)` 动态拼接，使构建在两种架构上均能正确链接。
 
 ## 潜在风险
-- 多阶段构建 `FROM foundationdb/foundationdb:${FDB_VERSION}` 依赖于 FoundationDB 官方镜像在 Docker Hub 的可达性；若网络不可达构建将提前失败（相比 RPM 方案更早暴露问题）。
-- Headers 下载 URL `https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/fdb-headers-${FDB_VERSION}.tar.gz` 基于 FoundationDB 命名约定，若上游变更 Release 文件命名需同步更新。
+- 完整 `git clone`（无 `--depth 1`）会占用更多网络带宽和磁盘空间，但 3FS 仓库规模有限，风险可控。
+- `COPY --from=fdb` 依赖 `foundationdb/foundationdb:7.3.77` 镜像在 Docker Hub 上可用，若该镜像不可达则构建会显式失败（而非静默跳过），这是预期行为。
