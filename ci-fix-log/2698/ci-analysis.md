@@ -2,28 +2,16 @@
 
 ## 基本信息
 - PR: #2698 — Feat: add percona 8.4.8 docker image on openEuler 24.03-LTS-SP3
-- 失败类型: lint-error
+- 失败类型: build-error
 - 置信度: 中
-- 知识库匹配: 模式11
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式（关联 模式11：YAML / 元数据文件错误）
+- 新模式标题: image-list条目值格式不符
+- 新模式症状关键词: `Missing required image root directory`, `parse_image_prefix`, `image-list.yml`, `multi-scene processing`
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-06-23 04:18:01,221-.../update.py[line:356]-INFO: Difference: [
-    "Database/percona/8.4.8/24.03-lts-sp3/Dockerfile",
-    "Database/percona/8.4.8/24.03-lts-sp3/config/conf.d/my.cnf",
-    "Database/percona/8.4.8/24.03-lts-sp3/config/my.cnf",
-    "Database/percona/8.4.8/24.03-lts-sp3/entrypoint.sh",
-    "Database/percona/README.md",
-    "Database/percona/doc/image-info.yml",
-    "Database/percona/doc/picture/logo.png",
-    "Database/percona/meta.yml"
-]
-Cloning into '/tmp/eulerpublisher_2598wsi1/ci/container/check/****-docker-images'...
-...Clone ... successfully.
 Traceback (most recent call last):
   File ".../eulerpublisher/update/container/app/update.py", line 365, in <module>
     if obj.check_code():
@@ -42,37 +30,36 @@ Finished: FAILURE
 
 ### 根因定位
 - 失败位置: `eulerpublisher/update/container/app/format.py:156`（`parse_image_prefix` 函数）
-- 失败原因: CI 预检工具 `format.check_report()` 遍历 PR 变更文件列表时，对 `Database/percona/README.md` 调用 `parse_image_prefix()` 无法确定该文件所属的镜像根目录（image root directory），抛出 ValueError。
+- 失败原因: `Database/image-list.yml` 中新增的 `percona: percona` 条目的值格式不满足 CI 工具 `parse_image_prefix` 的期望——函数处理变更文件 `Database/percona/README.md` 时，无法根据该条目解析出有效的镜像根目录。
 
 ### 与 PR 变更的关联
 
-PR 变更**应当满足** CI 预检要求：
-- PR 在 `Database/image-list.yml` 中新增了 `percona: percona` 条目（第 19 行），将 percona 镜像的根目录注册为 `Database/percona/`
-- 文件 `Database/percona/README.md` 的路径完全在已注册的根目录 `Database/percona/` 之下
+PR 在 `Database/image-list.yml` 中新增了 `percona: percona` 条目。CI 工具 `eulerpublisher` 的 `format.py:parse_image_prefix` 函数遍历变更文件列表，对每个文件查表获取镜像根目录。当处理到 `Database/percona/README.md` 时，函数在 `Database/image-list.yml` 中查找 `percona` 条目，但其值 `percona`（仅镜像目录名）未能通过函数的路径匹配逻辑，引发 ValueError。
 
-但 CI 预检工具仍然报告"在 Database/image-list.yml 中未找到该文件的镜像根目录"，这说明存在以下两种可能之一：
-
-1. **CI 工具读取的 image-list.yml 与 PR 提交的不同**：`parse_image_prefix()` 可能从工作区（workspace）而非克隆的 PR 分支中读取 `image-list.yml`，导致读到的是目标分支（master）版本，其中不包含 `percona` 条目。
-2. **CI 工具对 README.md 类文件的路径解析逻辑存在局限**：`parse_image_prefix()` 可能只处理版本化子目录下的文件（如 `Database/percona/8.4.8/24.03-lts-sp3/Dockerfile`），对直接在镜像根目录下的文件（如 `Database/percona/README.md`）匹配失败。
+根据项目 README 中对 `image-list.yml` 的格式说明，值应包含完整的场景前缀和尾部斜杠（如 `AI/OPEA/AudioQnA/Image_1/`），而当前使用的是简短形式。现有旧条目（`tidb: tidb`、`milvus: milvus` 等）也使用简短形式但未触发此错误，推测 CI 工具近期更新了对新条目值的格式校验，要求使用带场景前缀的完整相对路径。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**CI 工具 `parse_image_prefix` 从目标分支读取 image-list.yml，而非从 PR 分支读取。** 需要确认 `format.py:parse_image_prefix` 读取 `image-list.yml` 时的文件路径来源。若它从 Jenkins 工作区（master 分支）读取而非从 `/tmp/eulerpublisher_*` 临时克隆目录读取，则需要在 CI 脚本中确保校验阶段使用 PR 分支的 `image-list.yml`。
+将 `Database/image-list.yml` 中 `percona: percona` 的值从简短形式改为带场景前缀和尾部斜杠的完整相对路径格式：
+
+- 修改为 `percona: Database/percona/`
+- （若 CI 工具只接受相对于当前场景目录的路径）修改为 `percona: percona/`（仅补充尾部斜杠）
+
+同时检查项目中所有 `image-list.yml` 的格式一致性，确保新条目的值格式与 CI 工具 `parse_image_prefix` 的路径构造/匹配逻辑兼容。
 
 ### 方向 2（置信度: 低）
-**`parse_image_prefix` 函数不支持镜像根目录下的通用文件（README.md、meta.yml）。** 如果该函数设计上只处理版本化路径（至少 3-4 层目录深度），则需要对 `Database/percona/README.md` 这类文件做特殊处理（跳过校验或使用更宽松的匹配规则）。
+若方向 1 无效，可能是 CI 工具在加载 `Database/image-list.yml` 时未正确读取 PR 分支的文件内容（例如使用了 master 分支的缓存版本）。此时需排查 CI 工具的文件加载逻辑，确认其读取的是已克隆的 PR 分支仓库文件。
 
 ## 需要进一步确认的点
-
-1. `eulerpublisher/update/container/app/format.py` 中 `parse_image_prefix()` 函数的完整实现逻辑：该函数从何处读取 `image-list.yml`（工作区还是克隆目录？），以及路径匹配逻辑如何工作。
-2. CI 脚本中 `check_code()` 调用前后的工作目录状态：`format.check_report()` 运行时当前工作目录是工作区还是 `/tmp/eulerpublisher_*` 临时目录。
-3. 对比已通过 CI 的类似 PR（如其他数据库镜像首次提交），确认新增镜像的规范流程是否要求 README.md 等文件必须放在特定子目录下。
-4. 在 CI 环境中手动验证：将 `Database/percona/README.md` 从 PR 文件变更列表中移除（或改为仅提交版本化子目录下的文件）后，CI 是否能通过——以此确认是否为 README.md 所在路径层级所致。
+1. **`eulerpublisher/update/container/app/format.py:parse_image_prefix` 的实际实现**——需要阅读源码确认该函数：
+   - 如何从 `Database/image-list.yml` 中加载条目
+   - 如何用条目值与文件路径做匹配（前缀匹配？字符串包含？）
+   - 对值的格式有何期望（是否需要场景前缀、尾部斜杠等）
+2. **CI 工具加载 image-list.yml 的来源**——确认 `format.py` 是从已克隆的 PR 分支仓库读取，还是从 CI 环境中的其他路径读取，排除缓存/路径问题
+3. **现有简短格式条目的兼容性**——确认 `tidb: tidb`、`milvus: milvus` 等现有条目在 CI 同一流程中是否也被处理、是否正常通过，以确定是新格式要求还是仅影响特定文件路径
 
 ## 修复验证要求
-
-若修复方向涉及修改 `eulerpublisher` 工具代码，code-fixer 必须：
-1. 先阅读 `eulerpublisher/update/container/app/format.py:parse_image_prefix` 和 `eulerpublisher/update/container/app/update.py:check_code` 的完整实现
-2. 确认 CI 工作流中 `format.check_report()` 被调用时的当前工作目录和 `image-list.yml` 读取来源
-3. 若需要修改 CI 工具逻辑，需在本地模拟 CI 环境进行回归测试，确保不影响已有镜像的校验
+1. code-fixer 必须在修改 `Database/image-list.yml` 后，检查 `eulerpublisher` 工具中 `parse_image_prefix` 的实际源码，确认新值格式与函数的路径解析逻辑一致
+2. 验证修改后 `Database/percona/README.md`（以及变更列表中其他 `Database/percona/` 目录下的文件）均能通过 `parse_image_prefix` 的路径匹配
+3. 若修改了 `image-list.yml` 的条目值格式，需检查同文件中其他现有条目是否需要同步更新格式以保持一致性
