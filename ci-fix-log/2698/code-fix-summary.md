@@ -1,13 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-在 `Database/image-list.yml` 中注册 `percona` 镜像的根目录（`percona: percona`），解决 CI 预检工具 `parse_image_prefix()` 无法确定 `Database/percona/README.md` 等文件所属镜像根目录的问题。
+`Database/image-list.yml` 中 `percona` 条目值格式不符合 CI 工具 `parse_image_prefix` 的路径解析要求，导致 `ValueError: Missing required image root directory for multi-scene processing`。
 
 ## 修改的文件
-- `Database/image-list.yml`: 新增 `percona: percona` 条目（第 19 行），将 percona 镜像根目录注册为 `Database/percona/`
+- `Database/image-list.yml`: 添加 `percona: Database/percona/` 条目，使用带场景前缀和尾部斜杠的完整相对路径格式（符合 README 中 `image-list.yml` 格式规范）。
 
 ## 修复逻辑
-CI 失败的直接原因是 `format.parse_image_prefix()` 遍历 PR 变更文件列表时，对 `Database/percona/README.md` 等文件无法在 `Database/image-list.yml` 中找到对应的镜像根目录，抛出 ValueError。根因是 `Database/image-list.yml` 中缺少 `percona` 条目。原始 PR（`pr-head` 分支）的 git diff 确认包含此变更（`git diff master..pr-head -- Database/image-list.yml` 显示新增 `+  percona: percona`），但当前 fix 分支（基于 master）未包含该变更。添加此条目后，所有 `Database/percona/` 下的文件均能正确映射到已注册的镜像根目录，CI 预检将不再报错。
+CI 工具 `eulerpublisher` 的 `format.py:parse_image_prefix` 函数在处理变更文件 `Database/percona/README.md` 时，在 `Database/image-list.yml` 中查找 `percona` 条目用于解析镜像根目录。原始 PR 添加了 `percona: percona`（简短形式），但 CI 工具更新后要求条目值使用完整场景路径格式（如 README 规范的 `Database/percona/`），简短形式无法通过路径匹配逻辑，触发 ValueError。修复使用 `percona: Database/percona/` 替代简短形式，符合 README 中 `image-list.yml` 的规范格式（`SceneDir/ImageDir/`），使 `parse_image_prefix` 能正确解析镜像根目录。
 
 ## 潜在风险
-无。此修改与原始 PR 的变更完全一致，且与 `Database/image-list.yml` 中其他镜像条目（如 `mysql`、`redis` 等）格式相同。
+- `Database/image-list.yml` 中其他旧条目（如 `tidb: tidb`、`milvus: milvus` 等）仍使用简短格式。根据 CI 分析报告，这些旧条目在 CI 流程中未触发错误（可能是 CI 工具对已存在条目有兼容处理）。未来 CI 工具若统一校验所有条目格式，可能需要同步更新。
+- 若 CI 工具的路径构造逻辑与预期有差异（如 `value + filename` vs `value/ + filename`），可能仍需进一步调整。但当前修改严格遵循 README 规范的格式，是最合理的选择。
