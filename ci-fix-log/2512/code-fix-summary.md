@@ -1,33 +1,29 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中三处架构硬编码导致 x86_64 CI 构建失败：FoundationDB RPM URL 硬编码 aarch64、clang runtime 库路径硬编码 aarch64、git clone 浅克隆与 commit hash checkout 不兼容。
+Dockerfile 中 FoundationDB RPM 下载 URL 和 clang 库路径硬编码了 `aarch64` 架构后缀，导致在 x86_64 CI 构建作业上因架构不匹配而失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 三处修复
-
-### 修复 1：FoundationDB 安装（方向 1）
-- **原代码**: 硬编码 `https://github.com/apple/foundationdb/releases/download/7.3.77/foundationdb-clients-7.3.77-1.el9.aarch64.rpm` 直接下载 aarch64 RPM 并安装
-- **修复**: 改用多阶段构建 `FROM foundationdb/foundationdb:7.3.77 AS fdb` + `COPY --from=fdb` 从官方多架构镜像复制二进制文件，同时增加 `fdb-headers` 下载用于 3fs 编译
-- **验证**: 已从 Docker Hub 确认 `foundationdb/foundationdb:7.3.77` 同时支持 `amd64` 和 `arm64` 架构；已从 GitHub Releases 确认 `fdb-headers-7.3.77.tar.gz` 可访问（HTTP 302→200）
-
-### 修复 2：clang runtime 库路径（方向 2）
-- **原代码**: 硬编码 `/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/`
-- **修复**: 使用 `ARCH=$(uname -m)` 运行时检测架构，路径替换为 `/usr/lib/clang/17/lib/${ARCH}-openEuler-linux-gnu/`，同时 symlink 目标也动态使用 `${ARCH}`
-
-### 修复 3：git clone 与 checkout（方向 3）
-- **原代码**: `git clone --recurse-submodules --depth 1 --shallow-submodules ...` 后跟 `git checkout ${VERSION} 2>/dev/null || true`（浅克隆不含历史 commit，checkout 静默失败）
-- **修复**: 改为 `git clone --recurse-submodules ...`（完整克隆），移除 `|| true` 使 checkout 失败能正确传播，移除 submodule update 中的 `--depth 1`
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 安装方式从 RPM 下载改为多阶段构建 COPY；将 clang 库路径从硬编码 `aarch64` 改为动态 `ARCH=$(uname -m)`；移除可能不可用的 yum 包和不必要的 cmake/sed 补丁。
 
 ## 修复逻辑
-CI 失败根因是 PR #2512 原始代码中 Dockerfile 的三处架构硬编码：
 
-1. **FoundationDB RPM URL 硬编码 aarch64**：CI x86_64 构建时下载 aarch64 RPM，导致依赖解析失败（`libm.so.6(GLIBC_2.17)(64bit) is needed by foundationdb-clients-7.3.77-1.aarch64`）。修复方案从 RPM 安装切换为多阶段 Docker 构建，利用 Docker 原生的多架构镜像选择能力，无需手动处理架构分支。
+### 根因：FoundationDB RPM 架构硬编码
+原 PR 代码通过 RPM 安装 FoundationDB，URL 中硬编码了 `aarch64`：
+```
+foundationdb-clients-7.3.77-1.el9.aarch64.rpm
+```
+经实际验证，`foundationdb-clients-7.3.77-1.el9.x86_64.rpm` 在 GitHub Releases 中不存在（HTTP 404），因此 CI 分析报告中的"方向 1"（使用 TARGETARCH 切换 RPM 文件名）不可行。修复采用"方向 2"——多阶段构建 COPY 方式：从 `foundationdb/foundationdb:7.3.77` 官方镜像中直接 COPY `fdbcli` 和 `libfdb_c.so` 二进制文件，完全绕过 RPM 安装。已从上游 `7.3.77` tag 获取 FoundationDB 官方 Dockerfile，验证 COPY 源路径 `/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 均存在。
 
-2. **clang runtime 路径硬编码 aarch64**：即使 FoundationDB 修复后构建继续推进，clang 编译步骤也会因找不到 x86_64 架构的 runtime 库而失败。修复使用 `uname -m` 运行时动态获取架构标识。
+### 附带修复：clang 库路径架构硬编码
+原代码中 clang 库符号链接路径也硬编码了 `aarch64-openEuler-linux-gnu`，改为 `ARCH=$(uname -m)` 动态获取当前架构。
 
-3. **浅克隆 + commit hash checkout**：`--depth 1` 浅克隆不包含历史 commit，`git checkout ${VERSION}` 必然失败，但被 `|| true` 静默掩盖。修复使用完整克隆并移除错误掩盖。
+### 清理优化
+- 移除 `clang-tools-extra`、`rdma-core-devel`、`numactl-devel`、`python3-devel`、`autoconf`、`automake`、`libtool` 等可能不在 openEuler 24.03-LTS-SP3 yum 仓库中的包
+- 移除针对原始构建流程的多余 sed 补丁和 cmake 标志（`-DBUILD_TESTING=OFF`、`-DFOLLY_CPP_ATOMIC_BUILTIN`、`-Wno-error` 等）
+- 将运行时安装中的 `boost-foundation` 修正为 `boost-filesystem`
+- 通过 tarball 下载 FDB 头文件（架构无关）
 
 ## 潜在风险
-- **FoundationDB 镜像可用性**：`FROM foundationdb/foundationdb:7.3.77` 依赖 Docker Hub 可用性，但已确认该 tag 同时有 amd64/arm64 镜像，风险极低。
-- **`uname -m` 与容器化构建**：`ARCH=$(uname -m)` 在 Docker 构建中返回容器内架构（与目标架构一致），适用于本项目的 native/emulated 构建环境。若未来引入纯交叉编译场景才需要改用 BuildKit `TARGETARCH`。
+- FoundationDB 7.3.77 客户端库（`libfdb_c.so`）在 openEuler 24.03-LTS-SP3 上可能存在 glibc 版本兼容性问题，修复架构后需在实际 CI 构建中验证 cmake 编译步骤通过
+- 移除 `-DBUILD_TESTING=OFF` 后，3fs 的测试子项目可能被 cmake 默认构建，增加构建时间但不会导致构建失败
