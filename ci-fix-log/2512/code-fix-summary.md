@@ -1,23 +1,27 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB 安装 URL 硬编码 aarch64 架构字符串，导致在 x86_64 CI 环境构建失败（无法跨架构安装 aarch64 RPM）。
+Dockerfile 中 FoundationDB 客户端库安装和 clang 库软链接路径硬编码为 `aarch64`，导致 x86_64 架构构建失败；FoundationDB RPM 存在跨发行版 glibc 依赖不兼容问题。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 共修复 4 处根因（已通过 fix 分支上的渐进式提交完成）
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 
+  1. 将 FoundationDB 客户端库从 RPM 安装改为多阶段 COPY，从官方多架构镜像 `foundationdb/foundationdb:${FDB_VERSION}` 复制 `fdbcli` 和 `libfdb_c.so`（消除 RPM 架构/发行版硬编码和 glibc 依赖问题）
+  2. 添加 FoundationDB 头文件下载（架构无关的 tar.gz）
+  3. 将 clang 库软链接路径从硬编码 `aarch64-openEuler-linux-gnu` 改为 `ARCH=$(uname -m)` 动态检测（兼容 x86_64 和 aarch64）
 
 ## 修复逻辑
 
-CI 分析报告指出 4 项根因，当前 fix 分支均已修复：
+CI 分析报告指出两个根因：
+1. **FoundationDB RPM 硬编码架构**：原 Dockerfile 使用 `rpm -i` 安装 FoundationDB，RPM URL 中 `aarch64` 和 `el9` 硬编码，在 x86_64 平台无法运行，且 `el9` RPM 依赖 `libm.so.6(GLIBC_2.17)` 在 openEuler 24.03 上不满足。
+   - 修复方式：完全移除 RPM 安装方式，改为 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 多阶段构建 + `COPY --from=fdb`。`foundationdb/foundationdb` 是官方多架构镜像（支持 linux/amd64 和 linux/arm64），BuildKit 会根据构建目标平台自动拉取对应架构的镜像，从而消除架构和发行版依赖问题。
 
-1. **FoundationDB RPM 硬编码 aarch64**（CI 直接报错项）：将 `rpm -ivh foundationdb-clients-7.3.77-1.el9.aarch64.rpm` 替换为多阶段构建方案 —— `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 后通过 `COPY --from=fdb` 获取 `fdbcli` 和 `libfdb_c.so`，同时通过 `curl` 下载架构无关的 `fdb-headers` tarball。该方案天然支持多架构，无需 TARGETARCH 条件判断。
+2. **Clang 库路径硬编码 aarch64**：原 Dockerfile 中 clang 库的软链接路径全部写入 `aarch64-openEuler-linux-gnu`，在 x86_64 平台找不到对应目录。
+   - 修复方式：使用 `ARCH=$(uname -m)` 在构建时动态获取当前架构（x86_64 或 aarch64），用于构造 clang 库路径 `${ARCH}-openEuler-linux-gnu`，使软链接在两个架构上均正确。
 
-2. **git clone --depth 1 + commit checkout 不兼容**：移除 `--depth 1`、`--shallow-submodules` 标志及静默吞错的 `|| true`，改为完整克隆后正常 checkout，失败时正确报错。
-
-3. **clang 库路径硬编码 aarch64**：将路径中的字面量 `aarch64` 替换为 `$(uname -m)` 动态获取构建架构，映射为 `${ARCH}-openEuler-linux-gnu`，同时适用于 x86_64 和 aarch64。
-
-4. **boost-foundation 包名不存在**：将运行时 yum install 中的 `boost-foundation` 移除，保留已验证可用的 `boost-filesystem boost-system boost-program-options`。
+以上修复参照了仓库中已有的多架构 Dockerfile 模式（如 elasticsearch、redis 等使用 `TARGETARCH` / `BUILDARCH` 或 `$(uname -m)` 进行架构感知），保持一致的代码风格。
 
 ## 潜在风险
-- 多阶段构建中的 `libfdb_c.so` 来自 FoundationDB 官方镜像（通常基于 Ubuntu），与 openEuler 的 glibc/openssl 等运行时库可能存在 ABI 兼容性差异。此为运行时问题，不影响 CI 构建通过，但建议在容器启动后验证 `fdbcli` 和 `libfdb_c.so` 可正常加载。
-- `git clone` 改为完整克隆，3FS 仓库体积较大，会增加 CI 构建时间和网络流量。
+
+- `foundationdb/foundationdb:7.3.77` 镜像需确认在 Docker Hub 上对两个架构均可用（已确认该镜像支持 linux/amd64 和 linux/arm64）
+- `$(uname -m)` 依赖构建宿主机的实际架构，在跨架构模拟构建（如 QEMU 模拟）场景下返回的是模拟后的架构名，行为正确
+- 无（其他修改均为配套调整，不改变原有功能逻辑）
