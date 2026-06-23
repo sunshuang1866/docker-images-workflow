@@ -537,3 +537,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2684: `Bigdata/oozie/5.2.1/24.03-lts-sp3/Dockerfile` — Oozie 5.2.1 Maven 构建因 `releases.java.net` 仓库 SSL 证书过期导致 `org
+
+---
+
+## 模式27：GitHub Release URL 404
+
+**症状关键词**: curl: (22), 404, github.com, releases/download, apache kylin
+
+**根因**: - 失败位置: `Bigdata/kylin/5.0.3/24.03-lts-sp3/Dockerfile:60-63`
+- 失败原因: Dockerfile 中构造的 GitHub Release 下载 URL `https://github.com/apache/kylin/releases/download/kylin-5.0.3/apache-kylin-5.0.3-bin.tar.gz` 不存在（HTTP 404），可能的原因包括：① Apache Kylin 5.0.3 尚未在该 URL 发布 release 制品；② GitHub Release 的 tag 命名格式不是 `ky
+
+**修复方法**: Docker 构建时从 GitHub Releases 下载 Apache Kylin 5.0.3 二进制包返回 HTTP 404，将下载源切换至 Apache Archive。
+
+**历史案例**:
+- PR #2704: `Bigdata/kylin/5.0.3/24.03-lts-sp3/Dockerfile` — Docker 构建时从 GitHub Releases 下载 Apache Kylin 5.0.3 二进制包返回 HTT
