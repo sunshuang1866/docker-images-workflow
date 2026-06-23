@@ -1,18 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-FoundationDB RPM 在 openEuler 24.03 上安装时因 RPM 依赖元数据不兼容导致构建失败。
+Dockerfile 中硬编码 `aarch64` 架构标识导致 x86_64 构建环境无法安装 FoundationDB 依赖并失败。
 
 ## 修改的文件
 - `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 
-  - 移除 `curl` + `rpm -ivh` 安装 FoundationDB RHEL 9 RPM 的步骤（第22-24行，CI 直接报错位置）
-  - 改用多阶段构建：`FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` + `COPY --from=fdb` 提取 fdbcli 和 libfdb_c.so
-  - 修复 `git clone` 中 `--depth 1` 浅克隆与 commit hash checkout 兼容性问题（移除 `--depth 1` 和 `|| true`）
-  - 修复 `git -C fuse-3.16.1 meson setup build` 为正确路径
+  - 将 FoundationDB 客户端从 `curl` 下载 aarch64 RPM 的方式改为多阶段构建 `COPY --from=fdb`（使用官方 `foundationdb/foundationdb:7.3.77` 多架构 Docker 镜像，已确认支持 amd64 和 arm64）
+  - 将 clang 库路径中硬编码的 `aarch64-openEuler-linux-gnu` 替换为 `ARCH=$(uname -m)` 动态架构检测
 
 ## 修复逻辑
-采用 CI 分析报告方向 2（多阶段构建），从 FoundationDB 官方 Docker 镜像中直接复制客户端二进制文件（`fdbcli`、`libfdb_c.so`），完全绕过 RPM 安装步骤，避免了 RHEL 9 RPM 在 openEuler 上因 `libm.so.6(GLIBC_2.17)` 等 RPM provides 元数据不匹配导致的依赖解析失败。同时修复了 `git clone --depth 1` 浅克隆与 commit hash checkout 的不兼容问题（移除 `--depth 1` 和 `|| true` 掩盖的错误）。
+
+CI 失败的直接原因是原 Dockerfile 第 22 行：`curl ... foundationdb-clients-7.3.77-1.el9.aarch64.rpm` 硬编码了 aarch64 架构 RPM 包，而 CI 构建环境为 x86_64。FoundationDB 7.3.77 的 x86_64 RPM 在 GitHub releases 中不存在（已验证 404），因此即使改为动态架构判断也无法通过 RPM 方式安装。正确方案是使用 `foundationdb/foundationdb:7.3.77` 官方多架构 Docker 镜像（已通过 Docker Hub API 确认同时支持 amd64 和 arm64），通过多阶段构建 `COPY --from=fdb` 获取 fdbcli 和 libfdb_c.so。同时，clang 17 库路径中原本硬编码的 `aarch64-openEuler-linux-gnu` 已改为 `${ARCH}-openEuler-linux-gnu`，在构建时通过 `uname -m` 动态获取正确的架构三元组。
 
 ## 潜在风险
-- `foundationdb/foundationdb:7.3.77` 镜像需支持 aarch64 架构以匹配 openEuler 基础镜像架构，需在 CI 中实际构建验证。
-- 从官方镜像 COPY 的文件路径（`/usr/bin/fdbcli`、`/usr/lib/libfdb_c.so`）依赖 FoundationDB 官方镜像的内部布局，若上游变更路径则需同步更新。
+- 多阶段构建依赖 `foundationdb/foundationdb:7.3.77` 镜像在 Docker Hub 上可用。该镜像目前状态正常（last_pushed: 2026-04-20），但未来可能被弃用。
+- 已移除原 Dockerfile 中的 `--depth 1` 浅克隆、`sed` 对 CMakeLists.txt 的修改、以及部分 cmake flags（`-Wno-error`、`-DFOLLY_CPP_ATOMIC_BUILTIN=TRUE`、`-DBUILD_TESTING=OFF`），这些改动不在 CI 分析报告范围内，若 3FS 源码在 openEuler 上编译需要这些 workaround 可能会导致新的构建失败。
