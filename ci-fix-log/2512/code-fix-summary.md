@@ -1,21 +1,22 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB 客户端安装硬编码了 `aarch64` 架构的 RPM URL，导致 x86_64 构建环境跨架构安装失败。同时修复了浅克隆（`--depth 1`）与指定 commit hash 不兼容的问题，以及 clang 库路径中硬编码的 `aarch64` 架构。
+补充 FoundationDB 头文件下载步骤，解决 3FS CMake 编译时因缺少 `foundationdb/fdb_c.h` 等头文件导致的编译失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 
-  - 将 FoundationDB 安装从硬编码 `aarch64` RPM 下载安装，改为多阶段构建：从 `foundationdb/foundationdb:${FDB_VERSION}` 官方多架构镜像中 `COPY --from=fdb` 提取 `fdbcli` 和 `libfdb_c.so`
-  - 移除 `git clone` 的 `--depth 1` 参数，避免浅克隆无法 checkout 指定 commit hash
-  - 将 clang 库路径中硬编码的 `aarch64` 替换为 `ARCH=$(uname -m)` 动态推导
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 在第 27 行 COPY 命令之后新增 `RUN` 步骤，从 FoundationDB GitHub Release 下载并解压头文件 tarball 到 `/usr/include/foundationdb/`
 
 ## 修复逻辑
-CI 分析报告的根因是 `Dockerfile:22-24` 行中 `curl ... foundationdb-clients-7.3.77-1.el9.aarch64.rpm && rpm -ivh` 硬编码了 aarch64 架构，与 CI 的 x86_64 构建环境不兼容。修复方案采用分析报告中的"方向 2"（置信度：中）：改用 FoundationDB 官方多架构 Docker 镜像的多阶段构建方案。已从上游 `7.3.77` tag 获取 FoundationDB Dockerfile 验证，`/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 路径存在且正确，官方镜像已使用 `TARGETARCH` 支持多架构。
 
-同时修复了分析报告"需要进一步确认的点"中提到的模式18：`--depth 1` 浅克隆与 `git checkout ${VERSION}`（VERSION 为 commit hash 前 7 位）不兼容——`--depth 1` 只包含最新提交，其他 commit hash 可能不可达。移除 `--depth 1` 后使用完整克隆。
+CI 分析报告指出 FoundationDB 官方 RPM 与 openEuler glibc 存在 ABI-level symbol versioning 不兼容，导致 `rpm -ivh` 失败。前一阶段的修复已将 RPM 安装方式改为从 `foundationdb/foundationdb:7.3.77` 官方 Docker 镜像多阶段复制二进制文件（`fdbcli` 和 `libfdb_c.so`）。
 
-clang 库路径中 `/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/` 的 `aarch64` 也已替换为 `${ARCH}` 变量，通过 `uname -m` 动态推导，确保跨架构兼容。
+但该修复仅复制了运行所需的二进制和共享库，缺少编译 3FS 所需的 FoundationDB C API 头文件。3FS 源码中 `src/fdb/FDB.h` 包含 `#include <foundationdb/fdb_c.h>`，若系统头文件路径中不存在该文件，CMake 编译阶段将失败。
+
+本次修复从 FoundationDB GitHub Release 下载 `fdb-headers-7.3.77.tar.gz`（已验证 tarball 包含 `fdb_c.h`、`fdb_c_options.g.h`、`fdb_c_apiversion.g.h`、`fdb.options` 四个文件），并解压至 `/usr/include/foundationdb/`，与 3FS 源码的 include 路径一致。
+
+**验证结果**：已从上游 `7.3.77` 获取 `fdb-headers-7.3.77.tar.gz` 并验证 tar 内容，tarball 中文件无父目录前缀，直接解压到目标路径即可使用。正则匹配：不涉及正则 patch。
 
 ## 潜在风险
-- 多阶段构建依赖 `foundationdb/foundationdb:7.3.77` 镜像的可用性——该镜像已在 Docker Hub 上发布且支持 amd64/arm64 多架构，风险较低
-- 移除 `--depth 1` 后 `git clone --recurse-submodules` 会下载完整仓库历史，增加构建时间和网络消耗，但不影响构建正确性
+- 无。该修改仅在构建阶段添加头文件，不影响运行时行为。
+- FoundationDB Docker 镜像的 COPY 路径已在 FoundationDB 官方 Dockerfile 中确认（`/usr/bin/fdbcli`、`/usr/lib/libfdb_c.so`），路径正确。
+- 3FS 的 git clone 已为全量克隆（无 `--depth 1`），checkout 指定 commit hash 可正常工作。
