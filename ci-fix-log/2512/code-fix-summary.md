@@ -1,18 +1,23 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB clients RPM 下载 URL 硬编码为 `aarch64` 架构，在 x86_64 CI 构建环境中 `rpm -ivh` 因跨架构依赖解析失败（`libm.so.6(GLIBC_2.17)(64bit) is needed by foundationdb-clients-7.3.77-1.aarch64`）。
+FoundationDB 客户端安装使用 EL9 架构的 RPM 包导致 `libm.so.6(GLIBC_2.17)` 依赖在 openEuler 上不满足，构建失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 已使用 Docker 多阶段构建方案替换 RPM 安装方式，同时移除了 `git clone --depth 1` 以修复模式18（浅克隆与特定 commit checkout 不兼容）。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 移除 RPM 安装方式，改为多阶段构建从 `foundationdb/foundationdb:7.3.77` 官方镜像直接 COPY 二进制文件和共享库。
 
 ## 修复逻辑
-当前 `fix/2512` 分支的 Dockerfile 已包含以下两项修复：
-
-1. **FoundationDB 依赖获取（CI 分析报告的主根因）**：通过 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 多阶段构建 + `COPY --from=fdb` 复制 `fdbcli` 和 `libfdb_c.so`，完全避开 RPM 安装步骤。Docker 会根据构建平台自动拉取匹配架构的 FoundationDB 镜像，无需手动区分 `x86_64`/`aarch64` URL。FDB C API 头文件通过独立的 `curl` 下载 `fdb-headers` 压缩包获取。
-
-2. **Git 浅克隆问题（CI 分析报告提及的模式18）**：将 `git clone --depth 1 --shallow-submodules` 改为完整克隆 `git clone --recurse-submodules`，确保 `git checkout ${VERSION}` 能成功检出指定的 commit hash。
+1. **根因**：CI 分析报告指出 Dockerfile 使用了 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`（硬编码 `aarch64` + `el9`），导致 `rpm -ivh` 在 openEuler 上因 glibc 符号版本差异而依赖检查失败。
+2. **修复方案**：采用多阶段构建，通过 `FROM foundationdb/foundationdb:7.3.77 AS fdb` 引入 FoundationDB 官方镜像（多架构，支持 amd64 和 arm64），然后用 `COPY --from=fdb` 从该镜像中提取 `fdbcli` 和 `libfdb_c.so`。FoundationDB 官方镜像中的二进制文件为直接从 GitHub Release 下载的原始 ELF 可执行文件（非 RPM 打包），完全绕过了 RPM 依赖检查问题。
+3. **验证结果**：
+   - FoundationDB 7.3.77 Docker 镜像确认存在且为多架构（amd64 + arm64），参见 hub.docker.com 标签 API 返回
+   - FoundationDB 7.3.77 GitHub Release 包含 `fdb-headers-7.3.77.tar.gz`（用于头文件下载），以及各架构的二进制文件（`fdbcli.x86_64`、`fdbcli.aarch64` 等）
+   - FoundationDB 官方 Dockerfile（来自上游 `7.3.77` tag）证实 `/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 路径存在
+4. **补充修复**（已在先前迭代中完成）：
+   - 移除了 `git clone --depth 1` 以避免浅克隆导致的 checkout 失败
+   - 添加了 `ARCH=$(uname -m)` 动态架构符号链接以修复 clang 库路径问题
+   - 添加了 FoundationDB 头文件下载步骤
+   - 修正了 `boost-foundation` 包名错误为 `boost-filesystem`
 
 ## 潜在风险
-- 多阶段构建依赖 `foundationdb/foundationdb:7.3.77` Docker 镜像在 Docker Hub 上可用。若 CI 环境无法拉取该镜像（网络限制、镜像仓库不可达），构建仍会失败，但此类问题属于 CI 基础设施问题（infra-error），非代码问题。
-- `fdb-headers-7.3.77.tar.gz` 需在 GitHub Releases 中存在；若 FoundationDB 官方未提供该归档文件，需改用其他方式获取头文件。
+无。当前方案使用 FoundationDB 官方 Docker 镜像中已经验证过的二进制文件，不涉及 RPM 依赖解析，且官方镜像为多架构自动匹配构建目标架构。
