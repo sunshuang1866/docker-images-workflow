@@ -3,57 +3,57 @@
 ## 基本信息
 - PR: #2706 — 【自动升级】fbthrift容器镜像升级至2026.06.22.00版本.
 - 失败类型: build-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 正则patch未匹配
-- 新模式症状关键词: expected sha256, but got, _verify_hash, re.sub, fetcher.py, fix_getdeps.py
+- 新模式标题: getdeps归档提取失败
+- 新模式症状关键词: don't know how to extract, fetcher.py, getdeps, libaio, tar.gz, ArchiveFetcher
 
 ## 根因分析
 
 ### 直接错误
-
 ```
-#11 379.1 Traceback (most recent call last):
-#11 379.1     raise Exception(
-#11 379.1 Exception: https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz: expected sha256 716c7059703247344eb066b54ecbc3ca2134f0103307192e6c2b7dab5f9528ab but got b93da241a72971350fffba828e19acd925a3b18f6b0534fab5d326d46779403b
-#11 379.4 Assessing libaio...
-#11 379.4 Download with https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz -> /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz ...
-#11 ERROR: process "/bin/sh -c git clone ... && python3 /tmp/fix_getdeps.py && ./build/fbcode_builder/getdeps.py ... build fbthrift" did not complete successfully: exit code: 1
+#11 331.3 Traceback (most recent call last):
+#11 331.3     raise Exception("don't know how to extract %s" % self.file_name)
+#11 331.3 Exception: don't know how to extract /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/downloads/libaio-libaio-libaio-0.3.113.tar.gz
+```
+
+后续上下文：
+```
+#11 331.7 Assessing libaio...
+#11 ERROR: process "/bin/sh -c ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
+- 失败位置: `build/fbcode_builder/getdeps/fetcher.py:ArchiveFetcher` 的 `_extract_archive` 或等效方法（行号未知，需查看上游代码）
+- 失败原因: getdeps 的 `ArchiveFetcher` 在评估提取 libaio 预置归档时，无法识别归档类型（文件扩展名 `.tar.gz` 未被正确匹配），抛出异常导致构建终止。
 
-- 失败位置: `Others/fbthrift/2026.06.22.00/24.03-lts-sp3/fix_getdeps.py`:14-20
-- 失败原因: `fix_getdeps.py` 中的正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 未能匹配 fbthrift v2026.06.22.00 版本中 `build/fbcode_builder/getdeps/fetcher.py` 的 `_verify_hash` 方法，导致哈希校验未被跳过，本地预置的 libaio 压缩包因 SHA256 不匹配而构建失败。
+关键上下文：
+- 依赖 `boost`、`fmt`、`gflags`、`glog`、`googletest` 等均构建成功
+- 失败发生在 `Assessing libaio...` 阶段，即 getdeps 开始处理 libaio 依赖时
+- `fix_getdeps.py` 仅对 `fetcher.py` 中 `_verify_hash` 方法做正则替换（跳过哈希校验），未涉及归档提取逻辑
 
 ### 与 PR 变更的关联
+此 PR 是全新提交的 fbthrift v2026.06.22.00 Dockerfile。`fix_getdeps.py` 正则 `r'def _verify_hash\(self\):.*?(?=\n    def )'` 在 `fetcher.py` 中可能存在的问题：
 
-PR 此次新增了 fbthrift v2026.06.22.00 的 Dockerfile 和配套的 `fix_getdeps.py` 脚本。`fix_getdeps.py` 的设计意图是通过正则替换将 `fetcher.py` 中 `_verify_hash` 方法的实现体替换为 `pass`（跳过哈希校验），从而让预置的本地 libaio tarball 通过校验。但该正则表达式与目标文件中实际的方法签名/结构不匹配，`re.sub` 未命中时返回原始内容原样写回，哈希校验未被绕过，构建失败。
-
-**正则可能未命中的原因**（按可能性排序）：
-1. `_verify_hash` 方法签名中包含参数（如 `_verify_hash(self, url, path)`），正则要求精确匹配 `(self):`
-2. `_verify_hash` 方法是类中最后一个方法，其后不存在 `\n    def ` 满足 lookahead 条件
-3. 上游代码使用了类型标注（如 `def _verify_hash(self) -> None:`），冒号前有额外内容
-4. `re.sub` 确实命中但替换后的文件因 Python 语法错误导致运行时走了其他分支
+1. **正则不匹配**（可能性较高）：fbthrift v2026.06.22.00 的 `fetcher.py` 中 `_verify_hash` 方法签名/缩进/位置已变更，正则匹配失败，`re.sub` 返回原字符串（未生效），导致原始哈希校验逻辑继续执行，进而在某个代码路径中触发归档类型识别错误。
+2. **正则匹配过宽**（可能性中等）：正则匹配成功但替换范围超出预期，意外移除了与归档提取相关的代码（如归档类型设置逻辑），导致后续 `_extract_archive` 找不到已知的归档类型。
+3. **libaio 归档文件本身异常**（可能性较低）：`libaio-libaio-0.3.113.tar.gz` 二进制文件可能不是有效的 gzip 压缩包，但错误信息 "don't know how to extract" 而非 "failed to extract" 指向归档类型识别阶段，而非实际解压阶段。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
+### 方向 1（置信度: 中）
+`fix_getdeps.py` 中针对 `_verify_hash` 的正则可能与 fbthrift v2026.06.22.00 的实际 `fetcher.py` 不匹配。需从上游仓库拉取该版本的 `fetcher.py`，确认 `_verify_hash` 方法的实际签名和位置，调整正则表达式使其能正确匹配并替换。同时需检查替换后的文件语法是否完整（`pass` 缩进是否正确、是否破坏了后续方法定义）。
 
-Dockerfile 中不再依赖正则去 patch `fetcher.py` 的 `_verify_hash` 方法，而是改用更可靠的方式预置 libaio 压缩包：在 Dockerfile 的 `cp` 命令之后，直接在 `fetcher.py` 中删除或注释掉哈希校验逻辑，方式可以是：
-- 在 `cp` 和 `python3 fix_getdeps.py` 之间用 `sed` 直接注释掉 `fetcher.py` 中调用哈希校验的函数或条件分支
-- 或者修改 `fix_getdeps.py` 中的正则，使其能同时匹配有参和无参的 `_verify_hash` 方法签名（如 `r'def _verify_hash\(self[^)]*\):'`），并放宽末尾 lookahead 条件
-
-### 方向 2（置信度: 中）
-
-如果 `re.sub` 确实生效但替换后代码有语法问题，则应检查替换结果 `def _verify_hash(self):\n        pass` 的缩进是否与原方法对齐（原方法缩进可能不是 4 空格），使用捕获组保留原始缩进再拼接 `pass` 语句。
+### 方向 2（置信度: 低）
+`fetcher.py` 的归档类型检测逻辑本身在 fbthrift v2026.06.22.00 中发生了变更，预置 libaio 归档的文件名 `libaio-libaio-libaio-0.3.113.tar.gz` 不再被其归档类型识别逻辑接受。可能需要额外 patch `fetcher.py` 中负责归档类型检测的方法（如 `_get_archive_type` 或 `_extract_archive`），或者调整 Dockerfile 中 libaio 归档的复制目标文件名以匹配期望的命名模式。
 
 ## 需要进一步确认的点
+1. 需要获取 fbthrift v2026.06.22.00 上游仓库中 `build/fbcode_builder/getdeps/fetcher.py` 的实际内容，确认：
+   - `_verify_hash` 方法的精确签名字符串（是否仍是 `def _verify_hash(self):`）
+   - `_verify_hash` 方法体内容（是否仅包含哈希校验，还是也包含归档类型设置逻辑）
+   - 归档提取逻辑的入口方法及其归档类型检测机制（是如何根据文件名/URL 判断归档类型的）
+2. 需要确认预置的 `libaio-libaio-0.3.113.tar.gz` 是否为有效的 gzip tar 归档文件
+3. 需要确认 getdeps manifest 中 libaio 的预期下载 URL/文件名格式，验证 `libaio-libaio-libaio-0.3.113.tar.gz` 文件名是否符合其命名规范
 
-1. 需要获取 fbthrift v2026.06.22.00 源代码中 `build/fbcode_builder/getdeps/fetcher.py` 文件的实际内容，确认 `_verify_hash` 方法的精确签名（参数列表、类型标注、装饰器）以及该方法在类中的位置（是否是最后一个方法）
-2. 确认 pagure.io 上 libaio-0.3.113 的下载 URL 是否仍然有效（日志中响应 Content-Type 为 `text/html`，可能已失效或需要认证）
-3. 确认预置的 `libaio-libaio-0.3.113.tar.gz` 的 SHA256 是否为 `b93da241a72971350fffba828e19acd925a3b18f6b0534fab5d326d46779403b`
-
-## 修复验证要求
-
-code-fixer 在提交前，必须从 fbthrift v2026.06.22.00 仓库获取 `build/fbcode_builder/getdeps/fetcher.py` 的实际内容，确认 `_verify_hash` 方法的当前签名和位置，验证新的 patch 方式（正则或 sed）确实能匹配目标代码并禁掉哈希校验。修复后应在 Docker 环境中验证 `getdeps.py` 构建 fbthrift 时不再因 libaio 哈希校验而失败。
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+code-fixer 在提交前，必须从 fbthrift v2026.06.22.00 的 `build/fbcode_builder/getdeps/fetcher.py` 获取 `_verify_hash` 方法的实际签名和完整方法体，验证新正则确实能匹配目标内容，并确认替换后的文件语法正确（Python 可解析）。同时验证归档提取方法（`_extract_archive` 或等效方法）的归档类型检测逻辑与新正则在 `_verify_hash` 中的替换不会产生冲突。
