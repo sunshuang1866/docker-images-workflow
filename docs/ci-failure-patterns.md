@@ -551,3 +551,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2704: `Bigdata/kylin/5.0.3/24.03-lts-sp3/Dockerfile` — Docker 构建时从 GitHub Releases 下载 Apache Kylin 5.0.3 二进制包返回 HTT
+
+---
+
+## 模式28：Git短哈希无法作为远程ref
+
+**症状关键词**: `fatal: couldn't find remote ref`, `git fetch`, `--depth 1`, abbreviated SHA, `${VERSION}`
+
+**根因**: - 失败位置: `AI/xla/3b0ff80/24.03-lts-sp3/Dockerfile:21-24`
+- 失败原因: Dockerfile 中 `git fetch --depth 1 origin ${VERSION}` 使用 7 字符的缩写 Git SHA（`3b0ff80`）作为远程 ref，Git 在 fetch 阶段无法解析缩写 SHA，报 `fatal: couldn't find remote ref`。
+
+**修复方法**: Dockerfile 中 `git fetch --depth 1 origin ${VERSION}` 使用了 7 字符缩写 Git SHA（`3b0ff80`），Git 无法将缩写 SHA 解析为远程 ref，导致 `fatal: couldn't find remote ref` 构建失败。
+
+**历史案例**:
+- PR #2712: `AI/xla/3b0ff80/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `git fetch --depth 1 origin ${VERSION}` 使用了 7 字
