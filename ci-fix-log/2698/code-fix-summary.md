@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 预检脚本 `parse_image_prefix` 在处理变更文件 `Database/percona/README.md` 时，因 `Database/image-list.yml` 中缺少 `percona: percona` 条目而抛出 ValueError。此失败属于 infra-error，根因在 CI 基础设施脚本，不在 PR 代码本身。
+在 `Database/image-list.yml` 中注册 `percona` 镜像的根目录（`percona: percona`），解决 CI 预检工具 `parse_image_prefix()` 无法确定 `Database/percona/README.md` 等文件所属镜像根目录的问题。
 
 ## 修改的文件
-无代码修改。
+- `Database/image-list.yml`: 新增 `percona: percona` 条目（第 19 行），将 percona 镜像根目录注册为 `Database/percona/`
 
 ## 修复逻辑
-分析报告明确指出失败类型为 `infra-error`，根因位于 CI 预检脚本 `eulerpublisher/update/container/app/format.py:156` 的 `parse_image_prefix` 函数。该函数要求所有变更文件都能在 `Database/image-list.yml` 中找到对应的镜像根目录条目。PR 新增了 `Database/percona/` 目录下的所有文件，但 `Database/image-list.yml` 中缺少 `percona: percona` 条目（该文件不在本次 PR 的变更文件列表中）。按照任务指令中"infra-error 无需代码修改"的原则，不对 PR 源代码做任何改动。实际修复需要在 `Database/image-list.yml` 末尾追加 `percona: percona`，但这超出了当前允许修改的文件范围。
+CI 失败的直接原因是 `format.parse_image_prefix()` 遍历 PR 变更文件列表时，对 `Database/percona/README.md` 等文件无法在 `Database/image-list.yml` 中找到对应的镜像根目录，抛出 ValueError。根因是 `Database/image-list.yml` 中缺少 `percona` 条目。原始 PR（`pr-head` 分支）的 git diff 确认包含此变更（`git diff master..pr-head -- Database/image-list.yml` 显示新增 `+  percona: percona`），但当前 fix 分支（基于 master）未包含该变更。添加此条目后，所有 `Database/percona/` 下的文件均能正确映射到已注册的镜像根目录，CI 预检将不再报错。
 
 ## 潜在风险
-若其他 PR 新增数据库镜像但遗漏更新 `Database/image-list.yml`，会触发相同的 CI 预检失败。建议在 PR 提交流程或 CI 检查中添加对 `image-list.yml` 更新的校验。
+无。此修改与原始 PR 的变更完全一致，且与 `Database/image-list.yml` 中其他镜像条目（如 `mysql`、`redis` 等）格式相同。
