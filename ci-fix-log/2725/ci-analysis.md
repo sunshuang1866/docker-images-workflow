@@ -3,40 +3,41 @@
 ## 基本信息
 - PR: #2725 — 【自动升级】3dslicer容器镜像升级至5.12.0版本.
 - 失败类型: build-error
-- 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: COPY脚本缺执行权限
-- 新模式症状关键词: Permission denied, exit code 126, COPY, ./build, chmod
+- 置信度: 中
+- 知识库匹配: 模式08
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-#14 [8/8] RUN ./build-CTKAppLauncher.sh && ./build-tbb.sh && ... && ./build-Slicer.sh v5.12.0 /opt/zlib.patch
-#14 0.063 /bin/sh: line 1: ./build-CTKAppLauncher.sh: Permission denied
-#14 ERROR: process "/bin/sh -c ./build-CTKAppLauncher.sh && ..." did not complete successfully: exit code: 126
+#15 45.68 error: patch failed: SuperBuild/External_zlib.cmake:48
+#15 45.68 error: SuperBuild/External_zlib.cmake: patch does not apply
+#15 ERROR: process "/bin/sh -c ./build-CTKAppLauncher.sh &&     ./build-tbb.sh &&     if [ \"$TARGETARCH\" = \"arm64\" ]; then         BRANCH=\"main\";     fi &&     ./build-Slicer.sh ${BRANCH} /opt/zlib.patch" did not complete successfully: exit code: 1
 ------
-Dockerfile:21
+error: patch failed: SuperBuild/External_zlib.cmake:48
+error: SuperBuild/External_zlib.cmake: patch does not apply
+ERROR: failed to solve: process "/bin/sh -c ./build-CTKAppLauncher.sh &&     ./build-tbb.sh &&     if [ \"$TARGETARCH\" = \"arm64\" ]; then         BRANCH=\"main\";     fi &&     ./build-Slicer.sh ${BRANCH} /opt/zlib.patch" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `HPC/3dslicer/5.12.0/24.03-lts-sp3/Dockerfile:21`（RUN 步骤）
-- 失败原因: Dockerfile 通过 `COPY build-CTKAppLauncher.sh /opt/` 等指令将构建脚本复制到镜像内，但源文件在 Git 仓库中未设置可执行权限位（mode 未包含 execute bit），COPY 指令保留源文件权限，导致 `/opt/build-CTKAppLauncher.sh` 无执行权限，`./build-CTKAppLauncher.sh` 直接调用时报 "Permission denied"，exit code 126。
+- 失败位置: `HPC/3dslicer/5.12.0/24.03-lts-sp3/zlib.patch`（通过 `build-Slicer.sh` 中 `git apply zlib.patch` 应用到 Slicer 仓库源码时失败）
+- 失败原因: zlib.patch 中第二个 hunk 期望在 `SuperBuild/External_zlib.cmake` 第 48 行附近匹配特定上下文（`-DCMAKE_C_FLAGS:STRING=${ep_common_c_flags}`），但 Slicer 5.12.0 上游仓库中该文件的实际内容与 patch 生成时的源文件不一致，导致 `git apply` 失败。
 
 ### 与 PR 变更的关联
-PR 新增了 4 个 shell 脚本文件（`build-CTKAppLauncher.sh`、`build-tbb.sh`、`build-Slicer.sh`、`zlib.patch`），并在 Dockerfile 中通过 `COPY` + `RUN ./xxx.sh` 的方式执行。所有脚本文件均为新增（`new_file: true`），且 Dockerfile 中未对 COPY 后的脚本执行 `chmod +x`。这是 PR 自身改动直接导致的构建失败。
+PR 新增了 `HPC/3dslicer/5.12.0/24.03-lts-sp3/zlib.patch`，该 patch 是本 PR 引入的新文件。patch 的两个 hunk 旨在修改 Slicer 的 `SuperBuild/External_zlib.cmake`：hunk 1（第19行附近）为 64 位架构添加 `-fPIC` 编译标志；hunk 2（第48行附近）将 CMake C 标志从直接引用 `${ep_common_c_flags}` 改为引用新定义的 `${${proj}_CMAKE_C_FLAGS}` 变量。由于 Slicer 5.12.0 上游源码中该文件的实际行号或上下文与 patch 生成时的基线不匹配，patch 应用失败。此失败是 PR 新增内容直接触发的。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-在 Dockerfile 的 `COPY` 指令之后、`RUN ./build-CTKAppLauncher.sh ...` 之前，增加一步 `RUN chmod +x /opt/*.sh` 确保所有构建脚本具有可执行权限。
-
-### 方向 2（可选）
-在 Git 仓库中将对应 `.sh` 文件的 mode 设置为可执行（`git update-index --chmod=+x`），使 COPY 进入镜像时天然携带执行权限。此方法需确认 CI 构建上下文中 git 文件权限位被正确保留。
+### 方向 1（置信度: 中）
+针对 Slicer v5.12.0 上游仓库中的 `SuperBuild/External_zlib.cmake` 实际内容重新生成 `zlib.patch`。需要先获取 Slicer 5.12.0 对应 tag（`v5.12.0`）的 `SuperBuild/External_zlib.cmake` 文件，确认当前内容，然后基于新内容重新制作 patch，确保两个 hunk 的上下文与上游文件精确匹配后再提交。
 
 ## 需要进一步确认的点
-- 确认同一目录下 `build-CTKAppLauncher.sh`、`build-tbb.sh`、`build-Slicer.sh` 三个文件的 Git 文件模式（`git ls-files -s`），验证当前是否为非可执行模式（`100644` 而非 `100755`）。
-- 确认项目规范是否对 Dockerfile 中执行权限的处理方式有统一约定（是统一在 Dockerfile 中 `chmod`，还是在 Git 层面设置 `+x`）。
+- Slicer v5.12.0 上游仓库中 `SuperBuild/External_zlib.cmake` 的实际行号与上下文内容（当前 patch 针对的源版本未知，可能是较旧版本生成的）
+- 第一个 hunk（第19行附近）是否也存在偏移问题（日志中仅报告了第48行的 hunk 失败，但 hunk 1 也可能存在潜在不匹配）
 
 ## 修复验证要求
-无需外部验证。修改后重新触发 CI 构建，确认 `#14` 步骤不再出现 "Permission denied" 即可。
+code-fixer 在提交前，必须从 Slicer 上游仓库（tag `v5.12.0`，即 Dockerfile 中 `ARG VERSION=5.12.0` 对应的版本）获取 `SuperBuild/External_zlib.cmake` 的实际内容，确认 patch 的两个 hunk 能在该版本源码上通过 `git apply --check` 验证后再提交。特别需验证：
+1. hunk 1 在第 19 行附近的 `if(DEFINED ZLIB_ROOT AND NOT EXISTS ${ZLIB_ROOT})` 上下文能否匹配
+2. hunk 2 在第 48 行附近的 `-DCMAKE_C_FLAGS:STRING=${ep_common_c_flags}` 上下文能否匹配
