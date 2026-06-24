@@ -1,21 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 FoundationDB clients RPM 下载 URL 硬编码 `aarch64` 架构，导致在 x86_64 CI 构建机上 `rpm -ivh` 失败（依赖 `libm.so.6(GLIBC_2.17)(64bit)` 无法满足）。
+Dockerfile 中 FoundationDB 客户端 RPM 下载 URL 硬编码 `aarch64` 架构后缀，导致 x86_64 CI 构建时因架构不匹配而安装失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 移除 FoundationDB RPM 安装流程（含硬编码架构的 URL），改用多阶段构建从 `foundationdb/foundationdb` 官方镜像 COPY 二进制文件 + 独立下载 headers tar.gz。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 客户端安装方式从直接下载 RPM 并 `rpm -ivh` 安装，改为多阶段构建从官方 `foundationdb/foundationdb:${FDB_VERSION}` 镜像 `COPY` 二进制文件（`fdbcli` 和 `libfdb_c.so`），同时单独下载架构无关的 headers 包。
 
 ## 修复逻辑
-已通过多个提交完成修复（`f5e9729e` → `0e0615db` → `beb06627` → `4f26bf3b`），最终方案：
+CI 分析报告指出根因为 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile` 中 FoundationDB 客户端 RPM URL 硬编码为 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`，在 x86_64 构建环境中无法安装。修复采用多阶段构建方式：
+1. 新增构建阶段 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` — 官方镜像支持多架构（amd64/arm64），Docker 会自动拉取匹配目标架构的镜像。
+2. 用 `COPY --from=fdb` 从官方镜像直接复制 `fdbcli` 和 `libfdb_c.so` 二进制文件，彻底消除 RPM 架构硬编码问题。
+3. FoundationDB headers 包（`fdb-headers-7.3.77.tar.gz`）是架构无关的，通过独立 `RUN` 指令下载解压。
 
-1. **第 2-4 行**：声明 `ARG FDB_VERSION=7.3.77` 并添加 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 作为第一个构建阶段，利用 Docker 多架构镜像自动匹配构建平台架构。
-2. **第 26-27 行**：用 `COPY --from=fdb` 从该阶段复制 `fdbcli` 和 `libfdb_c.so`，替代原有的 RPM 下载+安装步骤。此方案完全避免架构硬编码问题，因为 Docker 会根据构建平台自动拉取对应架构的 `foundationdb/foundationdb` 镜像。
-3. **第 29-32 行**：独立下载 `fdb-headers-${FDB_VERSION}.tar.gz`（已从上游 7.3.77 验证 URL 有效，返回有效 gzip 内容），headers 为架构无关文件。
-
-此修复对应分析报告中的**修复方向 1（置信度: 高）**——将架构硬编码替换为自适应方案。COPY 方式天然自适应架构，优于在 URL 中拼接 `${ARCH}` 变量的方案。
+已从上游 `7.3.77` tag 获取 `packaging/docker/Dockerfile` 验证，FoundationDB 官方镜像将 `libfdb_c.so` 置于 `/usr/lib/libfdb_c.so`，当前 `COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib64/libfdb_c.so` 路径映射正确。同时验证 GitHub Releases 中 `foundationdb-clients` RPM 确实存在 x86_64（el7）和 aarch64（el9）两架构版本，但 EL 版本不统一，故多阶段构建方案比动态 RPM URL 方案更稳健。
 
 ## 潜在风险
-- `foundationdb/foundationdb:7.3.77` 镜像托管在 Docker Hub，构建时需确保网络可访问该 registry。
-- `fdb-headers-7.3.77.tar.gz` 从 GitHub Releases 下载，依赖 GitHub 可用性。
-- 若 `foundationdb/foundationdb` 镜像未来版本中内部文件路径变更，COPY 指令可能失败，但当前 7.3.77 版本路径稳定。
+`COPY --from=fdb` 依赖 Docker Hub 上 `foundationdb/foundationdb:7.3.77` 镜像可用且支持目标架构。若该镜像未来被移除或架构支持变化，构建将失败。当前该镜像在多架构 manifest 中同时提供 amd64 和 arm64，风险较低。
