@@ -54,6 +54,7 @@ Dockerfile:12
 - PR #2267: `Others/haproxy/3.3.0` — URL 目录写 `3.2`，应为动态生成
 - PR #1932: `Database/phoenix/5.3.0` — `phoenix-hbase-2.4-5.3.0-bin.tar.gz` 不存在（Phoenix 5.3.0 已弃 HBase 2.4） → 换 `archive.apache.org` + `hbase-2.5`
 - PR #2659: `Database/redis/5.4.1/24.03-lts-sp3/Dockerfile` — CI 构建失败：Dockerfile 中 `ARG VERSION=5.4.1` 指定的 Redis 版本不存在（Git
+- PR #2731: `Others/mongoose/7.22/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `ARG VERSION=7.22` 引用的上游 Git tag `7.22` 在 `cesa
 
 ---
 
