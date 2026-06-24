@@ -1,26 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-openEuler 24.03-lts-sp3 基础镜像的 yum 源安装的 CMake (3.27.9) 不满足 Slicer 5.12.0 对 CMake >= 3.28.0 的要求，导致 cmake 配置阶段失败。
+CI 构建在编译 VTK `vtkArrayBulkInstantiate_*.cxx` 时，编译器进程被 Linux OOM Killer 杀死（`Killed signal terminated program cc1plus`），属于 CI 基础设施层面的内存不足问题。
 
 ## 修改的文件
-- `HPC/3dslicer/5.12.0/24.03-lts-sp3/Dockerfile`: 从 yum 安装列表中移除 `cmake`，添加 `wget`，新增从 CMake 官方 GitHub Releases 下载并安装 CMake 3.28.6 预编译二进制包的步骤。
+无。此失败为 **infra-error**，与 PR 代码变更无关，不需要修改任何源代码文件。
 
 ## 修复逻辑
-根因是 CI 分析报告中的 **CMake版本过低**：Slicer 5.12.0 的 CMakeLists.txt 要求 `cmake_minimum_required(VERSION 3.28.0)`，而系统 yum 源仅提供 3.27.9。
+分析报告已明确指出："此失败与 PR 代码变更无关。PR 仅新增了 3D Slicer 5.12.0 的 Dockerfile 及配套构建脚本和 patch 文件，这些文件本身逻辑正确（cmake 配置阶段已完成并开始编译，说明脚本和依赖均正确安装）。失败发生在 CI 基础设施层：构建机器内存不足以在 --parallel $NUMBER_OF_PHYSICAL_CORES（全核心并行编译）模式下完成 VTK 的编译。"
 
-修复方案（对应分析报告方向1）：
-1. 将 `cmake` 从 `yum install` 列表中移除，同时添加 `wget` 用于下载
-2. 新增从 `https://github.com/Kitware/CMake/releases/download/v3.28.6/` 下载 CMake 3.28.6 的预编译 Linux 二进制包
-3. 根据 Docker `TARGETARCH` 选择正确的架构：`arm64` → `aarch64`，其他 → `x86_64`
-4. 解压到 `/usr/local`（使用 `--strip-components=1`），使 `cmake` 等二进制位于 `/usr/local/bin/`（已在 PATH 中）
+根据任务指令中"如果分析报告指出是 infra-error（CI 基础设施问题），在 output_file 中说明无需代码修改，不要强行改代码"的要求，不对源代码做任何修改。
 
-**验证结果**：已从 GitHub API 确认 CMake v3.28.6 Release 包含以下 Linux 二进制包：
-- `cmake-3.28.6-linux-x86_64.tar.gz`（对应 amd64）
-- `cmake-3.28.6-linux-aarch64.tar.gz`（对应 arm64）
-
-两个架构的二进制包均可正常下载。
+**建议的基建层解决方案**：
+- 提升 CI 构建节点的内存配额（建议不低于 8GB）
+- 或限制 `build-Slicer.sh` 中 `cmake --build` 的并行编译数（如 `--parallel 4`），但这属于基建绕过方案，需在 CI 配置层或构建脚本中由运维决策，不属于当前修复范围
 
 ## 潜在风险
-- CMake 3.28.6 从 GitHub Releases 下载依赖网络可达性，若 GitHub 不可达则构建会失败（与 yum 源不可达的风险相当）
-- CMake 3.28.6 可能对 CTKAppLauncher 和 TBB 的构建产生行为差异，但从经验看新版本 CMake 向后兼容性好，且这两个组件的 CMake 要求较低，风险很低
+无（未修改任何代码）。
