@@ -1,25 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-FoundationDB 客户端 RPM (`foundationdb-clients-7.3.77-1.el9.aarch64.rpm`) 在 openEuler 24.03 上通过 `rpm -ivh` 安装时因跨发行版依赖不兼容失败（`libm.so.6(GLIBC_2.17)(64bit) is needed`）。
+Dockerfile 中 FoundationDB RPM 下载 URL 硬编码了 `aarch64` 架构，导致 x86_64 CI 构建失败。该问题已通过先前的多次修复提交解决，当前代码无需额外修改。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将硬编码下载 EL9 RPM 并执行 `rpm -ivh` 的安装方式，替换为多阶段构建从 FoundationDB 官方 Docker 镜像 (`foundationdb/foundationdb:7.3.77`) 中直接复制客户端二进制文件。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 已由先前的修复提交（`beb06627`, `0eed6b50`, `4f26bf3b`）将硬编码 aarch64 RPM 下载方案替换为多阶段构建方案（`FROM foundationdb/foundationdb` + `COPY --from=fdb`），该方案与架构无关。
 
 ## 修复逻辑
-CI 分析报告指出根因是 EL9/RHEL 9 构建的 FoundationDB RPM 在 openEuler 24.03 基础镜像上存在 glibc 符号版本兼容性问题（RPM 依赖解析器无法识别 `GLIBC_2.17` 符号已满足）。推荐修复方案（置信度: 高）是改为多阶段构建，从 FoundationDB 官方 Docker 镜像中提取客户端二进制，规避跨发行版 RPM 依赖冲突。
+CI 分析报告指出的根因是 Dockerfile 中 FoundationDB 客户端 RPM 的 URL 硬编码为 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm`，在 x86_64 构建环境上无法安装。修复分支（`fix/2512`）上已通过以下提交序列解决了此问题：
 
-已验证：
-1. `foundationdb/foundationdb:7.3.77` 在 Docker Hub 存在，支持 `linux/amd64` 和 `linux/arm64`
-2. 已从上游 `release-7.3` 分支获取 FoundationDB Dockerfile 验证，客户端二进制路径 `/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 与 COPY 指令完全匹配
-3. FoundationDB headers tarball (`fdb-headers-7.3.77.tar.gz`) 在 GitHub Releases 中可正常下载
+1. `beb06627`: 移除了 `curl + rpm -i` 的架构特定 RPM 下载方式，改为多阶段构建 — 从 `foundationdb/foundationdb:7.3.77`（官方镜像，支持 `amd64` 和 `arm64` 两种架构）复制 `fdbcli` 与 `libfdb_c.so`
+2. `4f26bf3b`: 新增 FDB 头文件下载（架构无关），供 3FS 编译时链接使用
 
-具体改动：移除 `RUN curl ... rpm ... rpm -ivh /tmp/fdb-clients.rpm` 行，新增：
-- `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 声明多阶段构建
-- `COPY --from=fdb /usr/bin/fdbcli /usr/bin/fdbcli`
-- `COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib64/libfdb_c.so`
-- 新增 header 文件的 tarball 下载
+当前方案使用 Docker 多阶段构建 + `COPY --from=fdb`，Docker 会自动为每个目标平台拉取对应架构的镜像变体，完全消除了架构硬编码问题。已验证 `foundationdb/foundationdb:7.3.77` 在 Docker Hub 上同时提供 `amd64` 和 `arm64` 镜像，`COPY` 路径（`/usr/bin/fdbcli`, `/usr/lib/libfdb_c.so`）与上游 FoundationDB Dockerfile 中的实际路径一致。
 
 ## 潜在风险
-- FoundationDB 二进制本身仍基于 EL9 编译，运行时动态链接可能依赖特定 glibc 符号版本。若 openEuler 24.03 的 glibc 实际包含了所需符号（仅 RPM 元数据未声明），则运行时无问题；若符号缺失，运行时可能出现动态链接错误。CI 分析报告建议后续在运行容器中执行 `ldd` 验证。
-- 3FS 源码编译步骤（第 11 步）因原第 10 步失败从未执行过，修复后可能暴露新的编译错误，但该风险不在本次 CI 失败分析范围内。
+- 多阶段构建方案依赖 `foundationdb/foundationdb:7.3.77` 镜像持续可用；若该镜像被归档或下线，需恢复为架构感知的 RPM 下载方案
+- 若 3FS 将来需要特定于分发包的 FoundationDB 客户端文件路径（如 `/etc/foundationdb`），多阶段构建方案可能不完整，需额外处理
