@@ -1,26 +1,28 @@
 # 修复摘要
 
 ## 修复的问题
-将 FoundationDB clients 的安装方式从 RPM 包安装（`rpm -i`）改为多阶段构建（`COPY --from=fdb`），消除跨发行版 RPM 依赖不兼容导致的构建失败。
+Dockerfile 中 FoundationDB 客户端和 clang 库路径硬编码为 `aarch64` 架构，导致 x86_64 CI 构建失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 移除 `curl + rpm -i` 安装 FDB RPM 的命令，改为多阶段构建，从官方 `foundationdb/foundationdb:7.3.77` 镜像中直接复制 `fdbcli` 和 `libfdb_c.so` 二进制文件，并从 GitHub Release 下载头文件归档。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 
+  - 用多阶段构建 `COPY --from=fdb` 替代硬编码 `aarch64` 的 RPM 下载，从官方 `foundationdb/foundationdb:7.3.77` 镜像提取客户端二进制
+  - 将硬编码的 `aarch64-openEuler-linux-gnu` 和 `libclang_rt.builtins-aarch64.a` 替换为 `${ARCH}-openEuler-linux-gnu` 和 `libclang_rt.builtins-${ARCH}.a`，通过 `ARCH=$(uname -m)` 动态适配架构
+  - 新增 FoundationDB 头文件下载（架构无关）
+  - 修正运行时包列表：移除不存在的 `boost-foundation`，保留 `boost-filesystem`
 
 ## 修复逻辑
 
-**根因**: 原始 Dockerfile 使用 `rpm -i --nodeps --noscripts` 安装 FoundationDB 的 `el9.aarch64` RPM 包。该 RPM 声明了 `libm.so.6(GLIBC_2.17)` 版本化依赖，在 openEuler 24.03 的 glibc 中无法解析；且硬编码为 aarch64 架构，与 CI 实际构建环境（x86_64）不匹配。
+### 根因 1：RPM 架构硬编码
+分析报告指出 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm` URL 硬编码导致 x86_64 主机上 `rpm -ivh` 失败。修复采用分析报告方向 2：从 FoundationDB 官方 Docker 镜像 `COPY --from` 提取客户端二进制。已从 Docker Hub API 验证 `foundationdb/foundationdb:7.3.77` 同时提供 `amd64` (x86_64) 和 `arm64` (aarch64) 两种架构的镜像。
 
-**修复方案**: 采用多阶段构建：
-1. 前置一个 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 阶段，利用 Docker 自动选择匹配构建架构的镜像变体（amd64/arm64）
-2. 用 `COPY --from=fdb /usr/bin/fdbcli` 和 `COPY --from=fdb /usr/lib/libfdb_c.so` 直接复制预编译的 FDB 客户端二进制文件，完全绕过 RPM 依赖解析
-3. 从 GitHub Release 下载 `fdb-headers-${FDB_VERSION}.tar.gz` 提供编译所需的 C API 头文件
+### 根因 2：clang 库路径硬编码
+将 `/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/` 改为 `/usr/lib/clang/17/lib/${ARCH}-openEuler-linux-gnu/`，将 `libclang_rt.builtins-aarch64.a` 改为 `libclang_rt.builtins-${ARCH}.a`，通过 `ARCH=$(uname -m)` 在运行时根据构建主机架构动态选择正确路径。
 
-**验证结果**:
-- 已从 Docker Hub API 确认 `foundationdb/foundationdb:7.3.77` 镜像存在，提供 amd64 和 arm64 两种架构变体
-- 已从 GitHub Release API 确认 `fdb-headers-7.3.77.tar.gz` 制品存在，URL 格式正确
-- 已从 FoundationDB 官方 Dockerfile（`release-7.3` 分支）确认 `libfdb_c.so` 位于 `/usr/lib/libfdb_c.so`，`fdbcli` 位于 `/usr/bin/fdbcli`
-- `--depth 1` + commit hash checkout 问题（模式 18）：当前 Dockerfile 使用完整 `git clone`（无 `--depth 1`），不存在此问题
+### 验证结果
+- 已从 Docker Hub API (`https://hub.docker.com/v2/repositories/foundationdb/foundationdb/tags/7.3.77`) 确认镜像支持 amd64 和 arm64
+- 已从 GitHub Releases API 确认 `fdb-headers-7.3.77.tar.gz` 资产存在
+- Dockerfile 中已无任何 `aarch64` 硬编码残留
 
 ## 潜在风险
-- FoundationDB 官方 Docker 镜像基于 Rocky Linux 9.4，其预编译的 `libfdb_c.so` 在 openEuler 24.03 上运行时可能存在 libc++ 等运行时库版本差异，但不影响 Docker 构建过程本身
-- 若 FoundationDB 7.3.77 镜像从 Docker Hub 移除或架构支持变更，构建将失败
+- `COPY --from=fdb` 中 `libfdb_c.so` 的源路径 `/usr/lib/libfdb_c.so` 在不同架构的 FoundationDB 镜像中都存在，但若未来镜像版本调整库文件路径，需同步修改
+- `ARCH=$(uname -m)` 对原生构建有效，若未来需要跨架构构建，建议改用 BuildKit 的 `TARGETARCH` 变量
