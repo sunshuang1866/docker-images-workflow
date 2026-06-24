@@ -1,19 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建在编译 VTK `vtkArrayBulkInstantiate_*.cxx` 时，编译器进程被 Linux OOM Killer 杀死（`Killed signal terminated program cc1plus`），属于 CI 基础设施层面的内存不足问题。
+VTK 全核并行编译时单个 C++ 模板文件（vtkArrayBulkInstantiate_*.cxx）内存消耗过大，触发 OOM Killer 导致 `cc1plus` 被 kill。
 
 ## 修改的文件
-无。此失败为 **infra-error**，与 PR 代码变更无关，不需要修改任何源代码文件。
+- `HPC/3dslicer/5.12.0/24.03-lts-sp3/build-Slicer.sh`: 限制 cmake `--parallel` 为物理核心数的一半（核心数 ≤4 时保持原值）
+- `HPC/3dslicer/5.12.0/24.03-lts-sp3/build-CTKAppLauncher.sh`: 同上，预防性修复
+- `HPC/3dslicer/5.12.0/24.03-lts-sp3/build-tbb.sh`: 同上，预防性修复
 
 ## 修复逻辑
-分析报告已明确指出："此失败与 PR 代码变更无关。PR 仅新增了 3D Slicer 5.12.0 的 Dockerfile 及配套构建脚本和 patch 文件，这些文件本身逻辑正确（cmake 配置阶段已完成并开始编译，说明脚本和依赖均正确安装）。失败发生在 CI 基础设施层：构建机器内存不足以在 --parallel $NUMBER_OF_PHYSICAL_CORES（全核心并行编译）模式下完成 VTK 的编译。"
+三个构建脚本均使用 `NUMBER_OF_PHYSICAL_CORES=$(grep -c ^processor /proc/cpuinfo)` 获取全部 CPU 核心数，然后以 `--parallel $NUMBER_OF_PHYSICAL_CORES` 进行全核并行编译。Slicer 的 SuperBuild 子项目 VTK 中包含大量模板实例化文件（如 `vtkArrayBulkInstantiate_char.cxx`、`vtkArrayBulkInstantiate_float.cxx`），单文件编译内存消耗极大，全核并行导致 CI runner 内存耗尽。
 
-根据任务指令中"如果分析报告指出是 infra-error（CI 基础设施问题），在 output_file 中说明无需代码修改，不要强行改代码"的要求，不对源代码做任何修改。
-
-**建议的基建层解决方案**：
-- 提升 CI 构建节点的内存配额（建议不低于 8GB）
-- 或限制 `build-Slicer.sh` 中 `cmake --build` 的并行编译数（如 `--parallel 4`），但这属于基建绕过方案，需在 CI 配置层或构建脚本中由运维决策，不属于当前修复范围
+修复方案：在每个构建脚本中增加 `PARALLEL_JOBS=$(( NUMBER_OF_PHYSICAL_CORES > 4 ? NUMBER_OF_PHYSICAL_CORES / 2 : NUMBER_OF_PHYSICAL_CORES ))`，将 `--parallel` 的并行度限制为物理核心数的一半。当核心数 ≤ 4 时保持全核编译，确保低配环境不受影响。这对应分析报告中的修复方向 1（置信度: 高）。
 
 ## 潜在风险
-无（未修改任何代码）。
+- 降半核编译会增加构建时间（预计增加 30-60%），可能触发 CI 超时。若发生超时，需进一步评估是否在 cmake 配置阶段关闭不必要的 VTK 模块以减少编译单元数量。
+- CTKAppLauncher 和 tbb 项目规模较小，原本未触发 OOM，降并行度对其影响有限。
