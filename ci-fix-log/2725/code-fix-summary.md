@@ -1,16 +1,26 @@
 # 修复摘要
 
 ## 修复的问题
-zlib.patch 的两个 hunk 在 Slicer v5.12.0 上游源码 `SuperBuild/External_zlib.cmake` 上无法应用（patch does not apply），因为 patch 是基于更旧版本的 Slicer 生成的，行号与上下文内容均不匹配。
+openEuler 24.03-lts-sp3 基础镜像的 yum 源安装的 CMake (3.27.9) 不满足 Slicer 5.12.0 对 CMake >= 3.28.0 的要求，导致 cmake 配置阶段失败。
 
 ## 修改的文件
-- `HPC/3dslicer/5.12.0/24.03-lts-sp3/zlib.patch`: 基于 Slicer v5.12.0 上游仓库的实际 `SuperBuild/External_zlib.cmake` 内容重新生成 patch，修正两个 hunk 的上下文行号和周围内容。
+- `HPC/3dslicer/5.12.0/24.03-lts-sp3/Dockerfile`: 从 yum 安装列表中移除 `cmake`，添加 `wget`，新增从 CMake 官方 GitHub Releases 下载并安装 CMake 3.28.6 预编译二进制包的步骤。
 
 ## 修复逻辑
-1. 从 Slicer 上游仓库（tag `v5.12.0`，对应 Dockerfile 中 `ARG VERSION=5.12.0`）获取了 `SuperBuild/External_zlib.cmake` 的实际内容。
-2. Hunk 1 旧版问题：patch 期望 `if(DEFINED ZLIB_ROOT...)` 位于第 19 行，但 v5.12.0 中该行在第 18 行（offset -1）。已重新生成 hunk，使上下文精确匹配 v5.12.0 第 19-24 行内容。
-3. Hunk 2 旧版问题：patch 期望 `-DCMAKE_C_FLAGS` 行后面紧跟 `-DZLIB_MANGLE_PREFIX`，但 v5.12.0 中该行后面是 `-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON`（上游已变更）。已重新生成 hunk，使上下文精确匹配 v5.12.0 第 49-55 行实际内容。
-4. 已从上游 v5.12.0 获取 `SuperBuild/External_zlib.cmake` 验证，通过 `git apply --check` 和 `git apply` 双重验证，patch 可干净应用。
+根因是 CI 分析报告中的 **CMake版本过低**：Slicer 5.12.0 的 CMakeLists.txt 要求 `cmake_minimum_required(VERSION 3.28.0)`，而系统 yum 源仅提供 3.27.9。
+
+修复方案（对应分析报告方向1）：
+1. 将 `cmake` 从 `yum install` 列表中移除，同时添加 `wget` 用于下载
+2. 新增从 `https://github.com/Kitware/CMake/releases/download/v3.28.6/` 下载 CMake 3.28.6 的预编译 Linux 二进制包
+3. 根据 Docker `TARGETARCH` 选择正确的架构：`arm64` → `aarch64`，其他 → `x86_64`
+4. 解压到 `/usr/local`（使用 `--strip-components=1`），使 `cmake` 等二进制位于 `/usr/local/bin/`（已在 PATH 中）
+
+**验证结果**：已从 GitHub API 确认 CMake v3.28.6 Release 包含以下 Linux 二进制包：
+- `cmake-3.28.6-linux-x86_64.tar.gz`（对应 amd64）
+- `cmake-3.28.6-linux-aarch64.tar.gz`（对应 arm64）
+
+两个架构的二进制包均可正常下载。
 
 ## 潜在风险
-无。patch 的逻辑含义（为 64 位架构添加 `-fPIC` 编译标志、通过 `${${proj}_CMAKE_C_FLAGS}` 变量间接引用编译标志）与原始 patch 完全一致，仅修正了行号和上下文以适配 Slicer v5.12.0 上游源码。
+- CMake 3.28.6 从 GitHub Releases 下载依赖网络可达性，若 GitHub 不可达则构建会失败（与 yum 源不可达的风险相当）
+- CMake 3.28.6 可能对 CTKAppLauncher 和 TBB 的构建产生行为差异，但从经验看新版本 CMake 向后兼容性好，且这两个组件的 CMake 要求较低，风险很低
