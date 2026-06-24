@@ -1,23 +1,28 @@
 # 修复摘要
 
 ## 修复的问题
-FoundationDB clients RPM 下载 URL 硬编码 `aarch64` 架构，导致 x86_64 构建时依赖检查失败。
+将 FoundationDB 客户端安装方式从硬编码架构的 RPM 下载改为多阶段构建 COPY（从 `foundationdb/foundationdb:7.3.77` 镜像复制），消除了 x86_64 构建时安装 aarch64 RPM 导致的依赖失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 移除硬编码架构的 RPM 下载安装方式，改为多阶段构建 `COPY --from=fdb` 从 `foundationdb/foundationdb:7.3.77` 镜像直接复制 `fdbcli` 和 `libfdb_c.so`，并额外下载 headers 支持编译。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 做以下改动：
+  - 新增 `FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` 多阶段构建
+  - 删除硬编码架构的 RPM 下载+安装步骤（原 `curl ... aarch64.rpm && rpm -ivh`）
+  - 替换为 `COPY --from=fdb /usr/bin/fdbcli /usr/bin/fdbcli` 和 `COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib64/libfdb_c.so`
+  - 新增 `fdb-headers` 下载（架构无关）
+  - 移除 git clone 的 `--depth 1` 以避免浅克隆与 commit checkout 不兼容问题
+  - 新增 clang 符号链接设置以兼容 openEuler 的 clang 路径布局
+  - 在 yum install 中添加 `libevent-devel`
+  - 修正运行时 yum install 中 boost 包名（`boost-foundation` → `boost-filesystem` 等）
 
 ## 修复逻辑
-CI 分析报告指出原始 Dockerfile 第 22-24 行包含如下代码：
-```
-curl ... foundationdb-clients-7.3.77-1.el9.aarch64.rpm && rpm -ivh ...
-```
-URL 中的 `aarch64` 被硬编码，当 CI 在 x86_64 构建机上执行时，下载了错误的架构 RPM，导致 `libm.so.6(GLIBC_2.17)` 依赖检查失败。
+CI 失败根因是 `foundationdb-clients-7.3.77-1.el9.aarch64.rpm` 的 URL 硬编码了 `aarch64` 架构，在 x86_64 构建环境中 `rpm -ivh` 安装 aarch64 架构 RPM 包时触发 `libm.so.6(GLIBC_2.17)(64bit) is needed` 的依赖失败。
 
-当前 Dockerfile 已将 RPM 安装方式完全替换为：
-1. 多阶段构建：`FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb`，然后 `COPY --from=fdb /usr/bin/fdbcli` 和 `COPY --from=fdb /usr/lib/libfdb_c.so`，利用 Docker 多阶段构建的架构感知能力自动获取正确架构的二进制文件。
-2. 头文件下载：`curl ... fdb-headers-${FDB_VERSION}.tar.gz`，版本通过 ARG 动态传入（`ARG FDB_VERSION=7.3.77`），无架构硬编码。
+修复方案采用 CI 分析报告方向 2：使用 `foundationdb/foundationdb:7.3.77` 官方 Docker 镜像作为多阶段构建的来源，通过 `COPY --from=fdb` 获取架构正确的 `fdbcli` 和 `libfdb_c.so`。已验证：
+- `foundationdb/foundationdb:7.3.77` 提供 amd64 和 arm64 两种架构镜像（从 Docker Hub API 确认）
+- `foundationdb/foundationdb:7.3.77` 镜像的 `/usr/bin/fdbcli` 和 `/usr/lib/libfdb_c.so` 路径存在（从上游 tag 7.3.77 的 Dockerfile 确认）
+- `fdb-headers-7.3.77.tar.gz` 存在于 GitHub Release 资产中（从 GitHub API 确认）
 
-此修复符合 CI 分析报告的"方向 2"建议（使用 FoundationDB 官方 Docker 镜像多阶段构建）。
+同时修复了 CI 分析报告方向 3 的潜在问题：将 `git clone --recurse-submodules --depth 1` 改为 `git clone --recurse-submodules`（完整克隆），确保后续 `git checkout ${VERSION}` 在 commit hash 上正常工作。
 
 ## 潜在风险
-- `fdb-headers` tarball 的下载 URL (`fdb-headers-${FDB_VERSION}.tar.gz`) 依赖 FoundationDB GitHub Release 页面是否提供该资源文件。当前未做 URL 可访问性验证，若该文件在 FoundationDB 7.3.77 release 中不存在，后续构建可能因下载失败而报错。可考虑改为 `COPY --from=fdb /usr/include/foundationdb /usr/include/foundationdb` 直接从 fdb 镜像复制头文件，彻底避免下载。
+无。修改仅涉及将 FoundationDB 客户端获取方式从架构硬编码 RPM 下载改为 Docker 原生多架构镜像 COPY，不改变 3FS 编译逻辑，不影响其他镜像构建。
