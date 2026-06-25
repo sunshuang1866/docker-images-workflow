@@ -4,50 +4,54 @@
 - PR: #2743 — 【自动升级】seissol容器镜像升级至202103.Sumatra版本.
 - 失败类型: build-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: 缺少_GNU_SOURCE导致cpu_set_t未识别
-- 新模式症状关键词: cpu_set_t does not name a type, cpu_set_t has not been declared, -Werror -Wall -pedantic, SeisSol, Pin.h
+- 知识库匹配: 新模式 + 模式20（次要）
+- 新模式标题: 上游源码缺失sched.h头文件
+- 新模式症状关键词: cpu_set_t does not name a type, GCC 12, sched.h, Pin.h, SeisSol
 
 ## 根因分析
 
 ### 直接错误
 ```
-/tmp/seissol/src/Parallel/Pin.h:50:3: error: 'cpu_set_t' does not name a type
-/tmp/seissol/src/Parallel/Pin.h:51:3: error: 'cpu_set_t' does not name a type
-/tmp/seissol/src/Parallel/Pin.h:55:3: error: 'cpu_set_t' does not name a type
-/tmp/seissol/src/Parallel/Pin.h:56:3: error: 'cpu_set_t' does not name a type
-/tmp/seissol/src/Parallel/Pin.h:57:3: error: 'cpu_set_t' does not name a type
-/tmp/seissol/src/Parallel/Pin.h:58:33: error: 'cpu_set_t' has not been declared
-/tmp/seissol/src/Parallel/Pin.h:60:35: error: 'cpu_set_t' has not been declared
-/tmp/seissol/src/Parallel/Pin.cpp:49:44: error: 'processMask' was not declared in this scope
-/tmp/seissol/src/Parallel/Pin.cpp:52:3: error: 'openmpMask' was not declared in this scope
-/tmp/seissol/src/Parallel/Pin.cpp:55:11: error: no declaration matches 'cpu_set_t seissol::parallel::Pinning::getWorkerUnionMask() const'
-/tmp/seissol/src/Parallel/Pin.cpp:76:11: error: no declaration matches 'cpu_set_t seissol::parallel::Pinning::getFreeCPUsMask() const'
-/tmp/seissol/src/Parallel/Pin.cpp:83:6: error: no declaration matches 'bool seissol::parallel::Pinning::freeCPUsMaskEmpty(const cpu_set_t&)'
-/tmp/seissol/src/Parallel/Pin.cpp:92:13: error: no declaration matches 'std::string seissol::parallel::Pinning::maskToString(const cpu_set_t&)'
-gmake[2]: *** [CMakeFiles/SeisSol-lib.dir/build.make:579: CMakeFiles/SeisSol-lib.dir/src/Parallel/Pin.cpp.o] Error 1
-gmake[1]: *** [CMakeFiles/Makefile2:92: CMakeFiles/SeisSol-lib.dir/all] Error 2
-gmake: *** [Makefile:91: all] Error 2
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:50:3: error: 'cpu_set_t' does not name a type
+#14 85.78    50 |   cpu_set_t processMask{};
+#14 85.78       |   ^~~~~~~~~
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:51:3: error: 'cpu_set_t' does not name a type
+#14 85.78    51 |   cpu_set_t openmpMask{};
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:55:3: error: 'cpu_set_t' does not name a type
+#14 85.78    55 |   cpu_set_t getProcessMask() const { return processMask; };
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:56:3: error: 'cpu_set_t' does not name a type
+#14 85.78    56 |   cpu_set_t getWorkerUnionMask() const;
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:57:3: error: 'cpu_set_t' does not name a type
+#14 85.78    57 |   cpu_set_t getFreeCPUsMask() const;
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:58:33: error: 'cpu_set_t' has not been declared
+#14 85.78 /tmp/seissol/src/Parallel/Pin.h:60:35: error: 'cpu_set_t' has not been declared
+...
+#14 85.97 gmake[2]: *** [CMakeFiles/SeisSol-lib.dir/build.make:579: CMakeFiles/SeisSol-lib.dir/src/Parallel/Pin.cpp.o] Error 1
+#14 99.94 gmake[1]: *** [CMakeFiles/Makefile2:92: CMakeFiles/SeisSol-lib.dir/all] Error 2
+#14 99.94 gmake: *** [Makefile:91: all] Error 2
+#14 ERROR: process "/bin/sh -c git clone --recursive --depth 1 --branch ${VERSION} https://github.com/SeisSol/SeisSol.git /tmp/seissol && ..." did not complete successfully: exit code: 2
 ```
 
 ### 根因定位
-- 失败位置: `/tmp/seissol/src/Parallel/Pin.h:50` 及 `Pin.cpp` 多处（SeisSol 上游源码）
-- 失败原因: SeisSol 源码中的 `src/Parallel/Pin.h` 和 `src/Parallel/Pin.cpp` 使用了 POSIX/GNU 扩展类型 `cpu_set_t`（CPU 亲和性 API），但编译时未定义 `_GNU_SOURCE` 或未正确包含 `<sched.h>` 头文件，导致编译器无法识别该类型名。在 GCC 12 + openEuler 24.03 环境下，`cpu_set_t` 需要 `_GNU_SOURCE` 特性宏才暴露。
+- 失败位置: 上游 SeisSol 源码 `/tmp/seissol/src/Parallel/Pin.h:50`
+- 失败原因: SeisSol `v202103.Sumatra` 版本的 `src/Parallel/Pin.h` 使用了 POSIX 类型 `cpu_set_t`，但未显式 `#include <sched.h>`。在 GCC 12（openEuler 24.03-lts-sp3 搭载的编译器）上，`<sched.h>` 不再被其他头文件间接包含，导致 `cpu_set_t` 类型未声明，编译失败。
 
 ### 与 PR 变更的关联
-该 PR 新增了 SeisSol `202103.Sumatra` 版本的 Dockerfile (`HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`)。Dockerfile 本身逻辑正确——从上游 GitHub 仓库 `SeisSol/SeisSol.git` 的 `v202103.Sumatra` 分支克隆源码并进行 cmake 构建。失败发生在 SeisSol 自身的 C++ 编译阶段，是 SeisSol 该版本源码与 openEuler 24.03 编译环境的兼容性问题（`cpu_set_t` 类型在严格 C++ 标准模式下不可见），而非 Dockerfile 配置错误。但由于 PR 引入了该 Dockerfile，需要通过在 Dockerfile 中添加编译修复措施来使构建通过。
+PR 新增了 `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`，该 Dockerfile 从 GitHub 克隆 SeisSol `v202103.Sumatra` 源码并在 openEuler 24.03 上编译。上游源码存在 GCC 12 兼容性问题（缺失 `<sched.h>` 显式包含），Dockerfile 中未施加补丁修复，导致构建失败。这个错误**与 PR 的改动直接相关**（新增的 Dockerfile 触发了上游 bug 的暴露），但**根本原因在上游源代码**。
+
+**次要问题**：Dockerfile 第 97 行 `ENV LD_LIBRARY_PATH=...:$LD_LIBRARY_PATH` 自引用了未定义变量，BuildKit 报告 `UndefinedVar` 警告（匹配**模式20**）。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 Dockerfile 的 cmake 配置步骤中，通过 `-DCMAKE_CXX_FLAGS="-D_GNU_SOURCE"` 将 `_GNU_SOURCE` 宏传递给 SeisSol 编译，使 `cpu_set_t` 类型对编译器可见。这是最小侵入性修复，只需在 cmake 命令中追加一个定义参数即可。
+在 Dockerfile 的 `git clone` 后、`cmake` 前，用 `sed` 向 `src/Parallel/Pin.h` 添加 `#include <sched.h>`，解决 `cpu_set_t` 类型未声明问题。参考现有做法（如模式15、模式21 中的 sed patch），在 SeisSol build 步骤中加入一行 sed 命令。
 
-### 方向 2（置信度: 中）
-在 Dockerfile 中 `git clone` SeisSol 之后、`cmake` 之前，用 `sed` 向 `src/Parallel/Pin.h` 文件中添加 `#include <sched.h>` 头文件包含语句。此方法针对性更强但依赖于 SeisSol 源码内部结构。
+### 方向 2（置信度: 高，次要）
+将 Dockerfile 第 97 行 `ENV LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/local/lib64:/usr/local/lib:$LD_LIBRARY_PATH` 中的 `$LD_LIBRARY_PATH` 改为 `${LD_LIBRARY_PATH:-}`，消除 BuildKit `UndefinedVar` 警告。
 
 ## 需要进一步确认的点
-- SeisSol `v202103.Sumatra` 分支的 `Pin.h` 和 `Pin.cpp` 源码中是否已有 `#include <sched.h>` 或 `#define _GNU_SOURCE`，需查看上游实际文件内容确认当前声明方式
-- 确认 `_GNU_SOURCE` 宏是否会与其他编译单元产生副作用
+1. 确认 SeisSol `v202103.Sumatra` 的 `src/Parallel/Pin.h` 是否确实缺少 `#include <sched.h>`（从日志上下文可高置信度推断，但 code-fixer 应在修复时验证上游仓库实际文件内容）。
+2. CI 日志中的 cmake 命令包含 `-DCMAKE_CXX_FLAGS="-D_GNU_SOURCE"`，但 PR diff 的 Dockerfile 中不存在此参数——需确认是 CI 系统自动注入，还是 diff 与构建时的 Dockerfile 存在差异。此差异不影响根因判断。
 
 ## 修复验证要求
-若采用方向 1（cmake 添加 `-DCMAKE_CXX_FLAGS="-D_GNU_SOURCE"`），code-fixer 需提交后验证：openEuler 24.03-lts-sp3 容器内 SeisSol `cmake --build` 全量编译通过，且 Pin.cpp 编译不再报 `cpu_set_t` 相关错误。若采用方向 2（sed patch），code-fixer 必须从 SeisSol v202103.Sumatra 上游仓库获取 `src/Parallel/Pin.h` 的实际内容，确认 sed 匹配规则能正确注入 `#include <sched.h>` 后再提交。
+code-fixer 必须从 SeisSol v202103.Sumatra 的 `src/Parallel/Pin.h` 获取实际文件内容，确认 `cpu_set_t` 的使用位置及缺失的 `#include <sched.h>`，验证 sed 命令能正确在合适位置（如文件头部最后一个 `#include` 之后）插入该 include，然后再提交。
