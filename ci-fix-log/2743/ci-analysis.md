@@ -3,55 +3,57 @@
 ## 基本信息
 - PR: #2743 — 【自动升级】seissol容器镜像升级至202103.Sumatra版本.
 - 失败类型: build-error
-- 置信度: 高
-- 知识库匹配: 新模式 + 模式20（次要）
-- 新模式标题: 上游源码缺失sched.h头文件
-- 新模式症状关键词: cpu_set_t does not name a type, GCC 12, sched.h, Pin.h, SeisSol
+- 置信度: 中
+- 知识库匹配: 模式06（症状相似，根因不同）+ 模式20（副作用）
+- 新模式标题: cmake install 无安装规则
+- 新模式症状关键词: failed to calculate checksum, not found, SeisSol, cmake --install, COPY --from=builder
 
 ## 根因分析
 
 ### 直接错误
+
 ```
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:50:3: error: 'cpu_set_t' does not name a type
-#14 85.78    50 |   cpu_set_t processMask{};
-#14 85.78       |   ^~~~~~~~~
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:51:3: error: 'cpu_set_t' does not name a type
-#14 85.78    51 |   cpu_set_t openmpMask{};
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:55:3: error: 'cpu_set_t' does not name a type
-#14 85.78    55 |   cpu_set_t getProcessMask() const { return processMask; };
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:56:3: error: 'cpu_set_t' does not name a type
-#14 85.78    56 |   cpu_set_t getWorkerUnionMask() const;
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:57:3: error: 'cpu_set_t' does not name a type
-#14 85.78    57 |   cpu_set_t getFreeCPUsMask() const;
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:58:33: error: 'cpu_set_t' has not been declared
-#14 85.78 /tmp/seissol/src/Parallel/Pin.h:60:35: error: 'cpu_set_t' has not been declared
-...
-#14 85.97 gmake[2]: *** [CMakeFiles/SeisSol-lib.dir/build.make:579: CMakeFiles/SeisSol-lib.dir/src/Parallel/Pin.cpp.o] Error 1
-#14 99.94 gmake[1]: *** [CMakeFiles/Makefile2:92: CMakeFiles/SeisSol-lib.dir/all] Error 2
-#14 99.94 gmake: *** [Makefile:91: all] Error 2
-#14 ERROR: process "/bin/sh -c git clone --recursive --depth 1 --branch ${VERSION} https://github.com/SeisSol/SeisSol.git /tmp/seissol && ..." did not complete successfully: exit code: 2
+#15 [stage-1 3/8] COPY --from=builder /usr/local/bin/SeisSol* /usr/local/bin/
+#15 ERROR: failed to calculate checksum of ref 3z3utj5dde0nqcbrj72gahkpr::z7rqbv3f2iw30ji9201thbrbj: "/usr/local/bin/SeisSol": not found
+ERROR: failed to solve: failed to compute cache key: failed to calculate checksum of ref 3z3utj5dde0nqcbrj72gahkpr::z7rqbv3f2iw30ji9201thbrbj: "/usr/local/bin/SeisSol": not found
+
+ 1 warning found (use --debug to expand):
+ - UndefinedVar: Usage of undefined variable '$LD_LIBRARY_PATH' (line 98)
+Dockerfile:90
+--------------------
+  90 | >>> COPY --from=builder /usr/local/bin/SeisSol* /usr/local/bin/
 ```
 
 ### 根因定位
-- 失败位置: 上游 SeisSol 源码 `/tmp/seissol/src/Parallel/Pin.h:50`
-- 失败原因: SeisSol `v202103.Sumatra` 版本的 `src/Parallel/Pin.h` 使用了 POSIX 类型 `cpu_set_t`，但未显式 `#include <sched.h>`。在 GCC 12（openEuler 24.03-lts-sp3 搭载的编译器）上，`<sched.h>` 不再被其他头文件间接包含，导致 `cpu_set_t` 类型未声明，编译失败。
+
+- 失败位置: Dockerfile 第 90 行，stage-1（运行阶段）的 `COPY --from=builder /usr/local/bin/SeisSol*`
+- 失败原因: builder 阶段中 `cmake --install build` 未将 SeisSol 可执行文件实际安装到 `/usr/local/bin/` 目录。从日志中可见 cmake install 输出仅有一行 `-- Install configuration: "Release"`，无任何 `-- Installing:` 行（正常 install 会逐文件打印安装路径），说明 SeisSol 202103.Sumatra 的 CMakeLists.txt **未定义 `install()` 目标**，导致构建产物留在 build 目录而未被拷贝到安装前缀。build 阶段因 `&&` 链中所有命令（`cmake --install build`、`ln -sf`、`rm -rf`）均返回 0 而标记成功，但实际在 `/usr/local/bin/` 下无有效文件。stage-1 的 `COPY --from=builder /usr/local/bin/SeisSol*` 找不到任何匹配文件，BuildKit 报错。
 
 ### 与 PR 变更的关联
-PR 新增了 `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`，该 Dockerfile 从 GitHub 克隆 SeisSol `v202103.Sumatra` 源码并在 openEuler 24.03 上编译。上游源码存在 GCC 12 兼容性问题（缺失 `<sched.h>` 显式包含），Dockerfile 中未施加补丁修复，导致构建失败。这个错误**与 PR 的改动直接相关**（新增的 Dockerfile 触发了上游 bug 的暴露），但**根本原因在上游源代码**。
 
-**次要问题**：Dockerfile 第 97 行 `ENV LD_LIBRARY_PATH=...:$LD_LIBRARY_PATH` 自引用了未定义变量，BuildKit 报告 `UndefinedVar` 警告（匹配**模式20**）。
+PR 新增了 SeisSol 202103.Sumatra 版本的 Dockerfile，这是一个全新的文件。问题出在该 Dockerfile 的 3 阶段构建流程中：builder 阶段编译 SeisSol 后依赖 `cmake --install build` 将二进制安装至 `/usr/local/bin/`，但 SeisSol 的 CMake 项目未提供 install 规则，导致后续 COPY 步骤找不到目标文件。**该失败由这次 PR 引入的 Dockerfile 直接触发**，与之前已有的 SeisSol 1.3.2 版本 Dockerfile（如构建流程不同）无关。
+
+额外存在一个 BurildKit 警告（模式20）：第 98 行 `ENV LD_LIBRARY_PATH=...:$LD_LIBRARY_PATH` 自引用了未定义的 `$LD_LIBRARY_PATH`，应改为 `${LD_LIBRARY_PATH:-}`。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-在 Dockerfile 的 `git clone` 后、`cmake` 前，用 `sed` 向 `src/Parallel/Pin.h` 添加 `#include <sched.h>`，解决 `cpu_set_t` 类型未声明问题。参考现有做法（如模式15、模式21 中的 sed patch），在 SeisSol build 步骤中加入一行 sed 命令。
+### 方向 1（置信度: 中）
+将 `cmake --install build` 替换为手动拷贝构建产物。SeisSol 的 CMake 构建在 `build/` 目录下生成了实际的可执行文件（`SeisSol_Release_dnoarch_4_elastic` 和 `SeisSol_proxy_Release_dnoarch_4_elastic`），可以直接用 `cp` 或 `install` 命令将它们从 build 目录拷贝到 `/usr/local/bin/`，再创建对应的符号链接 `SeisSol`。这样做不依赖 SeisSol CMake 项目的 install 目标是否存在。
 
-### 方向 2（置信度: 高，次要）
-将 Dockerfile 第 97 行 `ENV LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/local/lib64:/usr/local/lib:$LD_LIBRARY_PATH` 中的 `$LD_LIBRARY_PATH` 改为 `${LD_LIBRARY_PATH:-}`，消除 BuildKit `UndefinedVar` 警告。
+### 方向 2（置信度: 低）
+为 SeisSol 202103.Sumatra 的 CMakeLists.txt 添加 `install(TARGETS ...)` 规则（通过 patch 方式在 Dockerfile 中 `sed` 或 `git apply`），使 `cmake --install` 能正确安装。但这需要了解 SeisSol 的 CMake 项目结构，且不同版本的 CMakeLists.txt 可能结构差异大，维护成本高。
 
 ## 需要进一步确认的点
-1. 确认 SeisSol `v202103.Sumatra` 的 `src/Parallel/Pin.h` 是否确实缺少 `#include <sched.h>`（从日志上下文可高置信度推断，但 code-fixer 应在修复时验证上游仓库实际文件内容）。
-2. CI 日志中的 cmake 命令包含 `-DCMAKE_CXX_FLAGS="-D_GNU_SOURCE"`，但 PR diff 的 Dockerfile 中不存在此参数——需确认是 CI 系统自动注入，还是 diff 与构建时的 Dockerfile 存在差异。此差异不影响根因判断。
+
+1. **SeisSol 202103.Sumatra 源码中 `src/` 目录的 CMakeLists.txt 是否确实没有 `install(TARGETS SeisSol-bin ...)` 规则**。可从上游仓库 `https://github.com/SeisSol/SeisSol.git` 的 `v202103.Sumatra` tag 拉取源码确认。
+2. **已有的 SeisSol 1.3.2 Dockerfile 是如何处理二进制安装的**。如果 1.3.2 版本也使用 `cmake --install` 并能成功，说明 1.3.2 版本的 CMake 项目有 install 规则，需对比两者的构建方式差异。
+3. **构建产物在 build 目录下的具体路径和确切文件名**，以便在修复方向 1 中使用正确的 `cp` 命令。
+4. **修复 LD_LIBRARY_PATH 的 UndefinedVar 警告**（第 98 行改为 `${LD_LIBRARY_PATH:-}`），这是每次构建都会产生的警告，与模式20一致。
 
 ## 修复验证要求
-code-fixer 必须从 SeisSol v202103.Sumatra 的 `src/Parallel/Pin.h` 获取实际文件内容，确认 `cpu_set_t` 的使用位置及缺失的 `#include <sched.h>`，验证 sed 命令能正确在合适位置（如文件头部最后一个 `#include` 之后）插入该 include，然后再提交。
+
+若采用修复方向 1（手动拷贝构建产物），code-fixer **必须**：
+1. 从上游仓库 `https://github.com/SeisSol/SeisSol.git` 拉取 `v202103.Sumatra` tag 的源码
+2. 在目标平台（openEuler 24.03-lts-sp3）上本地运行 cmake 构建，记录构建产物在 build 目录下的确切路径和文件名
+3. 确认 `cp`/`install` 命令能正确拷贝所有需要的二进制文件
+4. 修改 Dockerfile 后重新完整构建镜像验证
