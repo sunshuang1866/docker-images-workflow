@@ -5,47 +5,48 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM架构硬编码
-- 新模式症状关键词: Failed dependencies, harcoded aarch64, foundationdb, rpm -ivh, el9
+- 新模式标题: 跨发行版RPM依赖不兼容
+- 新模式症状关键词: Failed dependencies, libm.so.6, GLIBC_2.17, rpm -ivh, el9, foundationdb, aarch64
 
 ## 根因分析
 
 ### 直接错误
 ```
-#10 [5/9] RUN curl -sL --retry 5 -o /tmp/fdb-clients.rpm https://github.com/apple/foundationdb/releases/download/7.3.77/foundationdb-clients-7.3.77-1.el9.aarch64.rpm &&     rpm -ivh /tmp/fdb-clients.rpm &&     rm -f /tmp/fdb-clients.rpm
+#10 [5/9] RUN curl -sL --retry 5 -o /tmp/fdb-clients.rpm \
+  https://github.com/apple/foundationdb/releases/download/7.3.77/foundationdb-clients-7.3.77-1.el9.aarch64.rpm && \
+  rpm -ivh /tmp/fdb-clients.rpm && rm -f /tmp/fdb-clients.rpm
 #10 0.509 error: Failed dependencies:
 #10 0.509 	libm.so.6(GLIBC_2.17)(64bit) is needed by foundationdb-clients-7.3.77-1.aarch64
 #10 ERROR: process "/bin/sh -c ..." did not complete successfully: exit code: 1
-------
-Dockerfile:22
---------------------
-  22 | >>> RUN curl -sL --retry 5 -o /tmp/fdb-clients.rpm https://github.com/apple/foundationdb/releases/download/7.3.77/foundationdb-clients-7.3.77-1.el9.aarch64.rpm && \
-  23 | >>>     rpm -ivh /tmp/fdb-clients.rpm && \
-  24 | >>>     rm -f /tmp/fdb-clients.rpm
 ```
 
 ### 根因定位
 - 失败位置: `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile:22-24`
-- 失败原因: Dockerfile 中 FoundationDB RPM 下载 URL 硬编码了 `aarch64` 架构，而 CI 实际构建环境为 x86_64（日志中 Rust 三元组为 `x86_64-unknown-linux-gnu`，meson 输出 `Host machine cpu family: x86_64`）。x86_64 系统上安装 aarch64 的 RPM 包导致 `rpm -ivh` 依赖解析失败。
+- 失败原因: FoundationDB 官方发布的是面向 RHEL 9 (`el9`) 编译的 RPM 包，其 RPM 元数据中声明的 `libm.so.6(GLIBC_2.17)(64bit)` 依赖在 openEuler 的 glibc 包中未以相同 `Provides` 字符串提供（虽然底层 .so 实际包含该符号版本），导致 `rpm -ivh` 依赖检查失败。同时 Dockerfile 硬编码了 `aarch64` 架构的 RPM URL，当前 CI 构建环境实际运行在 x86_64 上（见 rustup 日志 `default host triple is x86_64-unknown-linux-gnu`），存在架构不匹配隐患。
 
 ### 与 PR 变更的关联
-PR 新增了 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`（共 69 行），该 Dockerfile 中的第 22 行 `RUN` 指令直接包含硬编码的 `aarch64` 架构 RPM URL。此次失败完全由 PR 引入的新代码触发。
+本次 PR 新增了 `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`，该 Dockerfile 第 22-24 行直接引入了 FoundationDB RPM 安装步骤，是该失败的**直接触发原因**。该步骤之前的 `yum install`、`rustup`、`fuse build`（步骤 7-9）均成功完成，失败发生在步骤 10。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 FoundationDB RPM 下载 URL 中的硬编码架构 `aarch64` 替换为构建时动态获取的目标架构。Docker BuildKit 提供 `TARGETARCH` 内置 ARG（值为 `amd64` 或 `arm64`），但在 `RUN` 指令中使用需先声明 `ARG TARGETARCH`。注意避免使用 `BUILDARCH`（BuildKit 预定义变量，在 RUN 中重新赋值无效，参考模式09）。
-
-FoundationDB GitHub Releases 中同时提供了 x86_64 和 aarch64 两种 RPM，URL 格式如下：
-- x86_64: `.../foundationdb-clients-7.3.77-1.el9.x86_64.rpm`
-- aarch64: `.../foundationdb-clients-7.3.77-1.el9.aarch64.rpm`
-
-需要将 Docker BuildKit 的 `amd64`/`arm64` 映射为 FoundationDB 使用的 `x86_64`/`aarch64` 架构标识。
+**改用 `rpm -ivh --nodeps` 绕过 RPM 跨发行版依赖校验**，并用架构变量动态选择正确的 RPM URL：
+1. 在 Dockerfile 开头使用条件判断当前构建架构（`uname -m`），将 `aarch64` / `x86_64` 映射为 FoundationDB 发布页面的架构标识（注意 FoundationDB 对 x86_64 可能使用 `amd64` 或 `x86_64`，需查看其 release 页面确认）
+2. 将 `rpm -ivh` 改为 `rpm -ivh --nodeps` 跳过跨发行版 RPM 元数据依赖检查（实际 .so 文件由 openEuler 的 glibc 包提供，运行时无问题）
+3. 验证 FoundationDB 7.3.77 的 x86_64 RPM 是否存在，若不存在该架构的 release，则需考虑备选方案
 
 ### 方向 2（置信度: 中）
-如果 FoundationDB `el9` RPM 在 openEuler 24.03 上即使架构匹配也存在 glibc 版本兼容性问题（`libm.so.6(GLIBC_2.17)` 依赖），可考虑不通过 RPM 安装，改为从 FoundationDB 官方 Docker 镜像中多阶段 `COPY` 二进制文件，或手动编译 FoundationDB 客户端库。
+**通过 FoundationDB 官方 Docker 镜像多阶段构建获取客户端二进制**（类似模式16）：
+1. 使用 `FROM foundationdb/foundationdb:7.3.77 AS fdb-source` 作为构建源
+2. `COPY --from=fdb-source /usr/bin/fdbcli /usr/lib/libfdb_c.so /usr/local/...` 复制所需文件
+3. 参考模式16的历史案例（grafana-agent），绕过 RPM 安装的跨发行版兼容问题
 
 ## 需要进一步确认的点
-1. 即使修复架构问题后，需确认 FoundationDB `el9` RPM 在 openEuler 24.03-LTS-SP3 上的 `libm.so.6(GLIBC_2.17)` 版本符号是否实际可用，避免依赖解析同样失败。
-2. 历史模式 #18 指出同一 Dockerfile 中 `git clone --depth 1` 后 `git checkout ${VERSION} 2>/dev/null || true` 存在浅克隆与 commit hash checkout 不兼容的问题。当前构建在步骤 5/9 即失败，步骤 6/9（git clone）尚未执行，修复 FDB 问题后可能暴露该下游问题。
-3. 历史模式 #10 指出同一 Dockerfile 存在 `boost-foundation` 运行时包名问题及缺少构建依赖。当前构建未到达该阶段，修复后需一并验证。
+1. FoundationDB 7.3.77 在 GitHub Releases 是否发布了 x86_64 (`amd64`) 架构的 RPM？当前 Dockerfile 只使用了 `aarch64` URL
+2. FoundationDB 官方 Docker 镜像中是否包含构建 3FS 所需的客户端库文件（`libfdb_c.so` 及头文件）？如果 3FS 编译时需要 header 文件，多阶段构建方案需额外处理
+3. 使用 `--nodeps` 安装后，FoundationDB 客户端在 openEuler 24.03 上运行时是否真正可用（glibc 版本兼容性需实际验证）
+
+## 修复验证要求
+1. 若采用方向 1：code-fixer 必须确认 FoundationDB 7.3.77 在 GitHub Releases 页面的 x86_64 RPM 文件名（`foundationdb-clients-7.3.77-1.el9.x86_64.rpm` 或 `...amd64.rpm`），并在 x86_64 openEuler 24.03 容器中验证 `rpm -ivh --nodeps` 安装后 `fdbcli --version` 可正常执行
+2. 若采用方向 2：code-fixer 必须拉取 `foundationdb/foundationdb:7.3.77` 镜像，确认其中包含 `libfdb_c.so` 和所有必需的客户端工具，并在 openEuler 24.03 容器中验证复制后的二进制能正常运行
+3. 架构变量映射表必须参照 FoundationDB 实际 release 页面的文件命名验证，不允许猜测
