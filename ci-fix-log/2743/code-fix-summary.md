@@ -1,16 +1,23 @@
 # 修复摘要
 
 ## 修复的问题
-SeisSol `v202103.Sumatra` 上游源码 `src/Parallel/Pin.h` 使用了 `cpu_set_t` 类型但未显式包含 `<sched.h>`，在 GCC 12（openEuler 24.03-lts-sp3）上编译失败。
+SeisSol 202103.Sumatra 的 CMakeLists.txt 无 `install()` 目标，`cmake --install build` 不安装任何文件，导致 stage-1 的 `COPY --from=builder /usr/local/bin/SeisSol*` 找不到文件。
 
 ## 修改的文件
-- `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`: 在 `git clone` 后、`cmake` 前增加一行 `sed` 命令，向 `src/Parallel/Pin.h` 中插入 `#include <sched.h>`
+- `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`: 将第 79 行 `cmake --install build` 替换为 `cp build/SeisSol_Release_*_4_elastic build/SeisSol_proxy_Release_*_4_elastic /usr/local/bin/`，直接拷贝构建产物到 `/usr/local/bin/`。
 
 ## 修复逻辑
-已从上游 `https://raw.githubusercontent.com/SeisSol/SeisSol/202103_Sumatra/src/Parallel/Pin.h` 获取实际文件内容验证，确认该文件仅 `#include <string>` 而无 `<sched.h>`，导致 `cpu_set_t` 类型在 GCC 12 上未声明。通过 `sed` 在 `#include <string>` 之后追加 `#include <sched.h>`，正则匹配成功。这是最小化修复，不改变其他构建逻辑。
+SeisSol 202103_Sumatra 的顶层 CMakeLists.txt 定义了 `SeisSol-bin` 和 `SeisSol-proxy` 两个可执行目标，但未定义 `install(TARGETS ...)` 规则，导致 `cmake --install build` 无实际操作（构建日志仅输出 `-- Install configuration: "Release"`，无 `-- Installing:` 行）。二进制文件实际位于 `build/SeisSol_Release_dnoarch_4_elastic` 和 `build/SeisSol_proxy_Release_dnoarch_4_elastic`。
 
-次要问题（Dockerfile 第 97 行 `$LD_LIBRARY_PATH` 自引用）：实际文件中已使用 `${LD_LIBRARY_PATH:-}` 格式，无需修改。
+已从上游 `https://raw.githubusercontent.com/SeisSol/SeisSol/202103_Sumatra/CMakeLists.txt` 和 `cmake/process_users_input.cmake` 获取源文件验证：
+- `HOST_ARCH=noarch` + `PRECISION=double` → `HOST_ARCH_STR=dnoarch`
+- `EXE_NAME_PREFIX=Release_dnoarch_4_elastic`
+- 目标输出名：`SeisSol_Release_dnoarch_4_elastic`、`SeisSol_proxy_Release_dnoarch_4_elastic`
+- `add_executable` 在顶层 CMakeLists.txt 定义，产物在 `${CMAKE_CURRENT_BINARY_DIR}` 即 `build/` 目录
+
+用 Python `fnmatch` 验证 glob 模式 `SeisSol_Release_*_4_elastic` 和 `SeisSol_proxy_Release_*_4_elastic` 均能匹配上述实际文件名，确认匹配成功。
+
+替换后，`cp` 将二进制拷贝至 `/usr/local/bin/`，后续 `ln -sf` 能正常创建 `SeisSol` 符号链接，stage-1 的 `COPY --from=builder /usr/local/bin/SeisSol*` 可找到文件。
 
 ## 潜在风险
-- 该 `sed` 命令依赖 `#include <string>` 这一确切行存在。若上游未来版本修改了该行的 include 顺序或内容，sed 将无法匹配并导致构建失败（`sed` 不报错但不会插入）。当前针对 `202103_Sumatra` tag 锁定版本，风险可控。
-- 该修复仅影响 `cpu_set_t` 的声明问题，不涉及任何运行时行为变更。
+无。`cmake --install build` 原本就是空操作，替换为直接的 `cp` 命令不改变其他行为。若未来 SeisSol 版本升级后 CMakeLists.txt 新增 `install()` 规则，该 `cp` 命令仍可正常执行（二进制文件会同时存在，cp 覆盖不影响结果）。
