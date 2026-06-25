@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-FoundationDB RPM 包在 openEuler 24.03 上因 `libm.so.6(GLIBC_2.17)(64bit)` RPM 元数据依赖不匹配导致 `rpm -ivh` 安装失败。
+Dockerfile 中 FoundationDB 安装步骤硬编码了 aarch64 RPM URL，导致在 x86_64 CI 环境中因 RPM 架构不匹配而构建失败。
 
 ## 修改的文件
-- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 客户端安装方式从 `rpm -ivh` 直接安装 el9 RPM 改为多阶段构建 `COPY --from=fdb`，从官方 FoundationDB Docker 镜像提取二进制文件，并单独下载头文件包。
+- `Storage/3fs/22fca04/24.03-lts-sp3/Dockerfile`: 将 FoundationDB 的安装方式从硬编码架构的 RPM 安装改为多阶段构建 `COPY --from=fdb`，从官方 multi-arch FoundationDB Docker 镜像复制客户端二进制文件和库文件。同时通过独立的 tarball 下载安装 FDB headers（无架构依赖）。
 
 ## 修复逻辑
-采用 CI 分析报告方向 2（使用 FoundationDB 官方二进制而非 RPM）的变体方案：利用 FoundationDB 官方发布的多架构 Docker 镜像 `foundationdb/foundationdb:7.3.77` 作为构建阶段，通过 `COPY --from=fdb` 直接提取 `fdbcli` 和 `libfdb_c.so` 二进制文件。头文件则从 GitHub Release 的 `fdb-headers` tarball 单独下载。此方案完全绕过了 RPM 依赖解析，彻底消除了 `libm.so.6(GLIBC_2.17)` 依赖不匹配问题。FoundationDB 官方 Docker 镜像为多架构（amd64/arm64）构建，其二进制文件已针对 aarch64 编译，与 openEuler 24.03 容器环境兼容。
+CI 分析报告指出根因是 Dockerfile 中 `curl ... foundationdb-clients-7.3.77-1.el9.aarch64.rpm && rpm -ivh` 硬编码了 aarch64 架构的 RPM 包，而 CI 构建目标为 x86_64。已从上游 `foundationdb/foundationdb:7.3.77` 标签验证：FoundationDB 7.3.77 未提供 x86_64 RPM 包（`foundationdb-clients-7.3.77-1.el9.x86_64.rpm` 返回 404），因此采用 CI 分析报告"方向 2"的方案——使用 FoundationDB 官方 Docker 镜像的多阶段构建方式（`FROM foundationdb/foundationdb:${FDB_VERSION} AS fdb` + `COPY --from=fdb`），利用 Docker 多架构镜像自动选择与目标平台匹配的二进制文件。FDB headers 通过架构无关的 tarball（`fdb-headers-${FDB_VERSION}.tar.gz`）下载安装，已从上游 7.3.77 获取验证可用。
 
 ## 潜在风险
-FoundationDB Docker 镜像未来版本可能更改内部文件路径（`/usr/bin/fdbcli`、`/usr/lib/libfdb_c.so`），若上游变更需同步更新 `COPY --from=fdb` 的源路径。当前 7.3.77 版本路径已验证正确。
+无。`COPY --from=fdb` 方式从官方 multi-arch FoundationDB Docker 镜像复制文件，自动适配目标架构，不依赖特定架构的 RPM 包。git clone 步骤未使用 `--depth 1`，commit hash checkout 不受影响。
