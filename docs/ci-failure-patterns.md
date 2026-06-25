@@ -142,6 +142,7 @@ RUN dnf install -y shadow python3-pip ...
 - PR #2264: `Bigdata/logstash/9.4.0`
 - PR #2206: `Bigdata/logstash/9.3.4`
 - PR #2163: `Bigdata/logstash/9.3.3`
+- PR #2743: `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile` — SeisSol 202103.Sumatra 的 CMakeLists.txt 无 `install()` 目标，`cm
 
 ---
 
