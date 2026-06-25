@@ -566,3 +566,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2712: `AI/xla/3b0ff80/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `git fetch --depth 1 origin ${VERSION}` 使用了 7 字
+
+---
+
+## 模式29：版本路径超层级
+
+**症状关键词**: Failed to check file path, image-version, os-version, format.py, _parse_image_info
+
+**根因**: - 失败位置: `eulerpublisher/update/container/app/format.py:101`（`_parse_image_info` 函数）
+- 失败原因: 新增 Dockerfile 路径为 `Cloud/openvelinux/velinux/1.0 velinux2/24.03-lts-sp3/Dockerfile`，相对于镜像根目录（`Cloud/openvelinux/`）包含三个目录层级（`velinux/`, `1.0 velinux2/`, `24.03-lts-sp3/`），但 CI 校验工具 `format.py` 期望严格的两级结构 `{imag
+
+**修复方法**: 将 `velinux/1.0+velinux2` 版本目录从三级扁平化为二级，使其符合 CI 校验要求的 `{image-version}/{os-version}/Dockerfile` 路径规范。
+
+**历史案例**:
+- PR #2751: `Cloud/openvelinux/velinux/1.0 velinux2/24.03-lts-sp3/Dockerfile` — 将 `velinux/1.0+velinux2` 版本目录从三级扁平化为二级，使其符合 CI 校验要求的 `{image
