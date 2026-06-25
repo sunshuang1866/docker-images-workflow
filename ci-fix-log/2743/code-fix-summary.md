@@ -1,17 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-SeisSol `v202103_Sumatra` 源码编译时 `cpu_set_t` 类型未识别，在 GCC 12 + openEuler 24.03 环境下需要 `_GNU_SOURCE` 宏才能暴露该类型。
+SeisSol `v202103.Sumatra` 上游源码 `src/Parallel/Pin.h` 使用了 `cpu_set_t` 类型但未显式包含 `<sched.h>`，在 GCC 12（openEuler 24.03-lts-sp3）上编译失败。
 
 ## 修改的文件
-- `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`: 在 SeisSol 的 cmake 配置步骤中添加 `-DCMAKE_CXX_FLAGS="-D_GNU_SOURCE"` 参数
+- `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile`: 在 `git clone` 后、`cmake` 前增加一行 `sed` 命令，向 `src/Parallel/Pin.h` 中插入 `#include <sched.h>`
 
 ## 修复逻辑
-CI 分析报告指出根因是 `src/Parallel/Pin.h` 和 `Pin.cpp` 使用了 `cpu_set_t`（CPU 亲和性 API 类型），但编译时未定义 `_GNU_SOURCE`，导致该类型不可见。经上游仓库 `https://raw.githubusercontent.com/SeisSol/SeisSol/202103_Sumatra/src/Parallel/Pin.h` 和 `Pin.cpp` 验证确认：Pin.h 只包含 `<string>` 但直接使用 `cpu_set_t` 声明类成员和方法签名；Pin.cpp 虽包含 `<sched.h>`，但它将 `#include "Pin.h"` 放在 `<sched.h>` 之前，导致 Pin.h 被处理时 `cpu_set_t` 尚未声明。
+已从上游 `https://raw.githubusercontent.com/SeisSol/SeisSol/202103_Sumatra/src/Parallel/Pin.h` 获取实际文件内容验证，确认该文件仅 `#include <string>` 而无 `<sched.h>`，导致 `cpu_set_t` 类型在 GCC 12 上未声明。通过 `sed` 在 `#include <string>` 之后追加 `#include <sched.h>`，正则匹配成功。这是最小化修复，不改变其他构建逻辑。
 
-采用分析报告中置信度最高的 Direction 1 修复方案：在 cmake 命令中追加 `-DCMAKE_CXX_FLAGS="-D_GNU_SOURCE"`，通过编译器宏定义使 `cpu_set_t` 在系统头文件中可见。此为最小侵入性修改，仅增加一行 cmake 参数，不改动上游源码结构。
-
-已从上游 `202103_Sumatra` tag 获取 `Pin.h` 和 `Pin.cpp` 验证，确认问题与此修复匹配。
+次要问题（Dockerfile 第 97 行 `$LD_LIBRARY_PATH` 自引用）：实际文件中已使用 `${LD_LIBRARY_PATH:-}` 格式，无需修改。
 
 ## 潜在风险
-- `_GNU_SOURCE` 宏可能影响其他编译单元的 GNU 扩展行为（如 `O_CLOEXEC`、`strerror_r` 返回值等），但 SeisSol 本身已使用 GNU 扩展 API（`sched_getaffinity`、`CPU_ZERO` 等），因此该宏符合项目实际依赖，风险极低。
+- 该 `sed` 命令依赖 `#include <string>` 这一确切行存在。若上游未来版本修改了该行的 include 顺序或内容，sed 将无法匹配并导致构建失败（`sed` 不报错但不会插入）。当前针对 `202103_Sumatra` tag 锁定版本，风险可控。
+- 该修复仅影响 `cpu_set_t` 的声明问题，不涉及任何运行时行为变更。
