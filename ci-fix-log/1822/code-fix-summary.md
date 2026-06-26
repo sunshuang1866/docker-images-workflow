@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施问题（infra-error），与 PR 变更无关。
+无需代码修改。CI 失败为 `infra-error`（基础设施问题），与本次 PR 的文档拼写修正无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-PR #1822 仅修改 `AI/cuda/README.md` 中一处文档拼写（"Start a cann instance" → "Start a cuda instance"），未涉及任何 Dockerfile、构建脚本、测试代码或 CI 配置。CI 日志不可用（`ci.logs` 为 `not available`），但此类纯文档变更不可能导致编译、构建、测试或 lint 失败。失败极大概率是 CI runner 临时故障、网络超时或资源不足等基础设施波动所致。建议触发 CI 重跑（re-run）观察是否恢复。
+本次 PR 仅修改了 `AI/cuda/README.md` 中的一处文本拼写（"Start a cann instance" → "Start a cuda instance"），属于纯文档修正，不会影响任何构建、编译、测试、lint 或镜像打包流程。CI 日志缺失，无法定位实际失败原因，但根因极大概率为 Jenkins runner 故障、网络波动等临时性基础设施问题。根据分析报告建议，应 **retrigger CI** 而非修改代码。
 
 ## 潜在风险
 无
