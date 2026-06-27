@@ -5,38 +5,42 @@
 - 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 模式19（证据不足 / 无法定位根因）
-- 新模式标题: —
-- 新模式症状关键词: —
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
-CI 日志不可用（`ci.logs` 字段标注为 `not available — analyze based on PR diff only`），无法提取任何错误信息。
+CI 日志不可用（`ci.logs` 明确标注为 `not available — analyze based on PR diff only`），无法获取任何构建或测试阶段的实际错误信息。
 
 ### 根因定位
-- 失败位置: 未知（无日志）
-- 失败原因: 无法确定。PR 仅修改了 `AI/cuda/README.md` 中的一个单词（`cann` → `cuda`），为纯文档变更，该改动本身极不可能导致任何构建或测试失败。
+- 失败位置: 未知（日志缺失）
+- 失败原因: 无法确定。CI 日志完全缺失，PR diff 仅包含 `AI/cuda/README.md` 中的一处文档拼写修正（`cann` → `cuda`），该变更本身不具备导致构建或测试失败的特征。
 
 ### 与 PR 变更的关联
-PR 变更内容：在 `AI/cuda/README.md` 第 33 行附近，将文档中的 `cann` 更正为 `cuda`（一字之差）。
-
-该改动仅影响 README 文档文本，不涉及 Dockerfile、构建脚本、依赖声明或任何可执行代码。**仅凭 diff 无法解释 CI 失败的原因**，失败极可能与本次 PR 改动无关，属于：
-1. CI 基础设施波动（runner 异常、网络超时等）
-2. 该目录/镜像原本就存在的构建问题（预存问题）
-3. CI 系统对此类 README-only PR 的预检规则（如 Copyright/SPDX 头检查、路径校验等）触发失败
+PR diff 仅修改了 `AI/cuda/README.md` 文件中的一行文本（将 "cann" 更正为 "cuda"），这是一个纯文档拼写修正，不涉及 Dockerfile、构建脚本、依赖版本或任何会影响容器构建流程的变更。该 diff 极不可能直接触发 CI 失败，失败更可能由以下原因之一导致：
+1. **CI 基础设施问题**（如 runner 异常、网络超时、磁盘空间不足）
+2. **与该 README 修改无关的下游构建 job 失败**（例如 x86-64 或 aarch64 架构的容器构建 job 因其他原因失败）
+3. **CI 预检/编排层问题**（如许可证检查、路径校验等与其他文件的交互）
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-重新触发 CI 运行（re-run），观察是否仍失败。若重跑后通过，则原失败为 CI 基础设施波动所致，无需修复代码。
+**CI 基础设施或下游 job 失败，与 PR 代码变更无关。** 该 PR 的 diff 仅为 README 文档修正，不具备引发构建失败的能力。建议：
+1. 获取 CI 运行的实际失败日志（非编排层 trigger job 日志），定位真正的失败 job 和错误信息
+2. 如果日志确认与 PR diff 无关，则重试 CI 运行即可
 
 ### 方向 2（置信度: 低）
-若重跑仍失败，需要获取完整的 CI 失败 job 日志，确认具体错误类型后再定修复方案。可能的待排查方向：
-- 检查 `AI/cuda/README.md` 是否缺少 Copyright + SPDX 声明头（参考模式17）
-- 检查 `AI/cuda/` 目录结构及 `image-list.yml` 条目是否符合 CI 校验规范（参考模式11）
+**Copyright / SPDX 声明检查失败（模式17）。** 若 `AI/cuda/README.md` 文件缺少 Copyright 和 SPDX-License-Identifier 头，且 CI 的 `check_package_license` 步骤因本次修改触发全量检查，可能导致失败。但无日志佐证此推断。
 
 ## 需要进一步确认的点
-1. **必须获取 CI 失败 job 的完整日志**：当前日志完全不可用，无法进行任何有意义的根因分析。
-2. 确认 CI 失败发生的具体阶段：是 Docker 镜像构建阶段、[Check] 容器启动测试阶段，还是预检（pre-check）阶段（如 license check、路径校验、image-list 完整性检查）。
-3. 确认 `AI/cuda/` 目录下是否有对应的 `image-list.yml` 条目，以及 README.md 是否包含正确的 Copyright/SPDX 头。
-4. 确认该 PR 所触发的 CI workflow 中是否有其他下游 job（如 x86-64、aarch64 架构构建 job）产生了日志但未被包含在当前分析上下文中。
+1. **获取 CI 实际失败 job 的完整日志**：当前提供的日志来自 trigger/编排层 job（显示成功），真正失败发生在下游的架构构建 job（如 `/job/x86-64/...` 或 `/job/aarch64/...`），需要拿到这些 job 的日志才能定位根因
+2. **确认 CI 失败的具体阶段**：失败发生在哪个阶段（checkout、pre-check、build、test、license check）？
+3. **确认是否是间歇性失败**：重试 CI 是否仍然失败？如果重试后通过，则确认为 infra-error，无需代码修复
+4. **检查是否有与本次 README 修改无关的并发变更**：是否存在其他 PR 合入导致的基线恶化？
+
+## 修复验证要求
+由于置信度为"低"且日志完全缺失，在采取任何修复行动之前，code-fixer 必须：
+1. 先获取并审查完整的下游构建 job 日志，确认实际错误信息
+2. 如果日志显示错误与本次 PR diff 无关（如 infra-error），则只需请求 CI 重试，无需修改代码
+3. 如果日志显示特定文件或步骤失败，再根据实际错误信息对照历史模式知识库确定修复方向
