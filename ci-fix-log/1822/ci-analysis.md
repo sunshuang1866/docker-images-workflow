@@ -4,39 +4,32 @@
 - PR: #1822 — 【轻量级 PR】：update: 更新文件 README.md
 - 失败类型: infra-error
 - 置信度: 低
-- 知识库匹配: 模式19
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 模式19（证据不足 / 无法定位根因）
 
 ## 根因分析
 
 ### 直接错误
-CI 日志未提供（`ci.logs` 字段标记为 `not available — analyze based on PR diff only`），无法获取任何实际错误信息。
+**无法确定** — CI 日志不可用（`(not available — analyze based on PR diff only)`），无法获取任何构建或测试阶段的错误输出。
 
 ### 根因定位
-- 失败位置: 未知
-- 失败原因: **证据不足，无法确定**。PR 仅修改了 `AI/cuda/README.md` 中的一处文档错字（`cann` → `cuda`），此变更不涉及构建脚本、Dockerfile、依赖声明或源代码，理论上不会触发任何 build-error / test-failure / lint-error / type-error / dependency-error / runtime-error。
+- 失败位置: 无法定位
+- 失败原因: **证据不足**。上下文仅提供了 PR diff，CI 日志完全缺失，无法确定失败发生在哪个阶段（构建/测试/预检），也无法确定具体错误信息。
 
 ### 与 PR 变更的关联
-PR diff 仅包含一行文档修正：`- Start a cann instance` → `+ Start a cuda instance`（`AI/cuda/README.md:33`）。该变更：
-1. 不涉及任何编译或测试逻辑，无法导致 CI 失败。
-2. 可能与 CI 基础设施问题（如 Runner 宕机、网络超时、Job 队列拥塞）或已被禁止提交的前置问题相关。
-3. 也可能是 CI 的元数据规范检查（如 Copyright/SPDX 声明、image-list.yml 路径校验等）因 README 文件缺少必要头部声明而触发失败，但无日志无法验证。
+PR 变更仅涉及 `AI/cuda/README.md` 中的一行文档修正（`Start a cann instance` → `Start a cuda instance`），属于拼写纠错（cann → cuda）。该改动本身极不可能触发构建或测试失败，但**无日志无法做出明确判断**。失败也可能由 CI 基础设施波动（网络、runner 状态）或其他与本次 PR 无关的预先存在问题引起。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-若 CI 失败系基础设施问题（Runner 异常、超时等），Code Fixer 无需处理，建议触发 re-run。
+若 CI 失败与 PR 无关（如 infra 波动），可尝试重新触发 CI（retrigger）。无需修改代码。
 
 ### 方向 2（置信度: 低）
-若 CI 有 README / 元数据预检步骤（如 Copyright + SPDX 头部检查，类似模式17），可能因为 `AI/cuda/README.md` 缺少规范的版权声明头导致失败。可检查该文件是否包含 `<!-- Copyright (c) Huawei Technologies Co., Ltd. ... -->` 和 `<!-- SPDX-License-Identifier: MulanPSL-2.0 -->` 头。
+若 CI 预检阶段对 README 文件有格式/元数据要求（如 Copyright/SPDX 头检查），且本次修改触发了该类检查，需参照模式17补充或修正文件头。但**无日志证据支持此推测**。
 
 ## 需要进一步确认的点
-1. **获取 CI 下游构建 job 的实际日志**：当前上下文中 `ci.logs` 不可用，必须从 CI 系统（Jenkins）拉取本次 PR #1822 对应 job 的完整日志，才能定位真实错误。
-2. **确认是否已存在的前置问题**：检查同目录或相关镜像路径的其他 PR 是否也有同样的 CI 失败，判断是否为历史遗留问题而非本次 PR 引入。
-3. **确认 CI 规范检查项**：查阅仓库 CI 规范文档，确认 README 文件是否需要包含 Copyright / SPDX 声明头，以及是否有其他元数据校验。
+1. **必须获取 CI 日志**：向 CI 系统查询 PR #1822 的实际失败日志，确认错误发生在哪个 stage（构建、测试、预检）以及具体报错信息。
+2. 确认 `AI/cuda/` 目录是否存在 `image-list.yml` 等元数据文件，以及 README 修改是否影响 CI 的目录完整性校验。
+3. 确认 CI 运行环境（runner）在此期间是否有已知的 infra 故障或维护窗口。
 
 ## 修复验证要求
-由于置信度为"低"且日志缺失，code-fixer 在实施任何修复前必须：
-1. 先从 CI 系统获取本次 PR 的完整失败日志，确认实际错误信息。
-2. 在明确错误根因后再进行针对性修复，不得基于当前报告中的推测方向直接修改代码。
+由于当前置信度为"低"且缺乏日志证据，**不得基于此报告进行任何代码修改**。code-fixer 必须先获取实际 CI 日志，重新分析后再执行修复。任何在无日志情况下提交的"修复"都可能引入不必要变更，甚至与实际错误无关。
