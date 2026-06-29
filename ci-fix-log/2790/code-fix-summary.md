@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施误报：appstore 预检流水线将根目录 README 文档文件纳入 appstore 路径校验范围，导致纯文档 PR 被错误标记为 lint-error。
+CI appstore 预检脚本误将仓库根目录的 README 文件纳入 appstore 路径校验范围，产生 `[Path Error]` 误报。无需修改 `README.en.md` 或 `README.md`。
 
 ## 修改的文件
-无需代码修改。
+无 — README 文件本身内容正确，不存在需要修复的问题。
 
 ## 修复逻辑
-本次 CI 失败属于 **infra-error**（CI 基础设施问题）。PR #2790 仅修改了 `README.en.md` 和 `README.md` 的文档内容（更新 supported tags 列表），属于纯文档更新。失败由 CI 的 appstore 预检脚本 `eulerpublisher/update/container/app/update.py` 触发——该脚本未对仓库根层级文档文件做豁免处理，导致根目录 README 被纳入 appstore 发布路径校验。这与历史案例 PR #2512（`.claude/` 目录下 README 文件被误检）模式一致。
+CI 失败根因是 `eulerpublisher/update/container/app/update.py:273` 的 appstore 发布规范预检逻辑未排除仓库根目录的文档文件（`README.md`、`README.en.md`），这些文件不应受 appstore 路径规则约束。这与历史 PR #2512 中 `.claude/` 目录 README 文件的处理模式一致。
 
-PR 涉及的 `README.en.md` 和 `README.md` 文件本身内容无任何问题，无需修改。真正需要修复的是 CI 预检脚本中的文件过滤逻辑，但该文件不在本次 PR 变更范围之内。
+修复应在 `update.py` 中添加对根层级非应用镜像文档文件的豁免逻辑，但该文件不在本次 PR 的 `changed_files` 范围内（仅包含 `README.en.md` 和 `README.md`），依据修复约束不得修改。README 文件本身无任何内容错误，无需改动。
 
 ## 潜在风险
-无。不涉及代码修改，PR 的 README 内容变更安全。
+无 — 本次未对任何文件做修改，不会引入风险。若需彻底解决此 CI 误报，需由有权修改 `eulerpublisher` 的维护者在 `update.py` 中添加根目录文档文件的路径豁免规则。
