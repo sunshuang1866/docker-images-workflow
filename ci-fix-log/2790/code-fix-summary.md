@@ -1,19 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI appstore 发布规范检查 (`update.py`) 对根级文档文件 (`README.md`, `README.en.md`) 触发路径校验失败，属于 CI 基础设施问题，无法通过修改 PR 涉及的源文件解决。
+无代码修改。本次 CI 失败为基础设施错误（infra-error）：appstore 发布规范预检工具对根目录文档文件（`README.md`、`README.en.md`）进行了不应执行的路径校验，这些文件是本仓库的项目顶层文档，不应被纳入应用镜像路径规范的校验范围。
 
 ## 修改的文件
-- 无。`README.md` 和 `README.en.md` 的内容本身无语法或格式错误，修改它们无法解决 CI 路径校验基础设施层面的问题。
+无。PR 修改的文件（`README.md`、`README.en.md`）内容合法正确，无需修改。
 
 ## 修复逻辑
-CI 失败根因：PR #2790 仅修改了仓库根目录下的 `README.md` 和 `README.en.md`（纯文档更新），但 CI pipeline 未区分文档类 PR 与镜像发布类 PR，统一执行了 appstore 发布规范预检。`update.py` 中的路径校验要求变更文件符合 `{category}/{image}/{version}/{os-version}/Dockerfile` 目录结构，根级 README 文件不满足此规则，因此报 `[Path Error]` 导致 `FAILURE`。
+CI 分析报告明确指出：PR #2790 仅更新了两个根目录文档文件的 Supported Tags 列表，改动本身合法正确。失败原因是 CI 流水线中的 `eulerpublisher/update/container/app/update.py:273` 对 PR 中所有变更文件无条件执行 appstore 镜像路径校验（期望路径为 `{category}/{image}/{version}/{os-version}/` 层级结构），根目录文档文件（`README.md`、`README.en.md`）天然不满足该规范，被误判为 `[Path Error]`。
 
-由于 `pr.changed_files` 仅包含 `README.en.md` 和 `README.md`，而实际修复需要调整 CI pipeline 触发条件或 `update.py` 中的白名单逻辑，均超出允许修改的文件范围。强行修改 README 内容无法绕过路径校验规则，属于无效修复。
+此为 CI 校验逻辑过度覆盖问题，属于基础设施层面错误，不应通过修改 PR 文件来规避。真正需要修复的是 CI 流水线配置：
+- 在 `update.py` 中将根目录项目文档文件（如 `README.md`、`README.en.md`、`.claude/README.md` 等）加入豁免名单
+- 或在上游 trigger 流水线中增加判断：若 PR 变更仅为文档类文件则跳过 appstore 校验步骤
 
-**建议的修复方向**（需由 CI 管理员执行）：
-1. 在 CI pipeline 中添加文档类 PR 过滤逻辑（仅变更根级 `README.md`、`README.en.md`、`LICENSE` 等文件时跳过 appstore 校验）
-2. 在 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑中添加根级文档文件白名单
+由于上述修复位置不在 `pr.changed_files` 允许修改的文件范围内，本次不进行代码修改。
 
 ## 潜在风险
-无。未修改任何源文件。
+无。本摘要未修改任何源码文件。
