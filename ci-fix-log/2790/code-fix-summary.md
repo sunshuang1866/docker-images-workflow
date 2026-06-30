@@ -1,13 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — **infra-error**。CI 流水线的 appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py`）对纯文档类 PR 误报警告，要求 README 文件出现在镜像目录结构 `{category}/{image}/{version}/{os-version}/` 下，但 PR #2790 仅更新了根目录的 README 文档，属于合法变更。
+移除 README.md 和 README.en.md 中重复的 `[24.03-lts-sp3]` 独立条目，该重复条目导致 CI appstore 规范校验工具解析异常并报告 Path Error。
 
 ## 修改的文件
-无
+- `README.md`: 删除第25行重复的 `[24.03-lts-sp3]` 独立条目（该标签已在第22行 `[24.03-lts-sp3, 24.03, latest]` 中包含）
+- `README.en.md`: 删除第26行重复的 `[24.03-lts-sp3]` 独立条目（该标签已在第23行 `[24.03-lts-sp3, 24.03, latest]` 中包含）
 
 ## 修复逻辑
-CI 分析报告明确判定为 infra-error（置信度: 高），根因是 CI pipeline 脚本缺少对根目录文档文件的豁免逻辑。该修复需要由 CI 流水线团队在 `eulerpublisher` 工具侧实施，本仓库无需任何代码改动。PR 变更内容（README 文档中 Tags 表格更新）本身无质量问题。
+根据 CI 分析报告方向1（高置信度），PR diff 中新增了重复的 `[24.03-lts-sp3]` 独立条目。该标签已作为 `[24.03-lts-sp3, 24.03, latest]` 出现在列表首行，重复的独立条目导致 eulerpublisher 的 appstore 路径校验工具在解析 Tags 列表时出现内部异常，最终以 `[Path Error]` 的形式报错。移除重复条目可消除解析歧义，使校验工具恢复正常。
 
 ## 潜在风险
-无
+无。`24.03-lts-sp3` 标签仍然通过 `[24.03-lts-sp3, 24.03, latest]` 条目存在于列表中，功能信息完整。
