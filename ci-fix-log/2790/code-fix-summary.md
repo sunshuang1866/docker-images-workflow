@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施误报：appstore 发布规范预检工具对纯文档 PR（仅修改根级 README.md / README.en.md）报路径错误，实际 README 文件内容正确，无需代码修改。
+CI Appstore 发布规范预检脚本对纯文档类 PR 产生误报，无需修改任何源文件。
 
 ## 修改的文件
-无。README.en.md 和 README.md 的内容更新（新增 Tags 条目）是正确的，不属于镜像发布路径下的文件变更，CI 预检工具不应将其纳入 appstore 发布规范检查范围。
+无（本次为 infra-error，CI 基础设施误报）
 
 ## 修复逻辑
-分析报告明确指出这是 CI appstore 预检工具（`eulerpublisher/update/container/app/update.py`）的**误报**，属于 infra-error 类型。PR 仅包含两个根级文档文件的变化，无任何 Dockerfile、meta.yml 或 image-info.yml 等镜像发布相关文件变更。根本解决方案应在 CI 流水线中添加对纯文档 PR 的跳过判断逻辑（当 PR 仅修改根级 `.md` 文件时跳过 appstore 发布规范检查），但该文件不在本 PR 的允许修改范围内。README 文件本身的内容和位置均符合仓库规范，强行将其移入子目录或修改内容来绕过 CI 检查是不合理的。建议由管理员手动豁免该检查后合并。
+CI 分析报告明确指出该失败并非代码或配置错误，而是 CI 检查工具 `eulerpublisher/update/container/app/update.py` 对仅修改根目录 README 文件的纯文档 PR 产生的误报。PR #2790 仅更新了 `README.md` 和 `README.en.md` 中的镜像可用 Tags 列表，不涉及任何 Dockerfile、meta.yml、image-info.yml 等镜像构建文件。CI 的 Appstore 发布规范预检将根目录的纯文档变更纳入了镜像发布路径校验流程，报告 `README.en.md` 的 `.en` 后缀与预期路径 `/README.md` 不匹配，并连带标记 `README.md` 为 FAILURE。
+
+该问题需要在 CI 触发层面修复 — 对仅修改根目录文件（非镜像目录下文件）的 PR 直接跳过 Appstore 发布规范预检步骤，或在 `update.py` 中增加文档类文件的豁免逻辑。当前 PR 的 README 文件内容正确，无需任何代码修改。
 
 ## 潜在风险
-无。未对任何代码文件进行修改。
+无 — 本次未修改任何源代码文件。
