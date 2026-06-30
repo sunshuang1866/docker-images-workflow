@@ -2,31 +2,36 @@
 
 ## 基本信息
 - PR: #1822 — 【轻量级 PR】：update: 更新文件 README.md
-- 失败类型: infra-error（证据不足）
+- 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 模式19
-- 新模式标题: (无)
-- 新模式症状关键词: (无)
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
-（CI 日志不可用——`ci.logs` 字段明确标注 `not available — analyze based on PR diff only`，无法获取任何错误信息）
+CI 日志不可用，无法提取错误信息。
 
 ### 根因定位
-- 失败位置: 未知（日志缺失）
-- 失败原因: 无法确定。CI 日志完全缺失，仅能基于 PR diff 推断 PR 意图。
+- 失败位置: 无法确定（日志缺失）
+- 失败原因: 无法确定（日志缺失）。PR 仅修改了 `AI/cuda/README.md` 中的一个词（`cann` → `cuda`），属于纯文档修正，不涉及任何 Dockerfile、构建脚本或代码逻辑变更。CI 失败极大概率与此 PR 无关。
 
 ### 与 PR 变更的关联
-PR 仅修改了 `AI/cuda/README.md` 第 33 行，将一个单词从 `cann` 更正为 `cuda`（"Start a cann instance" → "Start a cuda instance"）。这是一次纯文档修正，共 1 行新增、1 行删除，不涉及任何 Dockerfile、构建脚本或源代码变更。这种类型的改动**极不可能**直接触发构建或测试失败，CI 失败极大概率为基础设施层面的偶发问题或并发任务中的其他 PR 合并冲突导致。
+PR diff 仅涉及 `AI/cuda/README.md:33` 的一处文案修正（"Start a cann instance" → "Start a cuda instance"），变更内容不会触发任何构建、测试或校验流程。CI 失败应为预存在的问题或基础设施异常，与本次 PR 无直接因果关系。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-此为纯文档修正（README 错别字修复），不涉及镜像构建逻辑，CI 失败大概率与本次 PR 无关。建议触发 **retry / rebuild** 重新运行 CI Job，观察是否可正常通过。若重试后仍失败，需获取失败 job 的完整日志后重新分析。
+重新触发 CI 运行。由于 PR 变更是纯文档修正，CI 失败大概率是偶发性基础设施问题（如 runner 异常、网络波动、上游服务不可用等），重试可能直接通过。
+
+### 方向 2（置信度: 低）
+若重试后仍然失败，需获取完整的 CI job 日志（包括下游架构构建 job），排查是否存在：
+- 其他并发 PR 合并导致的基础镜像/依赖变更
+- CI 流水线本身的配置问题
 
 ## 需要进一步确认的点
-1. **获取 CI 失败日志**：当前 `ci.logs` 为 `not available`，必须获取 `jenkins, id=0` 对应的实际 Job 日志（或 workflow run 的完整输出），才能定位真正的错误原因
-2. 确认 CI 失败是发生在 `AI/cuda` 的构建 job 还是其他与本次 PR 无关的 job
-3. 确认是否存在 CI 基础设施问题（如 runner 资源不足、网络超时、磁盘满等）
-4. 参考历史案例 PR #2308（`AI/diskann/README.md` — 纯文档修正，同样日志缺失），此类 README-only PR 的 CI 失败通常为假阳性，重试可解决
+1. 获取本次 CI 运行的实际失败日志（当前上下文仅有 `"logs": "(not available — analyze based on PR diff only)"`，无法定位任何具体错误）
+2. 确认该 PR 是否触发了多个 CI job，以及具体是哪个 job 失败（如架构专属的 x86-64 或 aarch64 构建 job）
+3. 检查同期其他 PR 的 CI 状态，判断是否为系统性 CI 问题
+4. 若只有当前 PR 失败，通过 Git 仓库 webhook/history 确认 CI 流水线近期是否有配置变更
