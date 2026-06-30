@@ -1,14 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-移除 README.md 和 README.en.md 中重复的 `[24.03-lts-sp3]` 独立条目，该重复条目导致 CI appstore 规范校验工具解析异常并报告 Path Error。
+CI appstore 发布规范预检（`update.py:273`）对纯文档 PR（仅修改根目录 README 文件）误报路径校验失败，属于 CI 基础设施问题，PR 文件本身无需修改。
 
 ## 修改的文件
-- `README.md`: 删除第25行重复的 `[24.03-lts-sp3]` 独立条目（该标签已在第22行 `[24.03-lts-sp3, 24.03, latest]` 中包含）
-- `README.en.md`: 删除第26行重复的 `[24.03-lts-sp3]` 独立条目（该标签已在第23行 `[24.03-lts-sp3, 24.03, latest]` 中包含）
+无。`README.en.md` 和 `README.md` 内容正确，不需要修改。
 
 ## 修复逻辑
-根据 CI 分析报告方向1（高置信度），PR diff 中新增了重复的 `[24.03-lts-sp3]` 独立条目。该标签已作为 `[24.03-lts-sp3, 24.03, latest]` 出现在列表首行，重复的独立条目导致 eulerpublisher 的 appstore 路径校验工具在解析 Tags 列表时出现内部异常，最终以 `[Path Error]` 的形式报错。移除重复条目可消除解析歧义，使校验工具恢复正常。
+该失败是 CI 基础设施层面的问题：`eulerpublisher/update/container/app/update.py` 中的 appstore 路径校验逻辑对所有 PR 变更文件执行路径合规检查，期望路径格式为 `{category}/{image-name}/{version}/{os-version}/Dockerfile`，但根目录 `README.md` 和 `README.en.md` 是文档文件，不属于镜像构建文件，不应参与此检查。该 PR (#2790) 仅更新了 README 中的可用镜像 Tags 列表，不涉及任何镜像构建变更，因此无需对 PR 文件做任何代码修改。正确的修复应在 CI 基础设施端（`update.py`）将根目录文档文件加入白名单放行，或对纯文档 PR 跳过 appstore 检查。
 
 ## 潜在风险
-无。`24.03-lts-sp3` 标签仍然通过 `[24.03-lts-sp3, 24.03, latest]` 条目存在于列表中，功能信息完整。
+无（无代码变更）。
