@@ -1,21 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI appstore 发布规范预检错误拒绝了纯文档 PR（仅修改根目录 README.md 和 README.en.md），属于 CI 基础设施策略问题，非源码缺陷。
+CI appstore 发布规范预检工具错误地将根目录 README 文档变更判定为路径校验失败——属于 CI 基础设施流程设计问题，无需修改 PR 中的源代码文件。
 
 ## 修改的文件
-- 无代码修改。
+- 无代码修改。`README.en.md` 和 `README.md` 内容本身没有问题（纯文档更新，新增版本 tags 条目），无需改动。
 
 ## 修复逻辑
-该 PR (#2790) 仅更新了仓库根目录下的 `README.md` 和 `README.en.md` 中的基础镜像 Tags 列表（新增 `24.03-lts-sp3`、`25.09` 等），属于纯文档更新。CI 的 appstore 预检流程（`eulerpublisher/update/container/app/update.py`）要求变更文件必须位于 appstore 合法目录路径（如 `Bigdata/`、`AI/` 等）下，根目录 README 文件不在该白名单中，导致检查失败。
-
-根因分析报告明确指出：「这不是代码错误，而是 CI 策略冲突——CI 的 appstore 预检流程不适合纯文档更新的 PR」。README 文件内容本身完全正确，无需修改。
-
-此问题需要在 CI 侧解决：
-1. 在 `update.py` 中为根目录文档文件添加白名单豁免
-2. 或为纯文档 PR 设置免检通道
-
-由于 CI 配置文件不在本 PR 的 `changed_files` 范围内（仅 `README.en.md` 和 `README.md`），无法通过修改 PR 文件解决此 CI 失败。
+CI 失败分析报告确认：PR 变更内容（更新根目录 `README.en.md` 和 `README.md` 中的基础镜像 tags 表格）正确无误。失败根因是 CI 流水线 `eulerpublisher/update/container/app/update.py` 的 appstore 发布规范预检未豁免根目录 README 文档文件，导致路径格式校验误报。正确的修复方向是在 CI 配置层面调整触发规则，使仅修改根目录文档文件的 PR 不触发 appstore 校验流水线，或在 `update.py` 中增加对根目录 README 的豁免逻辑——但这些修改不在当前 PR 允许的文件范围内，也不应由代码修复 Agent 直接操作 CI 管道文件。
 
 ## 潜在风险
-无。README 文件内容正确，未做任何代码变更，不会引入新风险。
+无——未进行任何代码修改，不会引入新问题。
