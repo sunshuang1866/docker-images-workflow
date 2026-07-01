@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需修改源代码。CI appstore 预检工具 (`eulerpublisher/update/container/app/update.py`) 错误地将仓库根目录的 `README.md` 和 `README.en.md` 纳入应用镜像路径校验范围，导致误报 `[Path Error]`。
+无需代码修改。CI 失败为 appstore 发布规范路径校验问题，非 PR 内容变更引入的回归，且根因在 `eulerpublisher/update/container/app/update.py` 的路径比对逻辑/白名单配置中，不在 PR 允许修改的文件范围内。
 
 ## 修改的文件
-- 无（CI 基础设施问题，不在源代码修改范围内）
+无。
 
 ## 修复逻辑
-分析报告明确将此失败归类为 `infra-error`，根因在 CI 工具 `update.py` 的校验逻辑中。该文件不在 PR 变更文件列表（`['README.en.md', 'README.md']`）内，且本次 PR 仅修改了这两个文档文件的内容，未引入任何代码缺陷。修复需要修改 CI 工具本身，排除仓库根目录级文档文件，但这超出了本修复流程的权限范围——按照任务指令，`infra-error` 情况下不应强行修改代码。此失败应由 CI 平台管理员修复校验脚本后重新触发。
+- CI 检查脚本 (`update.py:273`) 将 `README.en.md` 和 `README.md` 均标记为路径不合法。
+- `README.en.md` 不在 appstore 预期根级文件白名单中，`README.md` 路径本应合法却被标记 FAILURE（疑似前导 `/` 路径比对不一致）。
+- 该失败不是由本次 PR 的内容变更（更新 Tags 列表）触发，而是 CI 对已存在文件的合规性校验。
+- PR 仅允许修改 `README.en.md` 和 `README.md`，其内容与路径校验无关，修改文件内容无法解决路径检查失败。
+- 根因修复需在 `eulerpublisher/update/container/app/update.py` 中将 `README.en.md` 加入白名单，或校正 `README.md` 的路径比对逻辑（如处理前导 `/`），这些文件不在 PR 变更列表中，不可修改。
 
 ## 潜在风险
-无（未修改任何代码）
+若强行对 README 文件内容做无意义修改（如重命名/合并文件），会偏离 PR 原始意图并引入新的合规性问题。建议由 CI 维护者修复 `update.py` 中的路径校验逻辑。
