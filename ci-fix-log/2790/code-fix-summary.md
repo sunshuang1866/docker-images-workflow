@@ -1,14 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI appstore 预检工具检测到 PR 修改了 `README.en.md`，该文件不在 appstore 规范允许的变更路径（仅 `/README.md`）中，触发 Path Error 校验失败。
+无需代码修改。CI 失败为 **infra-error**，由 CI 工具 `eulerpublisher/update/container/app/update.py` 的 appstore 路径校验逻辑导致，与企业仓库代码无关。
 
 ## 修改的文件
-- `README.en.md`: 撤销 PR 对该文件的修改，恢复被删除的 `[24.03-lts-sp3]` 条目行，使文件回到修改前状态
-- `README.md`: 保持不变（已正确移除了重复的 `24.03-lts-sp3` 条目）
+无。PR #2790 改动的 `README.md` 和 `README.en.md` 内容正确（仅更新可用镜像 Tags 列表），无需修改。
 
 ## 修复逻辑
-CI 分析报告指出 appstore 规范仅预期变更 `/README.md`，`README.en.md` 不属于允许变更路径。PR 同时修改了两个文件来移除重复的 tag 条目，导致校验失败。修复方案为：仅保留 `README.md` 的变更（移除重复条目），撤销 `README.en.md` 的变更，使英文 README 恢复原样。这样 CI 检查时仅检测到 `/README.md` 有变更，不再触发路径错误。
+CI 失败根因：`update.py:273` 的 appstore 发布规范预检器未区分「仓库根目录的项目级 README」与「具体镜像目录的 appstore README」，将所有被修改的 README 文件无差别纳入 appstore 路径检查。`README.md` 和 `README.en.md` 位于仓库根目录，不隶属于任何镜像目录，不应受镜像路径规范 `{category}/{image-name}/.../README.md` 约束。
+
+修复应在 CI 工具 `update.py` 中增加根目录级文件豁免规则，而非修改本仓库代码。由于 `update.py` 不在 PR 变更文件列表 `['README.en.md', 'README.md']` 中，且本仓库代码本身无缺陷，不做代码修改。
 
 ## 潜在风险
-无。`README.en.md` 中恢复了重复的 `24.03-lts-sp3` 条目不影响功能，仅为文档的冗余条目。后续如需同步清理英文 README，可通过单独的文档 PR 处理。
+无。本仓库代码无需任何改动，风险在于 CI 基础设施侧 `update.py` 需独立修复以豁免根目录级文档文件。
