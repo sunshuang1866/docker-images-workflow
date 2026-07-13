@@ -2,50 +2,39 @@
 
 ## 基本信息
 - PR: #3108 — chore(mesos): add openEuler 24.03-LTS-SP4 support
-- 失败类型: dependency-error
+- 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式02
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: Apache CDN 网络不可达
+- 新模式症状关键词: Connection timed out, downloads.apache.org, wget, Network is unreachable, exit code: 4
 
 ## 根因分析
 
 ### 直接错误
 ```
-#9 [ 3/10] RUN wget https://www.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz ...
-#9 0.162 --2026-07-13 08:15:08--  https://www.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz
-#9 0.426 HTTP request sent, awaiting response... 301 Moved Permanently
-#9 0.722 Location: https://github.com/openssl/openssl/releases/download/openssl-1.0.2k/openssl-1.0.2k.tar.gz [following]
-#9 0.858 HTTP request sent, awaiting response... 404 Not Found
-#9 1.184 2026-07-13 08:15:09 ERROR 404: Not Found.
-#9 ERROR: process "/bin/sh -c wget https://www.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz && ..." did not complete successfully: exit code: 8
+#12 0.110 Connecting to downloads.apache.org (downloads.apache.org)|95.216.224.44|:443... failed: Connection timed out.
+#12 136.3 Connecting to downloads.apache.org (downloads.apache.org)|88.99.208.237|:443... failed: Connection timed out.
+#12 271.5 Connecting to downloads.apache.org (downloads.apache.org)|2a01:4f8:10a:39da::2|:443... failed: Network is unreachable.
+#12 271.5 Connecting to downloads.apache.org (downloads.apache.org)|2a01:4f9:2b:1cc2::2|:443... failed: Network is unreachable.
+#12 ERROR: process "/bin/sh -c wget https://downloads.apache.org/mesos/${VERSION}/mesos-${VERSION}.tar.gz && tar -zxf mesos-${VERSION}.tar.gz" did not complete successfully: exit code: 4
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile:20-24`
-- 失败原因: `https://www.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz` 返回 HTTP 301 重定向至 `https://github.com/openssl/openssl/releases/download/openssl-1.0.2k/openssl-1.0.2k.tar.gz`，该 GitHub Release 上的旧版本制品已不存在（404 Not Found），导致 wget 下载失败。
+- 失败位置: `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile:42`（`wget` 步骤）
+- 失败原因: CI 构建节点无法连接 `downloads.apache.org` 的所有 IPv4/IPv6 地址（95.216.224.44、88.99.208.237 超时；IPv6 地址网络不可达），导致 wget 下载 Mesos 1.11.0 源码包失败（exit code 4）。
 
 ### 与 PR 变更的关联
-PR 新增了 `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile`，其中第 20 行硬编码了 `https://www.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz` 作为 OpenSSL 1.0.2k 的下载地址。该 URL 在上游已失效（openssl.org 将旧版本重定向到 GitHub Releases，而 GitHub 上的 release asset 已被移除），导致 `[ 3/10]` 构建步骤失败。此失败由 PR 代码直接触发。
+与 PR 变更**无关**。该 PR 新增了 mesos 1.11.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，Dockerfile 中引用的下载 URL `https://downloads.apache.org/mesos/1.11.0/mesos-1.11.0.tar.gz` 格式正确。同时，同一构建中的前一步（Python 2.7.18 构建步骤，step #11）成功从 `www.openssl.org` 和 `www.python.org` 完成下载，证明 CI 节点具备基本出网能力，问题仅出现在 Apache CDN 域名 `downloads.apache.org` 的连接上。故障属于 CI 基础设施网络层面的偶发性问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 OpenSSL 1.0.2k 的下载源切换为其他稳定的归档镜像源（如 `https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_0_2k.tar.gz`，即 GitHub 的 自动生成的源码归档包，而非 Release 附件），或使用 OpenSSL 官方 FTP 归档（如 `ftp://ftp.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz`）。
+### 方向 1（置信度: 中）
+**直接重试触发 CI 重新构建**。由于前一步 Python/OpenSSL 下载正常，该问题大概率是 `downloads.apache.org` CDN 节点在 CI 构建时刻出现的临时网络故障。重新触发 Pipeline 有很大概率通过。
 
-### 方向 2（置信度: 中）
-如果 openEuler 24.03-LTS-SP4 的 yum 仓库提供了兼容版本的 openssl 开发包，可以考虑用系统包管理器安装（如 `yum install -y openssl-devel`）替代从源码编译 OpenSSL 1.0.2k。但需要注意 Mesos 1.11.0 是否强制要求此特定版本的 OpenSSL。
+### 方向 2（置信度: 低）
+**更换下载源**。若重试后仍然失败，说明 CI 构建网络对 `downloads.apache.org` 存在持续性阻断。可将下载源从 `downloads.apache.org` 切换为 Apache 归档站 `archive.apache.org`（URL: `https://archive.apache.org/dist/mesos/${VERSION}/mesos-${VERSION}.tar.gz`），该域名通常具有更好的全网可达性。
 
 ## 需要进一步确认的点
-1. 确认 `ftp.openssl.org` 或 `https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_0_2k.tar.gz`（GitHub 源码归档）是否仍提供 OpenSSL 1.0.2k 源码包。
-2. 确认 Mesos 1.11.0 能否接受其他 OpenSSL 1.0.2 小版本（如 1.0.2u）替代 1.0.2k。
-3. 确认 openEuler 24.03-LTS-SP4 的默认 OpenSSL 版本（日志显示安装了 `openssl-1:3.5.6-4`）能否满足 Mesos 1.11.0 构建要求，如可则无需从源码编译 OpenSSL 1.0.2k。
-4. 日志中还有两个 BuildKit 警告：
-   - `UndefinedVar: Usage of undefined variable '$LD_LIBRARY_PATH' (line 41)` — Dockerfile 第 41 行 `ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:...` 自引用未定义变量。
-   - `LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 51)` — Dockerfile 第 51 行 `ENV PATH $PATH:/mesos/bin` 使用了旧式格式。
-   虽然这些警告未直接导致构建失败，但建议一并修复。
-
-## 修复验证要求
-1. code-fixer 必须验证所选的替代下载源（GitHub archive tag 或 ftp.openssl.org）中确实存在 `openssl-1.0.2k.tar.gz` 文件，且 SHA256 校验和与 OpenSSL 官方公布的 `6dd94765d28b55e9554dee771796957154470372156d6d3c2382d5a6795a0c8f` 一致。
-2. 如替换为系统 openssl-devel，需验证 Mesos 1.11.0 的 `./configure` 能正确检测并使用系统 OpenSSL。
-3. 如替换为其他 OpenSSL 小版本（如 1.0.2u），需同步修改 Dockerfile 中对应目录名和 URL，并验证 Mesos 构建通过。
+1. 重新触发 Pipeline 后是否仍然失败——如果重试通过，则确认为临时网络抖动，无需修改代码。
+2. CI 构建节点所在网络环境对 `downloads.apache.org` 各 IP 的连通性（可能需要运维排查防火墙/代理策略）。
+3. `archive.apache.org` 域名在 CI 环境中是否可达（可用作备选下载源）。
