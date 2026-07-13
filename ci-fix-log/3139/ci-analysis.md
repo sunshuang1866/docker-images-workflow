@@ -5,47 +5,58 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: PyPI镜像下载超时
-- 新模式症状关键词: Read timed out, ReadTimeoutError, mirrors.aliyun.com, pip install
+- 新模式标题: 镜像站网络超时
+- 新模式症状关键词: ReadTimeoutError, pip install, mirrors.aliyun.com, Read timed out, large wheel download
 
 ## 根因分析
 
 ### 直接错误
 ```
+#12 257.5 pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='mirrors.aliyun.com', port=443): Read timed out.
+...
 #12 257.5 ERROR: Exception:
 #12 257.5 Traceback (most recent call last):
 #12 257.5   File "/usr/lib/python3.11/site-packages/pip/_vendor/urllib3/response.py", line 452, in _error_catcher
+#12 257.5     yield
 #12 257.5 TimeoutError: The read operation timed out
-#12 257.5 ...
-#12 257.5 pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='mirrors.aliyun.com', port=443): Read timed out.
-#12 ERROR: process "/bin/sh -c npm config set registry https://registry.npmmirror.com/ &&     npm i &&     npm run build &&     pip install pydantic -i https://mirrors.aliyun.com/pypi/simple/ &&     pip install -r backend/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ &&     pip install fastapi_sso \ttransformers \taccelerate -i https://mirrors.aliyun.com/pypi/simple/" did not complete successfully: exit code: 2
+...
+#12 ERROR: process "/bin/sh -c npm config set registry https://registry.npmmirror.com/ && ... pip install -r backend/requirements.txt ... accelerate -i https://mirrors.aliyun.com/pypi/simple/" did not complete successfully: exit code: 2
 ```
 
-下载进度中断点：
 ```
-#12 257.5      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸  353.4/366.2 MB 23.0 MB/s eta 0:00:01
+------                                              
+Dockerfile:28
+--------------------
+  27 |     
+  28 | >>> RUN npm config set registry https://registry.npmmirror.com/ && \
+  29 | >>>     npm i && \
+  30 | >>>     npm run build && \
+  31 | >>>     pip install pydantic -i https://mirrors.aliyun.com/pypi/simple/ && \
+  32 | >>>     pip install -r backend/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && \
+  33 | >>>     pip install fastapi_sso \
+  34 | >>> 	transformers \
+  35 | >>> 	accelerate -i https://mirrors.aliyun.com/pypi/simple/
+  36 |     RUN pip uninstall litellm -y
+--------------------
+ERROR: failed to solve: process "/bin/sh -c ..." did not complete successfully: exit code: 2
 ```
-正在下载的包为 `nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_x86_64.whl`（366.2 MB），仅剩约 12.8 MB 时 TCP 读取超时。
 
 ### 根因定位
-- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`（`pip install -r backend/requirements.txt` 步骤）
-- 失败原因: CI 构建环境通过 `mirrors.aliyun.com` PyPI 镜像站下载 `nvidia-cudnn-cu13`（366.2 MB，torch 的间接依赖）时发生 TCP 读取超时，pip 无法完成依赖解析与安装。
+- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`（pip install 步骤）
+- 失败原因: pip 通过 `mirrors.aliyun.com` 镜像站下载 `nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_x86_64.whl`（366.2 MB 大文件）时发生 TCP 读超时（`Read timed out`）。下载进度停在 353.4/366.2 MB 后连接中断，pip 抛出 `ReadTimeoutError` 导致整个 RUN 指令失败。
 
 ### 与 PR 变更的关联
-与 PR 代码变更**无直接关联**。PR 新增了一个完全新的 Dockerfile（首次构建），失败是 CI 基础设施层面的网络问题（镜像站连接超时），而非 Dockerfile 语法或逻辑错误。npm 构建阶段（`npm i && npm run build`）已成功完成，pip 安装前期大量包下载正常，仅最后一个大包 `nvidia-cudnn-cu13`（366.2 MB）下载中断。
+**与 PR 变更无关。** 本次 PR 仅为 open-webui 新增 24.03-LTS-SP4 版本的 Dockerfile 及配套元数据更新，构建命令结构和依赖声明均正确。失败是 CI 构建环境中 pip 从阿里云镜像站下载大型 wheel 包（nvidia_cudnn_cu13, 366MB）时网络连接超时所致，属于基础设施网络波动问题，非代码缺陷。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**重试即可**。该失败为网络瞬断所致，属于偶发性 infra-error。Code Fixer 无需修改代码，触发 CI 重跑大概率可通过。
+重新触发 CI 构建。网络超时通常是暂时性的，下次构建时镜像站连接可能恢复正常。如果大型 wheel 包能完整下载，构建即可通过。
 
 ### 方向 2（置信度: 低）
-**为 pip install 添加重试机制**。在 Dockerfile 的 `pip install` 命令中增加 `--retries 5 --timeout 300` 参数，提高下载健壮性。但这不能根本解决网络问题，仅能降低偶发超时的影响。
-
-### 方向 3（置信度: 低）
-**更换 PyPI 镜像源**。将 `mirrors.aliyun.com` 更换为其他镜像（如 `mirrors.tuna.tsinghua.edu.cn` 或官方 `pypi.org`），但不同镜像在不同 CI 环境中的可达性不同，需实际测试验证。
+若多次重试仍超时，可考虑将 pip 镜像源从 `mirrors.aliyun.com` 更换为其他可用镜像站（如 `mirrors.tuna.tsinghua.edu.cn` 或官方 PyPI），或对 `nvidia_cudnn_cu13` 这类超大型包使用 `--default-timeout` 参数增加超时阈值。
 
 ## 需要进一步确认的点
-- 该 CI runner 到 `mirrors.aliyun.com` 的网络稳定性如何（是否为偶发，还是该镜像站对该 runner 持续不可用）
-- 是否存在镜像站频率限制（防爬策略）导致大文件下载被中断
-- 同一镜像在 x86-64 和 aarch64 架构上的构建是否均失败（日志仅显示 x64 构建）
+- `mirrors.aliyun.com` 在该 CI 构建时段是否存在网络波动或带宽限制（需运维确认）
+- 是否有其他同批次 PR 的构建也遇到类似的 `mirrors.aliyun.com` 超时问题，以判断是偶发还是系统性问题
+- 若该镜像有其他版本的 Dockerfile（如 22.03-lts-sp4、24.03-lts-sp1），其构建是否也因同样原因失败（可作对比确认）
