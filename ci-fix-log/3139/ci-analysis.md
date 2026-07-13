@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #3139 — chore(open-webui): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 镜像站大文件下载超时
-- 新模式症状关键词: ReadTimeoutError, mirrors.aliyun.com, pip install, nvidia-cudnn-cu13
+- 新模式标题: 镜像站下载超时
+- 新模式症状关键词: ReadTimeoutError, mirrors.aliyun.com, pip, Read timed out, nvidia-cudnn
 
 ## 根因分析
 
@@ -15,36 +15,27 @@
 #12 257.5 ERROR: Exception:
 #12 257.5 Traceback (most recent call last):
 #12 257.5   File "/usr/lib/python3.11/site-packages/pip/_vendor/urllib3/response.py", line 452, in _error_catcher
-#12 257.5     yield
-#12 257.5   ...
-#12 257.5   File "/usr/lib64/python3.11/ssl.py", line 1167, in read
-#12 257.5     return self._sslobj.read(len, buffer)
 #12 257.5 TimeoutError: The read operation timed out
-#12 257.5 ...
+...
 #12 257.5 pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='mirrors.aliyun.com', port=443): Read timed out.
 ```
-
-下载 `nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_x86_64.whl`（366.2 MB）时，在 353.4/366.2 MB（约 96%）处发生读超时。
+下载 `nvidia-cudnn-cu13==9.20.0.48`（366.2 MB 的 wheel 包）至 353.4/366.2 MB（96.5%）时 `mirrors.aliyun.com` 连接读取超时。
 
 ### 根因定位
-- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`
-- 失败原因: `pip install -r backend/requirements.txt` 从 `mirrors.aliyun.com` 下载大型 wheel 包 `nvidia-cudnn-cu13`（366 MB）时网络读超时。此前 npm 构建（`npm i && npm run build`）已成功完成，证明 Dockerfile 逻辑本身无误，失败由镜像站网络不稳定导致。
+- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`（`pip install -r backend/requirements.txt` 步骤）
+- 失败原因: pip 从 `mirrors.aliyun.com` 下载大型依赖包（`nvidia-cudnn-cu13`，366 MB）时网络连接读取超时（257 秒），属于 CI 基础设施网络问题，与代码无关。
 
 ### 与 PR 变更的关联
-
-PR 新增了 open-webui 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，其中所有 pip 操作均指定 `-i https://mirrors.aliyun.com/pypi/simple/` 作为镜像源。`nvidia-cudnn-cu13`（366 MB）是 `torch` → `sentence_transformers` 的传递依赖，安装时从阿里云镜像站下载该大文件触发读超时。
-
-此失败**与 PR 代码变更相关**（Dockerfile 选择了特定镜像站），但**非代码逻辑错误**——属于网络基础设施不稳定导致，重试可能成功。
+PR 仅新增 Dockerfile 和更新元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容本身无语法或逻辑错误。npm 构建阶段已成功（日志中出现 `.svelte-kit/output/` 构建产物），pip 依赖解析和多数包的下载也顺利完成，仅最后的大文件下载被网络超时中断。**此失败与 PR 代码改动无关**，属于 CI 构建环境到阿里云镜像站的网络不稳定所致。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-在 Dockerfile 的 pip install 命令中增加重试机制（如 `--retries 5 --timeout 120`），或为大型依赖单独拆分安装步骤以提高单点重试成功率。
+### 方向 1（置信度: 高）
+重新触发 CI 构建。这是网络瞬时故障导致的超时，重试大概率可成功。如果反复出现同类超时，可考虑在 Dockerfile 中为 pip install 添加 `--timeout` 参数增大超时阈值，或将 `nvidia-cudnn-cu13` 等大文件包改用更稳定的镜像源。
 
-### 方向 2（置信度: 低）
-考虑将 pip 镜像源切换为其他更稳定的大型文件托管源（如 `pypi.org` 加代理，或 `pypi.tuna.tsinghua.edu.cn`），避免阿里云镜像站对大文件下载的不稳定问题。
+### 附加说明：`BUILDARCH` 变量名冲突风险（当前未触发，但建议修正）
+Dockerfile 中声明了 `ARG BUILDARCH` 并在 `RUN` 中尝试对其赋值（`BUILDARCH="x64"`），这与 BuildKit 预定义的全局 `BUILDARCH` ARG 存在潜在冲突（参见知识库模式09）。虽然当前 npm 下载和构建均成功（因为 shell 内变量展开正常工作），但为避免未来 BuildKit 版本行为变化导致问题，建议将变量名改为自定义名称（如 `NODE_ARCH`）。
 
 ## 需要进一步确认的点
-- 同仓库内其他使用 `mirrors.aliyun.com` 的 Dockerfile（如 `open-webui/0.1.108/22.03-lts-sp4/Dockerfile`、`open-webui/0.1.108/24.03-lts-sp1/Dockerfile`）在 CI 中是否也出现过类似超时，以判断是偶发还是持久性问题。
-- 该镜像站对超大文件（>300 MB）的下载是否存在带宽限制或超时配置。
-- 是否可以通过 CI 重试机制（而非 Dockerfile 修改）解决该问题。
+- 本次 npm 构建产物日志显示成功，pip 下载也在超时前完成了几乎所有依赖的获取，确认构建环境到 `mirrors.aliyun.com` 的网络是偶发性波动。
+- 如果在多次重试后仍然超时，需检查 `nvidia-cudnn-cu13` 包在阿里云镜像站的可用性和网络路由。
