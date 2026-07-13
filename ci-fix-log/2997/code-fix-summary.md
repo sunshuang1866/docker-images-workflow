@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CESM 构建过程中 `checkout_externals` 调用 `svn checkout` 时因 `svn-ccsm-models.cgd.ucar.edu` SSL 证书 hostname 不匹配而失败（E230001）。
+CESM 2.2.2 构建过程中 `checkout_externals` 步骤因 SVN 服务器证书主机名不匹配（`E230001: certificate issued for a different hostname`）而失败。
 
 ## 修改的文件
-- `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile`: 在 `checkout_externals` 执行前添加 SVN 服务器配置，设置 `ssl-trust-default-ca = yes`，使 SVN 客户端信任系统默认 CA 证书链。
+- `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile`: 在第 54 行的 `printf` 命令中追加 `trust-server-cert-failures = unknown-ca,cn-mismatch,expired,not-yet-valid,other`，使 SVN 客户端（1.14.3）忽略证书主机名不匹配错误。
 
 ## 修复逻辑
-在 Dockerfile 第 52-57 行的 RUN 指令中，`yum install -y subversion` 之后、`checkout_externals` 执行之前，新增两步：
-1. `mkdir -p /root/.subversion` — 确保 SVN 配置目录存在
-2. 将 `[global]\nssl-trust-default-ca = yes\n` 写入 `/root/.subversion/servers` — 配置 SVN 使用系统默认 CA 信任存储
-
-这使得 SVN 在连接 `svn-ccsm-models.cgd.ucar.edu` 时能够接受该服务器的 SSL 证书，规避因证书 hostname 不匹配导致的连接拒绝。此修复针对 CI 分析报告的**方向 1（高置信度）**。
+分析报告指出根因是 `svn-ccsm-models.cgd.ucar.edu` 的 TLS 证书与访问主机名不匹配，原有的 `ssl-trust-default-ca = yes` 只能解决 CA 信任链问题，无法解决主机名不匹配。`trust-server-cert-failures` 是 SVN 1.9+ 提供的细粒度证书错误忽略选项，通过添加 `cn-mismatch` 可覆盖主机名不匹配场景。openEuler 24.03-LTS-SP4 中安装的 subversion 版本为 1.14.3，满足此选项的最低版本要求。
 
 ## 潜在风险
-- 该配置使 SVN 全局信任系统默认 CA，理论上可能降低 SSL 安全性，但仅在 Docker 构建临时容器中生效，不会影响运行时的容器。
-- 若上游 UCAR 服务器证书完全过期或与系统 CA bundle 不兼容，此修复可能仍不足。若后续仍失败，需进一步研究 `ssl-verify-server-cert = no` 或针对特定 host group 的配置。
+- 该修复降低了 SVN 客户端对上游服务器证书的验证强度（允许主机名不匹配、过期证书等），如果上游 SVN 服务器证书存在恶意篡改，此配置将无法检测到中间人攻击。
+- 如果上游 SVN 服务器的证书问题已修复，此配置将不再必要但不影响构建（多余的容忍不会破坏正常流程）。
+- 该修改仅影响当前 Dockerfile 的构建过程，不影响其他镜像或组件。
