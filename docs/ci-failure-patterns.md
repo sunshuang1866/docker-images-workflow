@@ -596,6 +596,7 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #3135: `AI/oneapi-basekit/meta.yml` — `meta.yml` 中新增的 `2024.2.0-oe2403sp4` 条目缺少 `arch: x86_64` 约束，
+- PR #3130: `AI/llm/meta.yml` — 为 `meta.yml` 中新增的 `chatglm2_6b-pytorch2.1.0.a1-cann7.0.RC1.a
 
 ---
 
