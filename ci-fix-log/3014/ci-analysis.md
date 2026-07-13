@@ -3,59 +3,52 @@
 ## 基本信息
 - PR: #3014 — chore(3dslicer): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 低
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: "构建节点通道断开"
-- 新模式症状关键词: ChannelClosedException, EOFException, Unexpected termination of the channel, ecs-build-docker, output clipped, log limit
+- 新模式标题: Jenkins Agent 通道中断
+- 新模式症状关键词: ChannelClosedException, EOFException, Remote call failed, output clipped, log limit
 
 ## 根因分析
 
 ### 直接错误
 ```
-#14 4262.5 [ 95%] Building CXX object Modules/IO/MeshBase/src/CMakeFiles/ITKIOMeshBase.dir/itkMeshFileWriterException.cxx.o
 #14 4529.2 [output clipped, log limit 2MiB reached]
 FATAL: command execution failed
 java.io.EOFException
+	at java.base/java.io.ObjectInputStream$PeekInputStream.readFully(Unknown Source)
+	...
 Caused: java.io.IOException: Unexpected termination of the channel
 Caused: hudson.remoting.ChannelClosedException: Channel "hudson.remoting.Channel@24d4cc0d:ecs-build-docker-x86-hk": Remote call on ecs-build-docker-x86-hk failed. The channel is closing down or has closed down
+	at hudson.remoting.Channel.call(Channel.java:1101)
+	...
 FATAL: Unable to delete script file /tmp/jenkins7496920232576494111.sh
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: Jenkins 构建节点 `ecs-build-docker-x86-hk`（x86-64 架构）
-- 失败原因: Docker 构建在编译 3D Slicer 源码（ITK 模块约 95% 进度）时，Jenkins agent 与 master 之间的 remoting channel 意外断开，导致构建步骤被标记为失败。日志在约 4530 秒（75 分钟）处因达到 2MiB 限制被截断，此后 channel 中断。
+- 失败位置: Jenkins 构建节点 `ecs-build-docker-x86-hk`，Docker 构建步骤 #14（`RUN ./build-Slicer.sh`）
+- 失败原因: Jenkins agent 与构建节点之间的 remoting channel 意外中断（`ChannelClosedException` / `EOFException`），导致 `Execute shell` 步骤被标记为失败。此时 Docker build 的日志已因达到 2MiB 上限被截断，真正的构建结果（成功/编译错误/OOM）不可见。
 
 ### 与 PR 变更的关联
-**高度相关**。PR #3014 新增了 3D Slicer 5.8.1 的完整 Docker 构建流程。Dockerfile 通过 `build-Slicer.sh` 从 GitHub 克隆 Slicer 源码并执行 `cmake --build`，这是一个编译范围极广的 C++ 工程，涉及 VTK、ITK、GDCM、VNL、Qt5 等数十个大型第三方库。日志显示编译过程产生了海量输出（2MiB 日志截断），其中包含大量 `-Wdeprecated-declarations` 警告（QLocale 枚举在 openEuler 2403 搭载的 Qt5 中已标记为废弃），这些警告输出占用了大量日志缓冲区。channel 断开最可能的原因是该 Docker 构建任务在 Jenkins agent 上触发了资源耗尽（推测为 OOM 或磁盘满），导致 agent 进程被系统 kill。
+**高度相关**。本 PR 新增的 3D Slicer Dockerfile 从源码编译 Slicer，其构建过程极为庞大——日志显示它内建了 VTK、ITK、GDCM、HDF5、VNL、JPEG、PNG、TIFF、MINC 等多达数十个 C/C++ 第三方库。编译过程产生了海量的 `QLocale` 废弃警告（Qt5 中大量 locale 枚举被标记为 deprecated），在短时间内填满了 2MiB 的日志缓冲区。极端的资源消耗（编译耗时 > 4500 秒、日志量巨大）很可能是导致 Jenkins agent 节点不稳定并最终丢失通道的直接诱因。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**构建节点资源不足导致 agent 进程被 OOM kill 或磁盘满**。
-
-该 Docker 构建编译 3D Slicer 及其依赖（VTK、ITK、Qt5 Python bindings 等），是非常重量级的 C++ 编译任务。日志在约 75 分钟、编译进度约 95% 时因 channel 断开而失败——临近链接阶段（link 阶段内存消耗最高），agent 可能因 OOM 被系统 kill。修复思路：
-- 检查 Jenkins agent `ecs-build-docker-x86-hk` 的资源配额（内存、磁盘），确认是否需要扩容
-- 在 `build-Slicer.sh` 的 cmake 参数中增加 `-DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"` 以抑制海量 Qt5 废弃 API 警告，减少日志输出量，降低 agent 侧的 IO/内存压力
-- 考虑减少并行编译核心数（当前使用 `$(nproc)` 全核心编译），可加 `--parallel $((NUMBER_OF_PHYSICAL_CORES / 2))` 限制
+**抑制编译警告以减少日志量，避免日志缓冲区溢出**。在 `build-Slicer.sh` 的 cmake 配置阶段添加 `-Wno-deprecated-declarations` 标志，抑制 Qt5 `QLocale` 废弃警告（该类警告产生了数千行日志输出，是日志被截断的主要原因）。减少日志体积有助于 CI 日志完整保留到构建结束，从而判断是否还有其他真正的编译错误。
 
 ### 方向 2（置信度: 低）
-**Docker 构建超时**。
-
-日志显示构建持续约 75 分钟后断开，可能是 Jenkins agent 或 Docker 构建步骤有超时限制。修复思路：
-- 检查 Jenkins job 的构建超时设置，必要时调大
-- 考虑启用 Docker BuildKit 的缓存功能，将依赖库单独构建为一层以便缓存复用
+**CI 基础设施侧的排查**。如果方向 1 无法解决（即日志缩减后仍出现 channel 中断），则问题出在 Jenkins agent 节点本身（内存/磁盘不足导致 agent 进程被杀、网络不稳定等）。此方向与 PR 代码无关，无需 Code Fixer 处理。
 
 ## 需要进一步确认的点
-1. 需要获取 Jenkins agent `ecs-build-docker-x86-hk` 的系统日志（OOM killer 日志 `dmesg`），确认进程是否被 OOM kill
-2. 需要确认 agent 节点的内存和磁盘配额是否足以支持 3D Slicer 完整编译（Slicer + VTK + ITK 全量编译预计需要 16GB+ 内存）
-3. 需要确认该 agent 上是否同时运行了其他构建任务导致资源争抢
-4. 需要确认 arm64 架构（aarch64）的构建 job 是否也以同样方式失败，以判断是否为架构特异性问题
-5. 日志被截断在约 4530 秒，实际构建可能在此后继续运行直到 channel 断开，需确认是否有未被捕获的 cmake/gcc 编译错误——当前日志中仅见 deprecation warning，未见 fatal error
+1. **Docker build 的真实退出状态**：当前日志在 `[output clipped, log limit 2MiB reached]` 处截断，此后 Docker build 是否以非零退出码结束完全不可知。需要在不截断日志的情况下重新触发构建，或从 Docker daemon 侧获取容器构建的完整日志。
+2. **构建节点的资源状况**：确认 `ecs-build-docker-x86-hk` 节点在构建期间是否发生了 OOM kill、磁盘满等资源耗尽事件。3D Slicer 全量编译对内存和磁盘要求极高（VTK + ITK + Slicer 联编通常需要 16GB+ RAM 和 30GB+ 磁盘空间）。
+3. **同一 Dockerfile 在其他平台（如 aarch64）上的构建结果**：本日志仅显示了 x86_64 构建的失败，但 Dockerfile 声明了 `amd64, arm64` 双架构支持。如果 aarch64 构建成功，则可以确认问题局限在 x86_64 构建节点的资源或稳定性上。
+4. **Qt5 废弃警告的具体数量级**：日志中 `QLocale::Etruscan`、`QLocale::Hanunoo` 等警告重复出现了极多次——这源于 `PythonQt` 自动生成的代码枚举了所有 `QLocale` 值。确认上游 Slicer 版本中是否有类似 issue 或已有的修复（如通过 cmake 选项禁用 PythonQt wrapper 生成，或升级到 Qt6 规避）。
 
 ## 修复验证要求
-若修复方向 1 被采纳（增加编译选项以抑制警告），code-fixer 必须：
-1. 在相同 Jenkins agent 上以相同的资源配额触发重试，验证 channel 不再断开
-2. 确认构建日志输出量显著减少（不再触发 2MiB 截断）
-3. 确认 arm64 构建也能成功完成，而非仅修复 x86-64 单架构
+若修复方向 1（添加 `-Wno-deprecated-declarations`）被采纳，Code Fixer 需在提交前：
+- 从 `https://github.com/Slicer/Slicer` 的 `v5.8.1` tag 获取 CMakeLists.txt，确认 cmake 标志通过 `CMAKE_CXX_FLAGS` 或 `add_compile_options()` 传递的规范方式。
+- 验证添加该标志后，构建日志量是否显著缩减（预期从 >2MiB 降至可完整捕获的水平）。
+- 如果有条件，在本地或 CI 中模拟完整构建，确认构建成功且无新增编译错误。
