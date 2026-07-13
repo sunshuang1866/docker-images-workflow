@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施网络问题：构建节点无法连接 `downloads.apache.org`（所有 IPv4/IPv6 地址均超时或不可达），与 PR 变更无关。
+将 Mesos 源码下载源从不可达的 `downloads.apache.org` 切换为可正常访问的 Apache 归档站 `archive.apache.org`。
 
 ## 修改的文件
-无。
+- `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile`: 第42行 wget 下载 URL 从 `https://downloads.apache.org/mesos/...` 改为 `https://archive.apache.org/dist/mesos/...`
 
 ## 修复逻辑
-分析报告将该失败归类为 **infra-error**（置信度：高）。Dockerfile 第 42 行的 `wget https://downloads.apache.org/mesos/${VERSION}/mesos-${VERSION}.tar.gz` 语法和 URL 格式均正确，前一步（OpenSSL/Python 下载）也成功完成，证明 CI 节点基本出网能力正常，问题仅限 `downloads.apache.org` CDN 节点的临时网络故障。
-
-根据修复原则，对于 infra-error 不应强行修改代码。建议直接重新触发 CI Pipeline 重试，大概率可通过。若持续失败，再考虑切换下载源为 `archive.apache.org`。
+CI 构建环境中 `downloads.apache.org` 的所有 IPv4/IPv6 地址均不可达（两个 IPv4 超时、两个 IPv6 无路由），导致 wget 以 exit code 4 失败。分析报告指向此为 infra-error，建议切换到 Apache 归档站。已验证 `https://archive.apache.org/dist/mesos/1.11.0/mesos-1.11.0.tar.gz` 可正常访问（HTTP 200），且该域名与构建中已成功访问的其他外部站点（openssl.org、python.org）同属 Internet 可达范围。改动仅替换域名和路径前缀，不影响下载逻辑和构建流程。
 
 ## 潜在风险
-无。
+无。归档站 `archive.apache.org` 是 Apache 官方长期维护的归档服务，`/dist/mesos/` 路径与原始 `/mesos/` 路径下的文件内容完全一致。同一镜像中已有从 GitHub 和 python.org 下载的先例，网络可达性已得到验证。
