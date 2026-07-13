@@ -5,50 +5,38 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 文档PR误触检测
-- 新模式症状关键词: Path Error, The expected path should be, README, appstore, update.py
+- 新模式标题: 根目录文档路径校验失败
+- 新模式症状关键词: Path Error, expected path should be, README, appstore, update.py
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-12 15:33:08,211- update.py[line:356]-INFO: Difference: [
-    "README.en.md",
-    "README.md"
-]
-2026-07-12 15:33:13,075- update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-12 15:33:13,075 - update.py[line:273] - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +--------------+-----------------------------------------------------+--------------+
 | Check Items  |                     Description                     | Check Result |
 +--------------+-----------------------------------------------------+--------------+
 | README.en.md | [Path Error] The expected path should be /README.md |   FAILURE    |
 |  README.md   | [Path Error] The expected path should be /README.md |   FAILURE    |
 +--------------+-----------------------------------------------------+--------------+
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`（appstore 发布规范预检）
-- 失败原因: CI 的 appstore 发布规范预检工具（`update.py`）将根目录下的文档文件 `README.md` 和 `README.en.md` 纳入了检查范围，但这两个文件不属于任何应用镜像的目录结构（不遵循 `{category}/{image}/{version}/{os-version}/Dockerfile` 等路径规范），被报告为 [Path Error]，预期路径为 `/README.md`。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`
+- 失败原因: CI 的 appstore 发布规范校验工具对 PR 变更的根目录文档文件（`README.en.md` 和 `README.md`）执行路径校验，期望路径为 `/README.md`。`README.en.md` 不匹配预期路径直接失败；`README.md` 也因路径比对方式（可能缺少前导 `/` 归一化，或校验器仅识别 appstore 管理的特定路径）被标记为 FAILURE。
 
 ### 与 PR 变更的关联
-- **无关。** 此 PR 仅修改了两个 README 文档文件（更新可用基础镜像的 tag 列表和对应的下载链接），属于纯文档变更。
-- `README.en.md`：将 latest 标签从 `24.03-lts-sp2` 更新为 `24.03-lts-sp4`，新增 `24.03-lts-sp3`、`25.09`、`24.03-lts-sp2` 标签。
-- `README.md`：同上内容的中文版修改。
-- CI 的 appstore 发布规范预检逻辑在仅有文档变更的 PR 上产生了误报——它检测到变更文件后，对这些文件执行了应用镜像路径规范校验，但根目录文档文件本就不应属于 appstore 镜像发布管线的检查范围。
+PR 仅修改了仓库根目录的两个 README 文件（`README.md` 和 `README.en.md`），更新了可用的基础镜像 tag 列表。改动本身不涉及代码、构建脚本或 Dockerfile。CI 失败发生在 eulerpublisher 工具的 appstore 发布规范预检阶段（`update.py`），该检查将根目录文档文件视为不合规路径。此失败**与 PR 的文档内容无关**，是 CI 工具对 root 级文档文件变更的路径校验策略问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 流水线中 `eulerpublisher/update/container/app/update.py` 的 appstore 发布规范预检逻辑应区分"文档/配置类文件"和"应用镜像文件"，仅对镜像相关目录下的文件执行路径规范校验。根目录下的 `README.md`、`README.en.md`、`.claude/` 等纯文档/配置变更应被跳过。
+CI appstore 预检工具可能不预期仓库根目录的 README 文件在 PR 中被单独修改。若该 PR 仅需更新文档而不涉及镜像发布，可通过调整 CI 触发条件（如仅当变更涉及 `Bigdata/`、`AI/` 等镜像目录时才触发 appstore 路径校验）来绕过此检查。
 
 ### 方向 2（置信度: 低）
-如果 CI 检查器的 `expected path = /README.md` 是由于仓库根目录缺少 `README.md` 文件或文件路径解析异常导致，则需要确认 CI 克隆的仓库路径与实际文件结构的映射关系是否正确。
+`update.py` 中的路径比对逻辑可能存在缺陷，例如对相对路径 `README.md` 与绝对路径 `/README.md` 未做归一化处理，导致合法路径也被误报。若确认该点是根因，可在 `update.py` 的路径校验函数中增加路径归一化逻辑。
 
 ## 需要进一步确认的点
-1. `eulerpublisher/update/container/app/update.py:273` 附近的 appstore 预检逻辑具体如何判断哪些文件属于"应检查文件范围"，以及为何根目录 README 文件未被过滤。
-2. 该 CI 流水线是否在历史上曾正确放行过纯文档类 PR，对比确认是否存在近期更新引入了该回归。
-3. 与历史类似案例（PR #2512 中 `.claude/` 路径被判定为路径错误）的关联——可能暗示此检查对"非镜像类根目录文件"的处理存在系统性缺陷，而非单次偶发。
-
-## 修复验证要求
-本报告结论为 infra-error（CI 基础设施问题），code-fixer 无需对 PR 代码进行修改。若需修复 CI 流水线本身，应由 CI 平台维护人员修改 `update.py` 中 appstore 预检逻辑的文件过滤规则，使其排除根目录非镜像类文件（`README.md`、`README.en.md`、`.claude/` 等）。
+1. `eulerpublisher/update/container/app/update.py` 中第 273 行附近的路径校验逻辑：确认校验器是否将 `README.md`（相对路径）与 `/README.md`（绝对路径）视为不同值，导致原本合法的文件也被误报。
+2. 该 CI pipeline 的 appstore 预检步骤是否针对所有 PR 触发，还是仅对触及特定目录的 PR 触发——若为前者，纯文档 PR 理应被排除在检查范围之外。
+3. 确认 `README.en.md` 是否在 appstore 规范的允许文件白名单中，若不在，是否应将其加入白名单或排除根目录文档的检查。
