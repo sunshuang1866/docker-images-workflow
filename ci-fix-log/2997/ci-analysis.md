@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2997 — chore(cesm): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
 - 新模式标题: SVN SSL证书不匹配
-- 新模式症状关键词: svn, E230001, Server SSL certificate verification failed, certificate issued for a different hostname
+- 新模式症状关键词: svn, E230001, SSL certificate verification failed, certificate issued for a different hostname
 
 ## 根因分析
 
@@ -20,25 +20,28 @@
 
 ### 根因定位
 - 失败位置: `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile:52-55`（`./manage_externals/checkout_externals` 步骤）
-- 失败原因: CESM 的 `checkout_externals` 脚本内部调用 `svn checkout` 从 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 组件，该 SVN 服务器的 SSL 证书与当前主机名不匹配（`certificate issued for a different hostname`），导致 TLS 握手被拒，svn 无法建立连接。
+- 失败原因: CESM 构建过程中 `manage_externals/checkout_externals` 脚本尝试通过 `svn checkout` 从 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 子组件（`chem_proc5_0_04`），但该 SVN 服务器的 SSL 证书的 CN/SAN 与实际主机名 `svn-ccsm-models.cgd.ucar.edu` 不匹配，导致 HTTPS 连接被拒绝。
 
 ### 与 PR 变更的关联
-PR 变更与此失败**无关**。这是一个网络/基础设施层面的外部依赖问题——NCAR/UCAR 的 SVN 服务器 SSL 证书配置存在问题。CESM 构建流程中 `checkout_externals` 需要从外部 SVN 仓库拉取 `chem_proc` 组件，该服务器的 SSL 证书在 CI 构建环境中无法通过验证。PR 的 Dockerfile 代码本身无任何错误，此前置依赖步骤（yum 安装、mpich/hdf5/netcdf/pnetcdf 编译安装）均成功完成。
+PR 新增了 CESM 2.2.2 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套的 `config_compilers.xml`。这是全新文件，其构建流程完整遵循 CESM 官方的 `manage_externals/checkout_externals` 外部依赖管理脚本。该脚本在检出子组件时依赖 SVN 协议访问 UCAR 的 SVN 仓库，而该仓库的 SSL 证书存在配置问题。此失败与 PR 代码本身无关，属于上游基础设施问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**问题本质**：外部 SVN 服务器 SSL 证书配置错误，非 PR 代码问题。此失败需要 CI 基础设施管理员或 NCAR/UCAR 方面处理：
-- 等待 NCAR/UCAR 修复其 SVN 服务器 `svn-ccsm-models.cgd.ucar.edu` 的 SSL 证书；
-- 或在 CI 构建环境中临时跳过该 SVN 服务器的 SSL 验证（不推荐，有安全风险）。
+### 方向 1——跳过 SVN SSL 验证（置信度: 中）
+在 Dockerfile 的 `./manage_externals/checkout_externals` 之前，配置 subversion 客户端以接受不受信任的 SSL 证书。通过设置 `~/.subversion/servers` 文件或传递 `--trust-server-cert-failures` 参数。
 
-### 方向 2（置信度: 低）
-如果上游服务器短期内无法修复，可在 Dockerfile 中的 `./manage_externals/checkout_externals` 之前添加 svn 配置，接受该服务器的 SSL 证书（如通过 `svn --non-interactive --trust-server-cert-failures=unknown-ca,cn-mismatch` 或 `echo p | svn info ...` 预先缓存证书），但此方案需确认 CI 安全策略是否允许。
+具体操作：在 `RUN` 指令中，先执行 `svn --non-interactive --trust-server-cert-failures=cn-mismatch ls https://svn-ccsm-models.cgd.ucar.edu/tools/proc_atm/chem_proc/release_tags/chem_proc5_0_04` 预先接受该证书（此操作会将证书缓存到 `~/.subversion/auth/`），之后 `./manage_externals/checkout_externals` 即可正常执行。
+
+### 方向 2——替换 SVN 源为 Git 镜像（置信度: 低）
+如果 `chem_proc` 组件的上游在 GitHub 或其他 Git 平台有镜像，可以将 `manage_externals/checkout_externals` 的 Externals 配置从 SVN 替换为 Git 源。但 CESM 的 `Externals_CAM.cfg` 中 `chem_proc` 条目的 `repo_url` 指向 SVN 是上游硬编码的，修改需要 patch 管理脚本，复杂度较高。
 
 ## 需要进一步确认的点
-1. 确认 `svn-ccsm-models.cgd.ucar.edu` 是否在不同时间段/不同网络环境（如从本地或 NCAR 内部网络）存在同样的 SSL 证书问题——可能是 CI 构建节点的时间/CA 根证书库过期，而非服务器端问题。
-2. 确认 CESM 上游社区是否有对应的替代方案（如从 GitHub 获取 chem_proc 的镜像或预先打包版）。
-3. 确认其他基于 openEuler 的 CESM 构建（如旧版 SP3 的 Dockerfile）是否也曾遇到同样问题，以及是否有已知的 workaround。
+1. **SVN 服务器证书是否永久性问题**：需确认 `svn-ccsm-models.cgd.ucar.edu` 的 SSL 证书是否为永久性配置错误，还是临时性的证书更新过渡期问题。如果是临时问题，可直接重试构建；如果长期存在，则需要上述修复方向。
+2. **CESM 上游是否已有 Git 替代方案**：确认 `chem_proc` 组件在 GitHub（如 `ESCOMP` 或 `NCAR` 组织下）是否有官方 Git 仓库替代 SVN。
+3. **其他使用 CESM 的 Dockerfile 是否也受影响**：检查仓库中已有的其他 CESM Dockerfile（如有）是否也遇到同样的 SVN 问题，以确认这是否是 CI 环境中首次触发。
 
 ## 修复验证要求
-（不适用——此为 infra-error，非 PR 代码问题，Code Fixer 无需处理。若后续确定需要 Dockerfile 层面的 workaround，则需要 code-fixer 在 CI 环境中实际验证 svn 连接是否可通过修改后的配置成功建立。）
+若采用方向 1，code-fixer 需验证：
+1. 修改后的 Dockerfile 在构建时能正常通过 `svn checkout` 步骤，`chem_proc` 被成功检出到 `/opt/ncar/cesm2/components/cam/chem_proc`
+2. 构建完成的镜像中 CESM 的外部依赖目录完整性正确（所有 `manage_externals` 子组件均存在）
+3. `~/.subversion/auth/` 中的缓存证书不会泄露到最终镜像层（在同一个 RUN 层内执行 svn 操作并清理证书缓存）
