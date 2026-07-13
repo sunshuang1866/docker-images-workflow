@@ -1,19 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修改。CI 失败类型为 `infra-error`（基础设施错误），根因是 Jenkins 构建节点 `ecs-build-docker-x86-hk` 在执行 3D Slicer 全量编译时发生资源耗尽（推测为 OOM kill 或磁盘满），导致 Jenkins agent remoting channel 意外断开。
+在 `build-Slicer.sh` 的 cmake 配置阶段添加 `-Wno-deprecated-declarations` 标志，抑制 Qt5 `QLocale` 废弃警告，减少构建日志量以避免 CI 日志缓冲区溢出导致 Jenkins agent 通道中断。
 
 ## 修改的文件
-无。根据分析报告，此失败为 `infra-error`，属于 CI 基础设施层面的问题，无需对源代码进行修改。
+- `HPC/3dslicer/5.8.1/24.03-lts-sp4/build-Slicer.sh`: 在 cmake configure 命令中添加 `-DADDITIONAL_CXX_FLAGS:STRING=-Wno-deprecated-declarations`
 
 ## 修复逻辑
-分析报告明确指出失败类型为 `infra-error`，置信度低。直接错误为 `java.io.EOFException` → `ChannelClosedException`，发生在 Docker 构建编译 3D Slicer ITK 模块约 95% 进度时（约 75 分钟）。日志因达到 2MiB 限制被截断，构建输出中海量的 `-Wdeprecated-declarations` 警告占用了日志缓冲区。
-
-这不是代码 bug 导致的失败，而是构建节点的资源配置不足以支撑 3D Slicer 完整编译（Slicer + VTK + ITK 全量编译预计需要 16GB+ 内存）。修复应在 CI 基础设施层面进行：
-
-- 检查并扩容 Jenkins agent `ecs-build-docker-x86-hk` 的内存和磁盘配额
-- 检查 agent 系统日志（`dmesg`）确认是否被 OOM killer 终止
-- 确认该 agent 上是否有其他并发构建任务导致资源争抢
+CI 分析报告指出 Docker 构建步骤（`RUN ./build-Slicer.sh`）因日志量超过 2MiB 上限被截断，大量 Qt5 `QLocale` 废弃警告（来自 PythonQt 自动生成代码）在短时间内填满了日志缓冲区，导致 Jenkins agent remoting channel 中断（`ChannelClosedException`）。通过 Slicer CMake 构建系统提供的 `ADDITIONAL_CXX_FLAGS` 缓存变量（已从上游 `https://github.com/Slicer/Slicer` 的 `v5.8.1` tag 获取 CMakeLists.txt 验证，`ADDITIONAL_CXX_FLAGS` 在 `CMAKE_CXX_FLAGS` 的 FORCE set 中被包含，正则匹配成功）添加 `-Wno-deprecated-declarations`，可在不修改 Slicer 源码的前提下全局抑制废弃声明警告，预期将日志量从 >2MiB 显著缩减。
 
 ## 潜在风险
-无。本次未修改任何源代码。
+- 抑制废弃声明警告可能会隐藏其他非 Qt5 locale 相关的真实废弃 API 使用，但由于 PR 旨在构建一个已知版本的 Slicer（v5.8.1），而非开发迭代，此风险可接受。
+- 若日志量缩减后 CI 仍然出现 channel 中断，则根因在 Jenkins agent 节点资源层面（内存/磁盘不足等），需基础设施侧排查，与代码无关。
