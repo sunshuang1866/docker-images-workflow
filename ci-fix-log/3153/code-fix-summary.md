@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误（infra-error）：纯文档 PR 被 appstore 发布规范路径校验拒绝。
+无需代码修改。CI 失败类型为 `infra-error`，根本原因是 CI 流水线的 appstore 发布规范校验器（`update.py`）将根级文档文件（`README.md`、`README.en.md`）纳入路径检查范围，产生了误报。
 
 ## 修改的文件
-无。当前 PR 涉及的文件（`README.md`、`README.en.md`）均为正确的文档更新，本身无需修改。
+无（infra-error，代码仓库无需修改）
 
 ## 修复逻辑
-该失败属于 CI 基础设施问题，非源码问题。根因在 `eulerpublisher/update/container/app/update.py:273`：该文件的 appstore 路径规范校验对所有 PR 强制要求变更文件符合 Docker 镜像发布路径格式（如 `{category}/{image}/{version}/{os-version}/Dockerfile`），但缺少对纯文档类 PR 的跳过逻辑。README 文件不在此路径规范内，因此被判定为 Path Error。
+分析报告明确指出该失败属于 `infra-error`（CI 基础设施问题），而非 PR 代码缺陷。PR #3153 仅修改了 `README.md` 和 `README.en.md` 两个根级文档文件（更新基础镜像可用 tags 列表），没有任何 Dockerfile、meta.yml 或其他镜像发布文件的变更。CI 的 `update.py` 校验器对所有变更文件执行 appstore 路径合规性检查，但根级文档文件不在任何镜像目录结构下，不适用于该检查逻辑，因此被误报为 "Path Error"。
 
-分析报告指出这是 infra-error 类型，正确的修复应在 CI 流水线层面添加判断逻辑：当 PR 变更文件全部为非 Dockerfile 的文档文件时，跳过 `update.py` 的 appstore 路径校验步骤。这超出了当前 PR 允许修改的文件范围，源代码无需改动。
+此问题需要修改 CI 校验器 `update.py` 中的文件分类逻辑，使其在检测到变更仅涉及根级文档文件时自动跳过 appstore 发布规范检查。但这属于 CI 配置/基础设施层面的修复，不在本 PR 的代码变更范围内，也不在允许修改的文件列表中。
 
 ## 潜在风险
-无。源代码层面未做任何修改。
+无
