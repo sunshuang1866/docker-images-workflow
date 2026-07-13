@@ -5,7 +5,7 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: DNF镜像站HTTP/2流错误
+- 新模式标题: 仓库镜像HTTP/2流错误
 - 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
 
 ## 根因分析
@@ -19,24 +19,25 @@
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
 #7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
-#7 ERROR: process "/bin/sh -c dnf install -y       gcc gcc-c++ make cmake autoconf automake libtool pkgconf-devel       readline-devel ncurses-devel       libX11-devel libXaw-devel libXrender-devel libXext-devel libXt-devel       zlib-devel libpng-devel libjpeg-turbo-devel       curl-devel libxml2-devel       cairo-devel pixman-devel fontconfig-devel freetype-devel       gd-devel jasper-devel       libgeotiff-devel libtiff-devel proj-devel       git &&     dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`
-- 失败原因: CI 构建节点在执行 `dnf install` 时，与 openEuler 24.03-LTS-SP4 RPM 仓库之间的 HTTP/2 连接反复出现流层协议错误（Curl error 92: `HTTP/2 stream was not closed cleanly: INTERNAL_ERROR`），涉及 `cmake-data`、`git-core`、`gcc-c++` 三个包均遭此错误。其中 `cmake-data` 和 `git-core` 在重试后成功下载，但 `gcc-c++` 在所有镜像均已尝试后仍失败，导致 `dnf install` 整体退出码为 1。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: CI 构建环境中 `repo.****.org` 仓库镜像站出现 HTTP/2 协议流中断（`Stream error in the HTTP/2 framing layer`, Curl error 92），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载失败。其中 gcc-c++ 包（13MB）两次重试均失败，耗尽所有镜像重试后 dnf 安装失败。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 新增的 Dockerfile 语法正确、`dnf install` 包名列表完整。失败是 CI 构建节点与 openEuler RPM 镜像站之间的 HTTP/2 传输层间歇性故障，属于 CI 基础设施层面的网络问题。Dockerfile 本身无任何错误。
+**与 PR 代码变更无关**。PR 新增的 Dockerfile 语法正确，`dnf install` 命令及其参数均无问题。失败根因是 openEuler 24.03-LTS-SP4 仓库镜像站在构建时出现 HTTP/2 协议层面的传输故障，属于 CI 基础设施/网络层面的偶发问题。同一构建中 `cmake-data` 和 `git-core` 在遇到 HTTP/2 流错误后均重试成功，只有 `gcc-c++` 重试多次后仍失败，进一步说明这是瞬态网络问题而非代码缺陷。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建**。该失败为 CI 基础设施与上游 RPM 镜像站之间的 HTTP/2 协议层间歇性网络故障，与代码变更无关。Code Fixer 无需修改任何文件，重新触发 CI 流水线大概率可以通过。
+**无需代码修复——重试触发构建即可**。该失败为仓库镜像站 HTTP/2 流传输偶发中断导致的瞬态 infra 问题，Dockerfile 本身无缺陷。建议直接重新触发 CI 构建（retry / re-run），大概率可成功通过。
 
 ### 方向 2（置信度: 低）
-若多次重试均在同一下载环节失败，可考虑在 Dockerfile 的 `dnf install` 前添加 `dnf makecache` 或调整 DNF 配置中的 `retries`/`timeout` 参数，增加网络容错能力。但从当前日志看，DNF 已经进行了自动重试（多个 MIRROR 切换），只是最终 gcc-c++ 耗尽了所有镜像。
+如果多次重试均在同一包（gcc-c++）上失败，可能是该特定 RPM 包在镜像站上存在完整性/同步问题。此时需要：
+- 检查 `repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 在镜像站上的实际可用性和文件完整性
+- 或联系仓库镜像站管理员排查该文件的同步状态
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 的 RPM 镜像站（`repo.****.org`）在 CI 构建时间段是否存在服务端 HTTP/2 处理异常或负载过高的问题。
-- 确认 CI 构建节点（`ecs-build-docker-x86-03-sp`）的网络出口是否存在 HTTP/2 代理或防火墙干扰。
+- 确认该仓库镜像站（`repo.****.org`）在构建时段是否存在已知的网络波动或维护事件
+- 如果多次 retry 仍然失败，需要人工验证 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 在镜像站上的可下载性和 checksum 完整性
