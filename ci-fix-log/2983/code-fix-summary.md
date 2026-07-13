@@ -1,20 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error）：Docker 构建进程在运行 ~35 分钟后被 Jenkins runner 异常终止（ChannelClosedException / Unexpected termination of the channel），无任何代码编译错误。
+无需代码修改。CI 失败为 Jenkins 基础设施问题：构建节点 `ecs-build-docker-x86-hk` 与 Jenkins Master 之间的 remoting 通道在执行 Docker build（约 2130 秒/35 分钟时）意外中断（`ChannelClosedException`），导致构建被强制终止。
 
 ## 修改的文件
-无代码修改。
+无
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`（置信度: 中），根因是 fbthrift 全量源码编译（通过 getdeps.py）极其耗时，在 2C/4G runner 上仅依赖解析/准备阶段就用了 35+ 分钟，触发 Jenkins job 超时或 OOM Killer。日志中无任何编译错误、依赖缺失或代码层面的错误。
+分析报告将该失败定性为 `infra-error`，置信度为低。Docker build 在 Jenkins Agent 崩溃前已顺利完成以下阶段：
+1. dnf 安装系统依赖（无报错）
+2. git clone fbthrift 源码（无报错）
+3. 执行 `fix_getdeps.py` 修补脚本（无报错）
+4. getdeps 开始编译依赖（boost、folly、fizz、mvfst、wangle），在 fbthrift cargo config 阶段时通道中断
 
-对 `fix_getdeps.py` 的正则进行了上游验证：已从 fbthrift `v2026.06.22.00` 获取 `build/fbcode_builder/getdeps/fetcher.py`，确认 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 正则与上游 `_verify_hash` 方法签名完全匹配，替换成功。代码层面无问题。
-
-建议措施（需 CI 管理员操作，非代码修改）：
-1. 增大 runner 规格（内存 ≥ 8G，建议 16G）
-2. 延长 Jenkins job timeout（≥ 4 小时）
-3. 检查是否可通过多阶段构建或使用预编译包减少构建时间
+日志中无任何与 PR 代码变更相关的编译错误。失败原因为 Jenkins 基础设施层面的通道中断（可能由网络波动、Agent 资源耗尽或超时引起），与 PR 改动无直接关联。建议重新触发 CI 流水线。
 
 ## 潜在风险
-无。此为基础设施配置问题，不影响代码正确性。
+分析报告提及 `fix_getdeps.py` 第 17 行的正则表达式 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 在 `_verify_hash` 为类中最后一个方法时可能无法匹配。但 Docker build 在到达 libaio 哈希校验步骤前已中断，无法从日志确认该正则是否生效。若重试 CI 后仍在编译阶段失败，再排查此正则问题。当前 CI 失败为基础设施问题，不应基于猜测修改代码。
