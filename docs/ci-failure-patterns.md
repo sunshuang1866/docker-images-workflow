@@ -29,6 +29,7 @@ Dockerfile:12
 - PR #2265: `Others/netty/4.2.13` — Maven 3.9.14 在 CDN 404 → 换华为云镜像站
 - PR #2100: `Others/netty/4.2.12` — Maven 3.9.12 在 CDN 404 → 升级到 3.9.14
 - PR #1884: `Others/netty/4.2.10` — Maven 3.9.11 在 CDN 404 → 升级到 3.9.12，文件名改用变量
+- PR #2926: `Others/spring-framework/7.0.3/24.03-lts-sp4/Dockerfile` — Maven 3.9.12 从 `dlcdn.apache.org` CDN 下架导致下载 404，将下载源替换为 Apa
 
 ---
 
