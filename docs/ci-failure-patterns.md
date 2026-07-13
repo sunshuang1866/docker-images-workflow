@@ -624,3 +624,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2929: `Others/bcache/1.1/24.03-lts-sp4/Dockerfile` — `git.kernel.org` 的 Anubis 反爬保护导致 `wget` 下载 snapshot tar.gz 时
+
+---
+
+## 模式33：Apache 镜像站网络不通
+
+**症状关键词**: Connection timed out, download.apache.org, wget, exit code: 4
+
+**根因**: - 失败位置: `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile:21`（wget 下载 Knox 步骤）
+- 失败原因: CI 构建环境无法与 `downloads.apache.org` 建立 TCP 连接（所有 IPv4 地址均 Connection timed out，IPv6 地址 Network is unreachable），导致 wget 下载 Knox 2.1.0 压缩包失败（exit code: 4）。
+
+**修复方法**: CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 超时失败（exit code: 4），将下载源切换为已验证可达的 `dlcdn.apache.org`。
+
+**历史案例**:
+- PR #3101: `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile` — CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 
