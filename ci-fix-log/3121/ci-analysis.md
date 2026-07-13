@@ -2,47 +2,47 @@
 
 ## 基本信息
 - PR: #3121 — chore(claude-code): add openEuler 24.03-LTS-SP4 support
-- 失败类型: dependency-error
-- 置信度: 中
+- 失败类型: infra-error
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 外部安装脚本403拒绝
-- 新模式症状关键词: curl: (22), 403, install.sh, claude.ai
+- 新模式标题: 下载脚本被区域封禁
+- 新模式症状关键词: App unavailable in region, syntax error near unexpected token `<`, install.sh, HTML, geo-blocked
 
 ## 根因分析
 
 ### 直接错误
 ```
-#9 [3/7] RUN curl -fsSL "https://claude.ai/install.sh" -o /tmp/claude-install.sh && \
-    chmod +x /tmp/claude-install.sh && \
-    /tmp/claude-install.sh "2.1.20" && \
-    rm -f /tmp/claude-install.sh
-#9 0.313 curl: (22) The requested URL returned error: 403
-#9 ERROR: process "/bin/sh -c curl -fsSL \"${CLAUDE_INSTALL_SCRIPT}\" -o /tmp/claude-install.sh && ..." did not complete successfully: exit code: 22
+#9 [3/7] RUN curl -fsSL -H "User-Agent: ..." "https://claude.ai/install.sh" -o /tmp/claude-install.sh && ...
+#9 0.552 /tmp/claude-install.sh: line 1: syntax error near unexpected token `<'
+#9 0.552 /tmp/claude-install.sh: line 1: `<!DOCTYPE html><!-- Last Published: Thu Jul 09 2026 ... --><html ...><title>App unavailable in region | Claude by Anthropic</title>...'
+#9 ERROR: process "/bin/sh -c curl -fsSL ... "https://claude.ai/install.sh" ..." did not complete successfully: exit code: 2
 ```
 
 ### 根因定位
-- 失败位置: `AI/claude-code/2.1.20/24.03-lts-sp4/Dockerfile:16-19`（Docker 构建第 3/7 步）
-- 失败原因: Dockerfile 中硬编码的 `curl -fsSL "https://claude.ai/install.sh"` 被 Anthropic 服务器返回 HTTP 403，CI 构建环境无法下载安装脚本。基础镜像拉取（第 1 步）和 yum 安装（第 2 步）均正常完成，问题仅出在外部 URL 下载环节。
+- 失败位置: `AI/claude-code/2.1.20/24.03-lts-sp4/Dockerfile:17`（`RUN curl -fsSL "${CLAUDE_INSTALL_SCRIPT}" ...` 步骤，即第3个 RUN 指令）
+- 失败原因: CI 构建环境所在区域无法访问 `https://claude.ai/install.sh`，Anthropic 服务器返回了一个 HTML 错误页面（标题为"App unavailable in region"）而非 bash 安装脚本。`curl` 将该 HTML 页面保存为 `/tmp/claude-install.sh`，随后 `bash` 尝试执行时因 HTML 标签（`<!DOCTYPE html>`）触发语法错误。
 
 ### 与 PR 变更的关联
-**直接关联**。PR 新增的 `AI/claude-code/2.1.20/24.03-lts-sp4/Dockerfile` 是全新文件，其中第 10 行 `ARG CLAUDE_INSTALL_SCRIPT="https://claude.ai/install.sh"` 和第 16 行的 `curl -fsSL "${CLAUDE_INSTALL_SCRIPT}"` 直接触发了此失败。该 Dockerfile 是本次 PR 新增的唯一构建文件，问题完全由本次变更引入。
+- **直接相关**。PR 新增的 Dockerfile 中硬编码了 `https://claude.ai/install.sh` 作为安装脚本下载源。该 URL 在 CI 构建环境所在区域（推断为亚太/中国区域）被 Anthropic 做了地理限制，返回的是区域不可用提示页面而非实际安装脚本。这是 PR 新增代码触发的失败，但根因在于上游服务的区域访问策略与 CI 环境不兼容。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-`claude.ai/install.sh` 可能对非浏览器 User-Agent 有访问限制，导致 curl 默认请求头被拒绝。可尝试在 `curl` 命令中添加浏览器模拟请求头（如 `-H "User-Agent: Mozilla/5.0"`），绕过服务器的 bot 检测。但此方案依赖 Anthropic 的服务器策略，不一定有效。
+### 方向 1（置信度: 高）
+将 claude-code 的安装方式从"运行时从 `claude.ai` 下载安装脚本"改为"在 Dockerfile 中预置安装脚本或将安装脚本托管在 CI 环境可访问的镜像源"。具体而言：
+- 将 `claude.ai/install.sh` 脚本内容直接内联到 Dockerfile 中（若脚本内容稳定且许可允许），或
+- 将安装脚本上传至 CI 环境可访问的内部/镜像服务器，并修改 `CLAUDE_INSTALL_SCRIPT` ARG 指向新地址，或
+- 使用支持该区域的代理/镜像 URL 替代 `https://claude.ai/install.sh`
 
 ### 方向 2（置信度: 中）
-`claude.ai/install.sh` 的安装脚本 URL 可能已变更或不再支持直接下载。需要验证：
-- `https://claude.ai/install.sh` 在当前是否仍然有效（在非 CI 环境的浏览器/anonymous 终端中测试）
-- Anthropic 是否提供了新的安装方式或替代下载 URL
-- 同仓库中已存在的 `AI/claude-code/2.1.20/24.03-lts-sp3/Dockerfile` 是否使用了相同 URL，以及当前构建是否也失败（若是，说明上游 URL 已全局失效）
-
-### 方向 3（置信度: 低）
-CI 构建环境的出口 IP 可能被 `claude.ai` 列入黑名单或受到地域限制。如果方向 1 和方向 2 均无法解决，需联系 CI 运维团队确认构建节点的网络出口策略是否被目标服务阻断。
+检查是否存在 Anthropic 官方提供的区域中立 CDN 地址或 GitHub Releases 发布的 claude-code 二进制包。如果 claude-code 在 GitHub 上有 release，可以直接从 GitHub 下载二进制，绕过 `claude.ai` 的地理限制。
 
 ## 需要进一步确认的点
-1. 同仓库中已有的 `AI/claude-code/2.1.20/24.03-lts-sp3/Dockerfile` 是否使用相同的 `https://claude.ai/install.sh`，其最近一次构建是否也失败（确认是 URL 全局失效还是偶然性问题）
-2. 从非 CI 环境（本地终端）执行 `curl -fsSL "https://claude.ai/install.sh"` 是否能正常下载（确认是环境限制还是 URL 变更）
-3. Anthropic 官方文档中 `install.sh` 的当前有效 URL 是什么（确认上游是否迁移了安装入口）
-4. `claude-code` 2.1.20 版本是否仍然受支持，该版本在 sp4 上的兼容性是否已经过验证
+- 确认 CI 构建环境的具体地理位置/网络出口，以判断是否有可用的代理或镜像方案
+- 确认 `https://claude.ai/install.sh` 脚本内容是否稳定，是否适合内联或缓存到内部仓库
+- 确认 claude-code 是否有 GitHub Releases 或其他无地理限制的下载渠道
+- 确认同类镜像（如 AI 目录下其他依赖外网下载的镜像）是否有类似的地理限制处理方案可参考
+
+## 修复验证要求
+若修复方向涉及将安装脚本内联或托管到内部源，code-fixer 必须：
+1. 从可访问 `https://claude.ai/install.sh` 的网络环境获取脚本的实际内容，验证脚本完整性后再内联或上传
+2. 在修复后，确保 CI 构建流程中不再依赖 `claude.ai` 域名的直接 HTTP 访问
