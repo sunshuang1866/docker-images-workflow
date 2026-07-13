@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 软件源 HTTP/2 流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 软件源HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,21 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: CI 构建环境中，openEuler 24.03-LTS-SP4 软件源（`repo.****.org`）的多个镜像站返回 HTTP/2 流错误（Curl error 92: HTTP/2 stream INTERNAL_ERROR），导致 `gcc-c++` 等 RPM 包下载失败。`dnf` 在尝试所有可用镜像后均失败，最终退出码为 1。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件源（`repo.****.org`）的 HTTP/2 服务端在下载过程中多次返回 `INTERNAL_ERROR`，导致 stream 异常关闭。虽然 `cmake-data` 和 `git-core` 通过重试其他镜像成功下载，但 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm`（约 13MB 的大包）在两次重试后所有镜像均返回相同错误，最终 `dnf install` 失败。
 
 ### 与 PR 变更的关联
-与 PR 变更**无直接关系**。PR 新增的 Dockerfile 本身语法正确、依赖声明完整（`dnf install` 的包列表合法），构建失败纯粹由 CI 基础设施中的软件源 HTTP/2 连接不稳定导致。日志中可见多个包（`cmake-data`、`git-core`、`gcc-c++`）均遭遇同类 Curl 92 错误，其中 `git-core` 在重试后成功下载，而 `gcc-c++` 耗尽所有镜像后仍失败，这进一步证明了问题是临时的网络/服务端抖动，而非 Dockerfile 内容有误。
+**与 PR 变更无关。** 本次 PR 仅新增了一个标准的 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`（以及配套的 README、image-info.yml、meta.yml 更新），Dockerfile 中的 `dnf install` 包列表语法正确、包名合理。失败完全由 openEuler 24.03-LTS-SP4 软件源服务器的 HTTP/2 实现缺陷引发，属于 CI 基础设施层面的问题。Code Fixer 无需对 PR 代码做任何修改。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建即可**。该失败为 CI 基础设施中的软件源 HTTP/2 连接瞬时故障，与 PR 代码变更无关。等待镜像站恢复后重新触发 CI 构建，大概率会通过。无需修改任何代码。
+此失败属于 CI 基础设施问题（软件源 HTTP/2 服务端不稳定），与 PR 代码变更无关。建议触发**重新运行 CI Job**（retry/re-run），等待软件源服务恢复正常后构建即可通过。无需修改任何代码。
 
 ### 方向 2（置信度: 低）
-如果该软件源 HTTP/2 问题持续出现，可考虑在 Dockerfile 的 `dnf install` 命令中添加重试参数（如 `--setopt=retries=10`），或临时将 `dnf` 回退为 HTTP/1.1（通过设置 `ip_resolve=4` 或禁用 HTTP/2），以规避 HTTP/2 层的流错误。但不推荐对偶发基础设施问题做此类代码级 workaround。
+如果多次重试均失败，可能是该特定 RPM 包（gcc-c++-12.3.1-110.oe2403sp4）在镜像站上确实损坏或同步不完整。此时需要联系 openEuler 基础设施团队检查 `repo.****.org` 镜像站的同步状态和 HTTP/2 代理配置。
 
 ## 需要进一步确认的点
-- 该 openEuler 24.03-LTS-SP4 软件源是否为近期新增或迁移的镜像站，是否存在 HTTP/2 配置不稳定的已知问题。
-- 如果后续多次触发 CI 构建仍然在相同镜像站失败，需要联系基础设施团队排查镜像站 HTTP/2 代理/负载均衡器的健康状态。
-- 其他基于 `openeuler:24.03-lts-sp4` 的新增 PR 是否也遇到同样的软件源 Curl 92 错误——若有，则确认是源站侧问题。
+- 确认 `repo.****.org` 的 HTTP/2 反向代理（如 nginx/haproxy）配置是否正确，是否存在对大文件传输的 HTTP/2 stream 超时或 buffer 限制。
+- 确认镜像站与上游 openEuler 主站之间的 RPM 同步是否完整，`gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 文件是否完整未损坏。
+- 同一时间段内其他 openEuler 24.03-LTS-SP4 的 Dockerfile 构建是否也出现了相同错误（可用于判断是否为软件源全局性问题）。
