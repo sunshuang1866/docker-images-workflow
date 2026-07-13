@@ -2,17 +2,17 @@
 
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
-- 失败类型: infra-error
-- 置信度: 中
-- 知识库匹配: 新模式
-- 新模式标题: 根目录文档路径校验失败
-- 新模式症状关键词: Path Error, expected path should be, README, appstore, update.py
+- 失败类型: lint-error
+- 置信度: 高
+- 知识库匹配: 模式11
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-12 15:33:13,075 - update.py[line:273] - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-12 15:33:13,075-.../update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +--------------+-----------------------------------------------------+--------------+
 | Check Items  |                     Description                     | Check Result |
 +--------------+-----------------------------------------------------+--------------+
@@ -22,21 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: CI 的 appstore 发布规范校验工具对 PR 变更的根目录文档文件（`README.en.md` 和 `README.md`）执行路径校验，期望路径为 `/README.md`。`README.en.md` 不匹配预期路径直接失败；`README.md` 也因路径比对方式（可能缺少前导 `/` 归一化，或校验器仅识别 appstore 管理的特定路径）被标记为 FAILURE。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`（appstore 发布规范校验）
+- 失败原因: CI 的 appstore 发布规范预检工具（`update.py`）对 PR 中所有变更文件执行路径规范校验。根目录下 `README.md` 和 `README.en.md` 不匹配 appstore 发布要求的镜像目录路径模式（期望格式为 `{image-version}/{os-version}/Dockerfile` 等），因此被标记为 `Path Error`。
 
 ### 与 PR 变更的关联
-PR 仅修改了仓库根目录的两个 README 文件（`README.md` 和 `README.en.md`），更新了可用的基础镜像 tag 列表。改动本身不涉及代码、构建脚本或 Dockerfile。CI 失败发生在 eulerpublisher 工具的 appstore 发布规范预检阶段（`update.py`），该检查将根目录文档文件视为不合规路径。此失败**与 PR 的文档内容无关**，是 CI 工具对 root 级文档文件变更的路径校验策略问题。
+PR 仅修改了根目录下的两个纯文档文件 `README.md` 和 `README.en.md`（更新可用基础镜像 tag 列表），未涉及任何 docker 镜像构建文件。CI 的 appstore 路径校验对所有变更文件一视同仁地执行检查，导致这两个文档文件因不属于任何镜像目录而触发了路径校验失败。这是 CI 校验范围过宽的问题——纯文档 PR 不应受镜像发布规范约束。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-CI appstore 预检工具可能不预期仓库根目录的 README 文件在 PR 中被单独修改。若该 PR 仅需更新文档而不涉及镜像发布，可通过调整 CI 触发条件（如仅当变更涉及 `Bigdata/`、`AI/` 等镜像目录时才触发 appstore 路径校验）来绕过此检查。
+### 方向 1（置信度: 高）
+CI 检查脚本 `update.py` 需要在遍历 PR 变更文件时，排除根目录级文档文件（如 `README.md`、`README.en.md`、`CONTRIBUTING.md` 等非镜像目录下的文件），使其仅对镜像目录内的文件执行 appstore 路径规范校验。
 
-### 方向 2（置信度: 低）
-`update.py` 中的路径比对逻辑可能存在缺陷，例如对相对路径 `README.md` 与绝对路径 `/README.md` 未做归一化处理，导致合法路径也被误报。若确认该点是根因，可在 `update.py` 的路径校验函数中增加路径归一化逻辑。
+### 方向 2（置信度: 中）
+若 CI 脚本不具备排除逻辑的修改条件，可考虑将根目录 README 文件注册到特定元数据或白名单中，使路径校验规则能正确识别它们为非镜像文件，但此方向仅为绕过方案，不如方向 1 从根本上解决问题。
 
 ## 需要进一步确认的点
-1. `eulerpublisher/update/container/app/update.py` 中第 273 行附近的路径校验逻辑：确认校验器是否将 `README.md`（相对路径）与 `/README.md`（绝对路径）视为不同值，导致原本合法的文件也被误报。
-2. 该 CI pipeline 的 appstore 预检步骤是否针对所有 PR 触发，还是仅对触及特定目录的 PR 触发——若为前者，纯文档 PR 理应被排除在检查范围之外。
-3. 确认 `README.en.md` 是否在 appstore 规范的允许文件白名单中，若不在，是否应将其加入白名单或排除根目录文档的检查。
+- CI 检查脚本 `eulerpublisher/update/container/app/update.py` 中文件遍历和路径校验逻辑的具体实现（当前日志中不可见），以确认添加文件过滤/排除逻辑的最佳位置。
+- 确认该仓库中还有哪些根目录级文件（如 `CONTRIBUTING.md`、`LICENSE`、`.gitignore` 等）同样会触发此类错误，以便一次性全面排除。
+- 确认 `eulerpublisher` 仓库是否有对应的 PR 修复流程（该脚本不在本仓库中管理）。
