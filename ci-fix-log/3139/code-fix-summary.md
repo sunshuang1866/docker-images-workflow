@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败原因为基础设施网络问题（pip 从 `mirrors.aliyun.com` 下载 `nvidia-cudnn-cu13`（366 MB）时发生 `ReadTimeoutError`），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施问题（infra-error）：pip 从 `mirrors.aliyun.com` 下载 `nvidia-cudnn-cu13`（366.2 MB）时发生 TCP 读超时，属于阿里云 PyPI 镜像站网络连接不稳定导致的大文件下载中断。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-分析报告明确指出失败类型为 `infra-error`，根因是 CI 构建节点到阿里云镜像站的网络链路不稳定，导致大文件下载超时。PR 仅新增了 `open-webui` 在 `openEuler:24.03-lts-sp4` 上的 Dockerfile 及元数据文件，Dockerfile 中使用的 pip 镜像源与现有其他版本一致，代码逻辑无问题。
-
-建议操作：重新触发 CI 构建（流水线重试），网络超时属于临时性问题，大概率重试后可通过。
+分析报告确认该失败与 PR 改动无直接关联——Dockerfile 中的 pip install 命令本身没有问题。失败发生在 353.4/366.2 MB（96.5%）处，下载速率 23 MB/s 正常，说明是网络连接在最后阶段中断，而非代码逻辑错误。推荐方案：直接重试 CI 构建（分析报告 Direction 1，置信度：高），相同的 Dockerfile 在镜像站连接稳定时大概率能直接构建成功。
 
 ## 潜在风险
 无
