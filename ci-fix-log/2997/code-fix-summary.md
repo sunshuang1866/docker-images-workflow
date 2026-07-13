@@ -1,15 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 infra-error，由 UCAR SVN 服务器 SSL 证书 hostname 不匹配导致，非 PR 代码缺陷。
+无需代码修改 — 此为基础设施错误（infra-error）。
 
 ## 修改的文件
-无。
+无
 
 ## 修复逻辑
-CI 失败发生在 `Dockerfile:52-55` 的 `./manage_externals/checkout_externals` 步骤，该步骤通过 SVN 从外部服务器 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 依赖时，SVN 客户端检测到服务器 SSL 证书中的 hostname 与实际访问的 hostname 不一致（E230001）。前期 yum 安装依赖、编译 MPICH/HDF5/NetCDF/PNetCDF、git clone CESM 仓库均成功完成。
+CI 失败原因为 CESM 的 `checkout_externals` 脚本在构建中调用 `svn checkout` 从外部 SVN 服务器 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 组件时，SVN 服务器的 SSL 证书与当前主机名不匹配（`certificate issued for a different hostname`），导致 TLS 握手被拒。
 
-根因在于 UCAR 的 SVN 服务器 SSL 证书配置问题（可能因 CDN/代理/负载均衡导致），Dockerfile 代码逻辑本身无错误。此为 CI 基础设施/网络环境问题，非 PR 代码缺陷。建议确认 UCAR 服务器证书状态后重试 CI。
+此失败与 PR #2997 的代码变更无关，是 NCAR/UCAR 外部 SVN 服务器的 SSL 证书配置问题。PR 的 Dockerfile 及所有变更文件本身无任何错误，前置依赖安装步骤（yum、mpich、hdf5、netcdf、pnetcdf）均成功完成。
+
+该问题需要：
+- NCAR/UCAR 修复其 SVN 服务器的 SSL 证书；或
+- CI 基础设施管理员协调处理构建环境的证书信任问题。
 
 ## 潜在风险
-无。
+无（未修改任何代码）
