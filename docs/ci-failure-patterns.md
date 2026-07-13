@@ -581,3 +581,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2751: `Cloud/openvelinux/velinux/1.0 velinux2/24.03-lts-sp3/Dockerfile` — 将 `velinux/1.0+velinux2` 版本目录从三级扁平化为二级，使其符合 CI 校验要求的 `{image
+
+---
+
+## 模式30：架构不匹配（meta缺失arch约束）
+
+**症状关键词**: does not have a compatible architecture, x86_64, aarch64, intel-basekit
+
+**根因**: - 失败位置: `AI/oneapi-basekit/2024.2.0/24.03-lts-sp4/Dockerfile:30`（`yum install` 步骤）
+- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-01-sp`）上构建该 Dockerfile，但 Intel oneAPI / GPU 仓库（配置为 RHEL x86_64 源）仅提供 x86_64 架构的 RPM 包（如 `intel-basekit-2025.3.2-19.x86_64`、`intel-opencl-...x86_64`），yum 在 aarch64 
+
+**修复方法**: `meta.yml` 中新增的 `2024.2.0-oe2403sp4` 条目缺少 `arch: x86_64` 约束，导致 CI 将该镜像调度到 aarch64 runner 上构建失败。
+
+**历史案例**:
+- PR #3135: `AI/oneapi-basekit/meta.yml` — `meta.yml` 中新增的 `2024.2.0-oe2403sp4` 条目缺少 `arch: x86_64` 约束，
