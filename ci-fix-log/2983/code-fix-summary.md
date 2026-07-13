@@ -1,13 +1,22 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败根因是 `infra-error`（Jenkins Agent 断连），非代码 bug。
+`fix_getdeps.py` 中用于替换 `_verify_hash` 方法的正则表达式在 `_verify_hash` 为类中最后一个方法时无法匹配，已增强以覆盖更多边界情况。
 
 ## 修改的文件
-无
+- `Others/fbthrift/2026.06.22.00/24.03-lts-sp4/fix_getdeps.py`: 第 17 行正则替换 `\n    def ` 为 `\n    (?:def |@)|\nclass |\Z`，增加对最后方法、装饰器方法、类边界和文件末尾的处理。
 
 ## 修复逻辑
-CI 分析报告将此失败归类为 `infra-error`，置信度高。直接错误是 Jenkins Agent `ecs-build-docker-x86-hk` 在执行 Docker 构建时通道意外关闭（`ChannelClosedException` / `EOFException`），Docker 构建步骤 #11 已运行约 35 分钟后被中断。日志因超过 2MiB 限制被截断。这是 CI 基础设施层面的问题（Jenkins 节点断连或资源不足），与 PR 代码变更无直接因果关系，不需要也不应该通过修改代码来修复。
+CI 分析报告指出原正则 `(?=\n    def )` 依赖下一个同级 `def` 作为匹配边界，当 `_verify_hash` 是类的最后一个方法、或下一个方法带有装饰器时，正则无法匹配，`re.sub` 不做任何替换，哈希校验未被跳过。
+
+修复后的正则 `(?=\n    (?:def |@)|\nclass |\Z)` 在三个备选边界中选择最早匹配者：
+1. `\n    def ` — 下一个未装饰方法（与原逻辑兼容）
+2. `\n    @` — 下一个带装饰器的方法
+3. `\nclass ` — 类定义结束
+4. `\Z` — 文件末尾（最后方法）
+
+已从上游 `fbthrift v2026.06.22.00` 获取 `build/fbcode_builder/getdeps/fetcher.py` 验证，新正则匹配成功，替换后语法正确（AST 编译通过），且恰好替换一处。
 
 ## 潜在风险
-无
+1. 若上游 `fetcher.py` 使用非 4 空格的缩进（如 tab），正则仍会匹配失败。当前上游版本使用 4 空格缩进，该风险仅在上游改变缩进风格时出现。
+2. CI 日志在 `Writing cargo config` 后截断，实际构建失败原因可能并非正则问题（如构建超时、OOM）；若后续仍失败，建议检查 Jenkins job 的 timeout 和内存配置。
