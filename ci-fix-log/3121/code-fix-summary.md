@@ -1,14 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-Claude 安装脚本下载时遭服务器 403 拒绝，通过添加浏览器 User-Agent 请求头绕过 bot 检测。
+无需代码修改。CI 失败类型为 `infra-error`（基础设施问题），根因是 CI 构建环境所在区域被 Anthropic 对 `claude.ai/install.sh` 做了地理限制，返回 HTML 错误页面而非实际安装脚本。
 
 ## 修改的文件
-- `AI/claude-code/2.1.20/24.03-lts-sp4/Dockerfile`: 新增 `ARG CURL_USER_AGENT` 定义浏览器 User-Agent 字符串，并在 `curl` 命令中添加 `-H "User-Agent: ${CURL_USER_AGENT}"` 参数。
+无。按照任务指令，`infra-error` 类型不应对代码做任何修改。
 
 ## 修复逻辑
-CI 分析报告方向 1（置信度: 中）指出 `claude.ai/install.sh` 可能对非浏览器 User-Agent 有限制。经测试，该 URL 当前可正常访问（返回 302 重定向至 `https://downloads.claude.ai/claude-code-releases/bootstrap.sh`），但 CI 环境中 curl 默认请求头被拒绝。通过在 curl 命令中添加 Chrome 浏览器 User-Agent 请求头，使请求模拟浏览器行为，提高服务器接受概率。
+此问题不是代码逻辑错误，而是 CI 基础设施与上游服务之间的网络可达性问题。Dockerfile 中的安装逻辑本身是正确的（从 `claude.ai` 下载安装脚本），但在 CI 当前所在区域该 URL 返回了区域不可用页面。解决此问题需要从 CI 基础设施层面入手，而非修改 Dockerfile 代码，例如：
+- 将 CI 构建节点迁移至未被 Anthropic 地理限制的区域
+- 在 CI 环境中配置代理以绕过区域限制
+- 预先将 `install.sh` 脚本托管至 CI 可访问的内部/镜像服务器，然后通过构建参数传入
 
 ## 潜在风险
-- 如果未来 Anthropic 变更 `claude.ai/install.sh` 的 URL，可能需要同步更新 `CLAUDE_INSTALL_SCRIPT` 参数。
-- 同仓库 `AI/claude-code/2.1.20/24.03-lts-sp3/Dockerfile` 使用相同 URL 但未添加 User-Agent，如果 sp3 构建也出现 403，需要同步修复（当前未被要求修改）。
+无（未修改任何代码）。
