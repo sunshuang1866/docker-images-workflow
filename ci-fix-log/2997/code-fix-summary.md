@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 此为 CI 基础设施问题（infra-error），非代码层面的 bug。
+无需代码修复。CI 失败为 infra-error，由 UCAR SVN 服务器 SSL 证书 hostname 不匹配导致，非 PR 代码缺陷。
 
 ## 修改的文件
-无
+无。
 
 ## 修复逻辑
-CI 失败根因是上游 NCAR/UCAR 的 SVN 服务器 `svn-ccsm-models.cgd.ucar.edu` 的 SSL 证书与主机名不匹配（`E230001: certificate issued for a different hostname`）。在 Docker 构建过程中，`./manage_externals/checkout_externals` 通过 SVN 拉取 `chem_proc` 子模块时连接该服务器，SSL 验证失败导致构建中断。
+CI 失败发生在 `Dockerfile:52-55` 的 `./manage_externals/checkout_externals` 步骤，该步骤通过 SVN 从外部服务器 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 依赖时，SVN 客户端检测到服务器 SSL 证书中的 hostname 与实际访问的 hostname 不一致（E230001）。前期 yum 安装依赖、编译 MPICH/HDF5/NetCDF/PNetCDF、git clone CESM 仓库均成功完成。
 
-此问题属于外部基础设施故障，不是 Dockerfile 代码本身的问题。CESM 上游仓库的 `Externals.cfg` 中 `chem_proc` 组件仍指向旧 SVN 服务器，而该服务器的证书配置存在错误。需等待上游 NCAR/UCAR 修复其 SVN 服务器证书，或 CESM 上游将 `chem_proc` 迁移至 Git 镜像后，重新触发构建即可通过。
+根因在于 UCAR 的 SVN 服务器 SSL 证书配置问题（可能因 CDN/代理/负载均衡导致），Dockerfile 代码逻辑本身无错误。此为 CI 基础设施/网络环境问题，非 PR 代码缺陷。建议确认 UCAR 服务器证书状态后重试 CI。
 
 ## 潜在风险
-无 — 未对代码做任何修改。
+无。
