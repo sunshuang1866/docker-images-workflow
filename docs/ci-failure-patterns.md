@@ -595,3 +595,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #3135: `AI/oneapi-basekit/meta.yml` — `meta.yml` 中新增的 `2024.2.0-oe2403sp4` 条目缺少 `arch: x86_64` 约束，
+
+---
+
+## 模式31：架构不匹配
+
+**症状关键词**: does not have a compatible architecture, x86_64 on aarch64, oneAPI, yum install
+
+**根因**: - 失败位置: `AI/oneapi-runtime/2024.2.0/24.03-lts-sp4/Dockerfile:30`
+- 失败原因: 新增 Dockerfile 对应的 `meta.yml` 条目未设置 `arch: x86_64`，导致 CI 在 aarch64 节点上也尝试构建该镜像。而 Intel oneAPI 仓库和 Intel GPU 驱动仓库均只提供 x86_64 架构的 RPM 包，在 aarch64 上 yum 无法安装，报 "does not have a compatible architecture"。
+
+**修复方法**: 新增的 `2024.2.0-oe2403sp4` 镜像条目缺少 `arch: x86_64` 架构限制，导致 CI 在 aarch64 节点上也尝试构建该镜像，Intel oneAPI 包仅支持 x86_64 而安装失败。
+
+**历史案例**:
+- PR #3136: `AI/oneapi-runtime/meta.yml` — 新增的 `2024.2.0-oe2403sp4` 镜像条目缺少 `arch: x86_64` 架构限制，导致 CI 在 
