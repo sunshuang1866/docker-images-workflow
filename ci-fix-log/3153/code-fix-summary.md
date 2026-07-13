@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 此为 CI 基础设施问题（infra-error），非 PR 代码缺陷。
+无需代码修改 — 此为 CI 基础设施问题（infra-error），PR 变更的文档文件本身无错误。
 
 ## 修改的文件
-无。PR #3153 仅包含 `README.md` 和 `README.en.md` 的文档内容更新（基础镜像 Tags 列表），这些文件内容正确，无需修改。
+无
 
 ## 修复逻辑
-CI 失败分析报告将该失败归类为 `infra-error`。根因是 CI 的 appstore 发布规范预检脚本（`eulerpublisher/update/container/app/update.py`）错误地将仓库根级项目文档文件（`README.md`、`README.en.md`）纳入路径校验范围。该检查本应仅针对 `AI/`、`Bigdata/` 等应用镜像场景目录内的文件，不应审查仓库根级文档。PR #3153 是纯文档变更，不影响任何应用镜像的构建或发布。需要修复的是 CI 基础设施脚本（`eulerpublisher/update/container/app/update.py`），该文件不在本 PR 的变更范围内，也不在允许修改的文件列表中。
+PR #3153 仅修改了 `README.en.md` 和 `README.md` 两个仓库根目录文档文件（更新基础镜像 tag 列表），这些文件内容正确，无代码或格式错误。
+
+CI 失败的根本原因是 appstore 发布规范校验脚本 (`eulerpublisher/update/container/app/update.py`) 未区分"纯文档类 PR"和"应用镜像类 PR"，对所有变更文件一律执行路径校验。两个 README 文件属于仓库根目录文档，不在任何应用镜像目录（AI/、Bigdata/、Cloud/ 等）下，因此被标记为 `[Path Error]`。
+
+真正的修复应在 `update.py` 中增加豁免逻辑：当所有变更文件均为根目录非应用镜像文件时跳过路径校验。但该文件不在本 PR 变更范围内，无法在此 fix 分支中修改。
+
+此 PR 本身是正确的文档更新，可通过仓库管理员手动合并或等待 CI 豁免逻辑修复后重新触发。
 
 ## 潜在风险
-无代码修改，无风险。建议在 CI 侧修复 `eulerpublisher/update/container/app/update.py` 增加根级文档文件的豁免逻辑，或使用 label 跳过方式允许纯文档 PR 绕过该检查。
+无 — 未对任何文件做代码修改。
