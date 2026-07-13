@@ -610,3 +610,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #3136: `AI/oneapi-runtime/meta.yml` — 新增的 `2024.2.0-oe2403sp4` 镜像条目缺少 `arch: x86_64` 架构限制，导致 CI 在 
+
+---
+
+## 模式32：Git快照返回HTML
+
+**症状关键词**: `gzip: stdin: not in gzip format`, `text/html`, `saved [2090]`, `git.kernel.org`, `snapshot`
+
+**根因**: - 失败位置: `Others/bcache/1.1/24.03-lts-sp4/Dockerfile:20`（wget + tar 步骤）
+- 失败原因: `wget` 请求 `git.kernel.org` 的 snapshot URL（`bcache-tools-1.1.tar.gz`），服务器返回 `text/html` 内容（仅 2090 字节的 HTML 页面）而非 gzip 压缩包，`tar -zxvf` 解压时报 `not in gzip format`。
+
+**修复方法**: `git.kernel.org` 的 Anubis 反爬保护导致 `wget` 下载 snapshot tar.gz 时返回 HTML 页面而非 gzip 压缩包，构建失败。
+
+**历史案例**:
+- PR #2929: `Others/bcache/1.1/24.03-lts-sp4/Dockerfile` — `git.kernel.org` 的 Anubis 反爬保护导致 `wget` 下载 snapshot tar.gz 时
