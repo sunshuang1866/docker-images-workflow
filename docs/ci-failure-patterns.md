@@ -639,3 +639,4 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #3101: `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile` — CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 
+- PR #3077: `Bigdata/accumulo/3.0.0/24.03-lts-sp4/Dockerfile` — 将 Zookeeper 下载源从 `archive.apache.org` 更换为 `repo.huaweicloud.
