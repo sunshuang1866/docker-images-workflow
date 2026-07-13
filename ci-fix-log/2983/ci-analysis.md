@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: Jenkins Agent 连接中断
-- 新模式症状关键词: ChannelClosedException, EOFException, Remote call failed, channel is closing down, ecs-build-docker
+- 新模式标题: Jenkins 通道断连
+- 新模式症状关键词: java.io.EOFException, ChannelClosedException, Unexpected termination of the channel, Remote call failed
 
 ## 根因分析
 
@@ -14,46 +14,46 @@
 ```
 FATAL: command execution failed
 java.io.EOFException
-  at java.base/java.io.ObjectInputStream$PeekInputStream.readFully(Unknown Source)
-  ...
 Caused: java.io.IOException: Unexpected termination of the channel
-  at hudson.remoting.SynchronousCommandTransport$ReaderThread.run(...)
 Caused: hudson.remoting.ChannelClosedException: Channel "hudson.remoting.Channel@24d4cc0d:ecs-build-docker-x86-hk": Remote call on ecs-build-docker-x86-hk failed. The channel is closing down or has closed down
-  at hudson.remoting.Channel.call(Channel.java:1101)
-  ...
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
+```
+```
+FATAL: Unable to delete script file /tmp/jenkins3161304096436833533.sh
+java.io.EOFException
+Caused: hudson.remoting.ChannelClosedException: Channel "hudson.remoting.Channel@24d4cc0d:ecs-build-docker-x86-hk": Remote call on ecs-build-docker-x86-hk failed. The channel is closing down or has closed down
 ```
 
 ### 根因定位
-- 失败位置: Jenkins agent `ecs-build-docker-x86-hk`（远程构建节点）
-- 失败原因: Jenkins agent 与 master 之间的 remoting 通道意外关闭（EOFException → ChannelClosedException），导致正在执行的 shell 步骤（Docker build）被强制终止。此时 Docker 构建本身并未报错，正在正常推进 getdeps 依赖链。
+- 失败位置: Jenkins 远程代理节点 `ecs-build-docker-x86-hk`，Shell 执行步骤
+- 失败原因: Docker 构建（`getdeps.py build fbthrift`）运行超过 35 分钟后，Jenkins master 与远程构建节点 `ecs-build-docker-x86-hk` 之间的 remoting 通道意外断开（`java.io.EOFException` → `ChannelClosedException`），导致 shell step 被标记为失败。Docker 构建自身在断连前进展正常（已完成 boost 安装、folly/fizz/mvfst/wangle 依赖解析，正在生成 fbthrift Rust cargo 配置），无编译错误输出。
 
 ### 与 PR 变更的关联
-**本次 PR 变更不是失败原因。** Docker 构建日志显示构建按预期推进：
-1. 系统包安装（dnf install）— 正常完成
-2. `fix_getdeps.py` 补丁执行（openEuler 发行版识别、libaio hash 跳过、manifest subdir 修正）— 正常
-3. Boost 编译安装 — 正在进行中（日志在 2MiB 处被截断）
-4. folly / fizz / mvfst / wangle 依赖解析（Using pinned rev）— 正常
-5. fbthrift cargo config 写入 — 正在执行（#11 2130.5 秒，约 35.5 分钟）
-
-构建在正常运行约 35.5 分钟时因 Jenkins agent 通道断开而中断，未出现任何从 Docker 构建内部产生的编译错误、链接错误或测试失败。
+本次 PR 新增了一个完整的 fbthrift 源码编译 Dockerfile，通过 `getdeps.py` 构建 fbthrift 及其全部依赖（boost、folly、fizz、mvfst、wangle），构建过程耗时极长（日志记录到 35.5 分钟时仍在进行中）。长时间构建可能触发 Jenkins 代理节点的资源限制（OOM、超时等），导致代理进程崩溃/失联。此外，`fix_getdeps.py` 中用于跳过 libaio 哈希校验的正则表达式存在健壮性隐患（见下文），重试时可能暴露该问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**重新触发 CI 构建**。这是一次性的 Jenkins 基础设施故障（agent 连接中断），与代码变更无关。重新运行该 job 大概率可以成功通过。
+本次失败的直接原因是 Jenkins 代理通道断连，属于基础设施问题。建议直接**重试 CI**，观察是否稳定复现。如果重试后成功，则无需修改代码。
 
 ### 方向 2（置信度: 低）
-**排查 agent 资源或网络问题**。如果多次重新触发均在同一阶段失败，则可能是：
-- Agent `ecs-build-docker-x86-hk` 内存不足（OOM），Docker 构建 boost + folly 等大型 C++ 项目时内存压力大
-- CI job 配置的构建超时时间不足（当前构建至少需要 35+ 分钟，尚不清楚完成总共需要多长时间）
-- Agent 与 master 之间的网络不稳定
+如果重试仍然失败，需排查 `fix_getdeps.py` 中跳过 `_verify_hash` 的正则表达式是否在目标版 fbthrift 的 `fetcher.py` 中成功匹配。当前正则 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 依赖以下假设：
+- 方法签名中无嵌套括号
+- 下一个 `def` 关键字恰好缩进 4 个空格
+- `_verify_hash` 不是类中最后一个方法
+
+若正则未匹配（静默失败），则 libaio 哈希校验未被跳过，getdeps 可能因哈希不匹配而失败。
+
+### 方向 3（置信度: 低）
+若 Docker 构建因资源不足（内存/OOM）被 kill，可考虑在 Dockerfile 中为 `getdeps.py` 添加 `--num-jobs` 参数限制并行编译数（如 `--num-jobs 2`），减少峰值内存消耗。
 
 ## 需要进一步确认的点
-1. **下游架构 job 日志**：当前提供的日志来自触发/编排层 job（x86 构建的主 job），若 PR 仍标记为 `ci_failed` 且重新触发后仍失败，需要获取该 job 的完整未截断日志（当前 2MiB 截断可能丢失了后续的错误信息）。
-2. **构建总耗时**：fbthrift 的 getdeps 完整构建（boost + folly + fizz + mvfst + wangle + fbthrift + 测试）需要多少时间？如果超过 CI 配置的超时阈值，需考虑增大超时或优化构建（如通过 dnf 安装部分预编译依赖替代源码编译）。
-3. **fix_getdeps.py 正则健壮性**：`_verify_hash` 方法的 patch 正则 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 依赖上游 `fetcher.py` 的特定方法签名格式和缩进风格。若上游代码中 `_verify_hash` 的签名格式变化（如多行参数、类型注解换行、该方法是类中最后一个方法导致无后续 `def`），正则可能匹配失败，导致 hash 校验未被跳过，构建将在 libaio 步骤失败。当前日志未覆盖到该环节，无法验证正则是否实际匹配成功。
+1. Jenkins 节点 `ecs-build-docker-x86-hk` 的**资源使用情况**：需要确认该节点在构建期间是否发生 OOM kill 或磁盘满等事件
+2. 目标版 fbthrift（`v2026.06.22.00`）中 `build/fbcode_builder/getdeps/fetcher.py` 的 **`_verify_hash` 方法实际签名和位置**：需确认 `fix_getdeps.py` 中的正则是否能命中
+3. `libaio-libaio-0.3.113.tar.gz` 二进制文件（PR 中新增）的**实际内部目录结构**：确认 `subdir` 修复 `libaio-libaio-0.3.113` → `libaio-0.3.113` 是否正确
 
 ## 修复验证要求
-若 code-fixer 需要调整 `fix_getdeps.py` 中的正则，必须从 fbthrift v2026.06.22.00 的 `build/fbcode_builder/getdeps/fetcher.py` 获取 `_verify_hash` 方法的实际签名，验证正则确实能匹配目标内容后再提交。同时验证 `fetcher.py` 的缩进风格（4 空格 vs tab）与正则中的 `\n    def ` 一致。
+若修复方向涉及修改 `fix_getdeps.py` 中的正则表达式，code-fixer 必须在提交前：
+- 从 `https://github.com/facebook/fbthrift.git` 的 `v2026.06.22.00` tag 获取 `build/fbcode_builder/getdeps/fetcher.py` 的实际内容
+- 验证 `_verify_hash` 方法的完整签名（包括类型注解）和前后代码上下文
+- 用修改后的正则对该文件运行 `re.sub`，确认替换成功
+- 同时验证 `build/fbcode_builder/manifests/libaio` 中 `subdir` 字段的实际值
