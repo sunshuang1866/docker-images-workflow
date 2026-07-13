@@ -3,7 +3,7 @@
 ## 基本信息
 - PR: #2997 — chore(cesm): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: SVN SSL证书不匹配
 - 新模式症状关键词: svn, E230001, Server SSL certificate verification failed, certificate issued for a different hostname, checkout_externals
@@ -16,34 +16,34 @@
 #16 92.39 ERROR:root:Failed with output:
 #16 92.39     svn: E170013: Unable to connect to a repository at URL 'https://svn-ccsm-models.cgd.ucar.edu/tools/proc_atm/chem_proc/release_tags/chem_proc5_0_04'
 #16 92.39     svn: E230001: Server SSL certificate verification failed: certificate issued for a different hostname
-#16 ERROR: process "/bin/sh -c yum install -y subversion cmake lapack-devel blas-devel perl-XML-LibXML &&     git clone -b release-cesm${VERSION} https://github.com/ESCOMP/cesm.git cesm2 &&     cd cesm2 &&     ./manage_externals/checkout_externals" did not complete successfully: exit code: 1
+#16 ERROR: process "/bin/sh -c yum install -y subversion cmake lapack-devel blas-devel perl-XML-LibXML && git clone -b release-cesm${VERSION} https://github.com/ESCOMP/cesm.git cesm2 && cd cesm2 && ./manage_externals/checkout_externals" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile 第52-55行（`RUN` 步骤中的 `./manage_externals/checkout_externals`）
-- 失败原因: CESM 的 `checkout_externals` 脚本在 checkout `chem_proc` 子模块时，通过 SVN 访问 `svn-ccsm-models.cgd.ucar.edu`，该服务器的 SSL 证书与主机名不匹配（`E230001: certificate issued for a different hostname`），导致 SVN checkout 失败，整个 Docker 构建中止。
+- 失败位置: `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile:52-55`（`./manage_externals/checkout_externals` 步骤）
+- 失败原因: CESM 的 `manage_externals/checkout_externals` 脚本通过 `svn checkout` 从 UCAR 服务器 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc`（chem_proc5_0_04）外部依赖时，SVN 客户端检测到该服务器 SSL 证书中的 hostname 与实际访问的 hostname 不一致，SSL 验证失败。这与 Dockerfile 代码逻辑无关。
 
 ### 与 PR 变更的关联
-**直接关联。** 本次 PR 新增了完整的 `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile`，在该 Dockerfile 的构建步骤（step 10/13）中执行 `./manage_externals/checkout_externals` 时触发了上游 SVN 服务器的 SSL 证书问题。这不是 Dockerfile 本身写法有误，而是上游 NCAR/UCAR 的 SVN 基础设施（`svn-ccsm-models.cgd.ucar.edu`）存在证书配置问题。CESM 主仓库已迁移至 GitHub，但其 `Externals.cfg`（由 `checkout_externals` 读取）中 `chem_proc` 组件仍指向旧 SVN 服务器。
+此次 PR 是新增 Dockerfile，代码逻辑本身无错误。前期步骤（yum 安装依赖、编译 MPICH/HDF5/NetCDF/PNetCDF、git clone CESM 仓库）均成功完成。失败发生在外部的 SVN 服务器 SSL 证书问题，属于 CI 基础设施/网络环境问题，非 PR 代码缺陷。
+
+上游 UCAR 的 SVN 服务器 `svn-ccsm-models.cgd.ucar.edu` 提供的 SSL 证书可能因 CDN/代理/负载均衡导致 hostname 不匹配，或该域名近期更换了托管服务器导致证书尚未更新。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-在 Dockerfile 的 `./manage_externals/checkout_externals` 执行前，通过环境变量或 SVN 全局配置允许证书信任异常（`--trust-server-cert-failures`），使 SVN checkout 忽略 SSL 主机名不匹配错误。需确认 openEuler 24.03-LTS-SP4 中 svn 1.14.x 版本对该选项的支持情况。
+在运行 `./manage_externals/checkout_externals` 之前，通过 SVN 配置关闭该特定主机的 SSL 证书验证。在 Dockerfile 的 RUN 命令中添加：
+```
+mkdir -p ~/.subversion && echo '[global]' > ~/.subversion/servers && echo 'ssl-verify=false' >> ~/.subversion/servers
+```
+注意：此方法降低了安全性，仅适用于构建环境。
 
-### 方向 2（置信度: 低）
-检查 `chem_proc5_0_04` 是否已有 Git 镜像（如 ESCOMP 组织的 GitHub 仓库），若是，则在 Dockerfile 中修改 CESM 的 `Externals.cfg`（`Externals_CAM.cfg`）将 `chem_proc` 的拉取方式从 `svn` 改为 `git`，指向 GitHub 镜像仓库。
+### 方向 2（置信度: 中）
+重试构建。如果 SSL 证书问题是 UCAR 服务器侧的临时性问题（如证书刚更新、DNS 缓存未同步），在数小时/数天后重试 CI 可能自动通过。建议先确认是否为临时性问题。
 
 ### 方向 3（置信度: 低）
-在 `./manage_externals/checkout_externals` 执行前，用 `sed` 临时修改 External 配置文件中 `chem_proc` 的 `repo_url`，将 `https://svn-ccsm-models.cgd.ucar.edu/tools/proc_atm/chem_proc/release_tags/chem_proc5_0_04` 替换为一个可用的镜像源。
+在 SVN checkout 命令层面使用 `--trust-server-cert-failures=cn-mismatch` 参数。但 CESM 的 `checkout_externals` 脚本内部调用 SVN，不直接暴露 SVN 参数，需要在 CESM 的 `manage_externals` 工具源码中找到 SVN 调用点并添加该参数，维护成本较高。
 
 ## 需要进一步确认的点
-- `svn-ccsm-models.cgd.ucar.edu` 的 SSL 证书问题是否为临时故障还是长期问题，需通过外部手段验证该 SVN 服务器当前是否仍提供服务
-- `chem_proc5_0_04` 是否已托管在 ESCOMP 或其他 GitHub 组织下，如有，其准确的 Git URL 和分支/tag 是什么
-- openEuler 24.03-LTS-SP4 中 `subversion` 包的 1.14.3 版本是否支持 `--trust-server-cert-failures` 选项
-- CESM 的同类别 Dockerfile（如 `22.03-lts-sp3`、`24.03-lts-sp3` 版本）是否已遇到过同样问题，如已有修复方案可参考
-
-## 修复验证要求
-无论采用哪个修复方向，code-fixer 必须：
-1. 在修改 Dockerfile 后触发完整的 Docker 构建，确认 `checkout_externals` 步骤（特别是 `chem_proc` 的 checkout）能成功通过
-2. 若采用方向2/3修改 External 配置，需验证修改后的 URL 确实能获取到 `chem_proc5_0_04` 的完整源码，确保 CESM 后续编译不受影响
+1. UCAR 服务器 `svn-ccsm-models.cgd.ucar.edu` 的 SSL 证书是否确实已过期或 hostname 不匹配（可通过 `openssl s_client -connect svn-ccsm-models.cgd.ucar.edu:443 -servername svn-ccsm-models.cgd.ucar.edu` 从 CI runner 网络环境验证）
+2. 在其他平台（如 24.03-lts-sp3、22.03-lts-sp4）上构建 CESM 2.2.2 时是否遇到同样错误（即判断是否为 openEuler 24.03-LTS-SP4 容器镜像中 CA 证书包的问题）
+3. 该 SVN 服务器历史上是否稳定可用，或者这是首次在该 CI 环境中访问该 SVN 服务器
