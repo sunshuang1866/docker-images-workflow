@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 本次 CI 失败属于 Jenkins 基础设施故障（agent 连接中断），与 PR 变更无关。
+CI 失败原因为 `infra-error`：Jenkins 远程代理节点 `ecs-build-docker-x86-hk` 在执行长时间 Docker 构建（35+ 分钟）时通道意外断连（`java.io.EOFException` → `ChannelClosedException`），属于基础设施问题，非代码缺陷。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-CI 分析报告诊断结论：失败类型为 `infra-error`，根因是 Jenkins agent `ecs-build-docker-x86-hk` 与 master 之间的 remoting 通道意外关闭（EOFException → ChannelClosedException），导致正在执行的 Docker build 被强制终止。Docker 构建本身正在正常推进（dnf 安装完成、fix_getdeps.py 补丁执行正常、Boost 编译进行中、依赖解析正常），未出现任何编译错误、链接错误或测试失败。
-
-修复方向：重新触发 CI 构建即可，这是一次性的基础设施故障，与代码无关。
+根据 CI 失败分析报告，本次失败的直接原因是 Jenkins master 与远程构建节点之间的 remoting 通道断开。Docker 构建自身在断连前进展正常（已完成 boost 安装、folly/fizz/mvfst/wangle 依赖解析，正在生成 fbthrift Rust cargo 配置），无编译错误输出。该问题属于基础设施故障，建议重试 CI 观察是否稳定复现。分析报告将失败类型明确标注为 `infra-error`，按照规范无需进行代码修改。
 
 ## 潜在风险
-无
+如果重试后仍然失败，需进一步排查：
+1. Jenkins 节点 `ecs-build-docker-x86-hk` 的资源使用情况（OOM、磁盘满等）
+2. `fix_getdeps.py` 中跳过 `_verify_hash` 的正则表达式是否在目标版本 fbthrift (`v2026.06.22.00`) 的 `fetcher.py` 中成功匹配（分析报告标注置信度低）
+3. 是否需在 Dockerfile 中为 `getdeps.py` 添加 `--num-jobs` 参数限制并行编译数以减少峰值内存
