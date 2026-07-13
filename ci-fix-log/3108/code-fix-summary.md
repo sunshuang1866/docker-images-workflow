@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-将 Mesos 源码下载源从不可达的 `downloads.apache.org` 切换为可正常访问的 Apache 归档站 `archive.apache.org`。
+CI 构建环境无法连接 `archive.apache.org` 下载 Mesos 1.11.0 源码包，导致 Docker 构建在 wget 阶段超时失败。
 
 ## 修改的文件
-- `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile`: 第42行 wget 下载 URL 从 `https://downloads.apache.org/mesos/...` 改为 `https://archive.apache.org/dist/mesos/...`
+- `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile`: 将 Mesos 源码下载 URL 从 `https://archive.apache.org/dist/mesos/` 替换为 `https://repo.huaweicloud.com/apache/mesos/`
 
 ## 修复逻辑
-CI 构建环境中 `downloads.apache.org` 的所有 IPv4/IPv6 地址均不可达（两个 IPv4 超时、两个 IPv6 无路由），导致 wget 以 exit code 4 失败。分析报告指向此为 infra-error，建议切换到 Apache 归档站。已验证 `https://archive.apache.org/dist/mesos/1.11.0/mesos-1.11.0.tar.gz` 可正常访问（HTTP 200），且该域名与构建中已成功访问的其他外部站点（openssl.org、python.org）同属 Internet 可达范围。改动仅替换域名和路径前缀，不影响下载逻辑和构建流程。
+CI 构建节点的网络无法访问 `archive.apache.org`（TCP 连接超时），该类 Apache 镜像站在当前 CI 环境中不可达。已从上游验证 `https://repo.huaweicloud.com/apache/mesos/1.11.0/mesos-1.11.0.tar.gz` 返回 HTTP 200（Content-Length: 72210031），文件存在且可下载。华为云镜像站在同类 CI 失败（PR #3077 accumulo）中已验证可达，修复方向与历史案例一致。
 
 ## 潜在风险
-无。归档站 `archive.apache.org` 是 Apache 官方长期维护的归档服务，`/dist/mesos/` 路径与原始 `/mesos/` 路径下的文件内容完全一致。同一镜像中已有从 GitHub 和 python.org 下载的先例，网络可达性已得到验证。
+无。仅替换下载源 URL，镜像站路径结构与 Apache 官方一致（`/apache/mesos/${VERSION}/`），不改变文件内容、构建逻辑或其他步骤。
