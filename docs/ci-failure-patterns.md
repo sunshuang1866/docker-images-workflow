@@ -641,3 +641,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 - PR #3101: `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile` — CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 
 - PR #3077: `Bigdata/accumulo/3.0.0/24.03-lts-sp4/Dockerfile` — 将 Zookeeper 下载源从 `archive.apache.org` 更换为 `repo.huaweicloud.
 - PR #3108: `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile` — CI 构建环境无法连接 `archive.apache.org` 下载 Mesos 1.11.0 源码包，导致 Dock
+
+---
+
+## 模式34：SVN证书主机名不匹配
+
+**症状关键词**: svn, E230001, certificate issued for a different hostname, checkout_externals, chem_proc
+
+**根因**: - 失败位置: Dockerfile 第 52-57 行 RUN 指令中的 `./manage_externals/checkout_externals` 步骤，具体在 checkout `chem_proc` 子组件时
+- 失败原因: CESM 的 `manage_externals/checkout_externals` 脚本内部通过 `svn checkout` 从 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 组件，该 SVN 服务器的 TLS 证书与访问主机名 `svn-ccsm-models.cgd.ucar.edu` 不匹配，SVN 
+
+**修复方法**: CESM 2.2.2 构建过程中 `checkout_externals` 步骤因 SVN 服务器证书主机名不匹配（`E230001: certificate issued for a different hostname`）而失败。
+
+**历史案例**:
+- PR #2997: `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile` — CESM 2.2.2 构建过程中 `checkout_externals` 步骤因 SVN 服务器证书主机名不匹配（`E
