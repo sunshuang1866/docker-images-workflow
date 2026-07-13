@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修改。CI 失败属于 **infra-error**（基础设施问题），`pip install` 从 `mirrors.aliyun.com` 下载大文件 `nvidia-cudnn-cu13==9.20.0.48`（366.2 MB）时网络读取超时，下载进度停在 96.5%，属于临时网络波动，与 PR #3139 的代码变更无关。
+CI 构建失败为基础设施问题（infra-error），无需代码修改。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-分析报告结论为 `infra-error`，失败类型为 pip 镜像下载超时（`ReadTimeoutError`），根因是阿里云镜像站对该特定大文件的 CDN 连接稳定性问题。npm 阶段和 pip 小体积包下载均成功，仅大文件下载接近完成时超时，属于瞬时性基础设施问题，重试 CI 构建通常可以成功。按规范要求，infra-error 不做代码修改。
+CI 失败的直接原因是 `pip install -r backend/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/` 在下载 `nvidia-cudnn-cu13`（366 MB）时发生 `ReadTimeoutError`，属于阿里云镜像站的 TCP 读超时。该 Dockerfile 语法正确、依赖声明正确，失败与 PR 代码逻辑无关，属于外部镜像站的瞬态网络不稳定问题。同样配置在其他时间或使用其他镜像源重试很可能成功。
 
 ## 潜在风险
 无
