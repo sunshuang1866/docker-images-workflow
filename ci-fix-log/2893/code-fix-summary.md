@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误（infra-error）：CI Runner 的 [Check] 阶段缺少 `shunit2` Bash 测试框架，导致容器镜像验证脚本 `common_funs.sh` 执行失败。与 PR #2893 的代码变更无关。
+无需代码修复。CI 失败属于基础设施问题（infra-error）：CI aarch64 runner 的 `eulerpublisher` 测试环境中缺少 `shunit2` Shell 测试框架，导致 `common_funs.sh` 中 `source shunit2` 报 "file not found"。
 
 ## 修改的文件
-无代码修改。
+无
 
 ## 修复逻辑
-根据 CI 失败分析报告，失败类型为 `infra-error`：
-- Docker 构建过程全部成功：422/422 步骤通过，aarch64 镜像推送也成功完成。
-- 失败发生在 CI Runner 的 [Check] 阶段（`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`），该脚本需要 `shunit2` 但文件不存在。
-- PR 只新增了 bind9 的 openEuler 24.03-LTS-SP4 Dockerfile、配置文件及元数据条目，不涉及 CI 基础设施配置。
-- 这是一个 CI 环境配置问题，需由 CI 运维人员在 Runner 节点安装 `shunit2` 测试框架来解决，无需修改 PR 中的任何代码。
+本次 PR 仅新增 bind9 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配置文件，构建阶段（`meson setup`、`meson compile`、`meson install`）和镜像推送阶段均已成功。失败发生在 CI 自身 Check 阶段的 `eulerpublisher` 测试框架内部，与 PR 变更完全无关。属于 CI runner 环境依赖缺失问题，需联系 CI 运维团队在 aarch64 runner 上安装 `shunit2`。
 
 ## 潜在风险
-无。此问题属于 CI 基础设施层面的环境缺失，不影响 Docker 镜像构建的正确性和镜像质量。
+无
