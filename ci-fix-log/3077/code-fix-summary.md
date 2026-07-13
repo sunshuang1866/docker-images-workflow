@@ -1,13 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（网络连接超时），非代码逻辑错误。
+将 Zookeeper 下载源从 `archive.apache.org` 更换为 `repo.huaweicloud.com`（华为云镜像站），解决 CI aarch64 构建节点无法连接 `archive.apache.org` 导致 curl 超时的问题。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+- `Bigdata/accumulo/3.0.0/24.03-lts-sp4/Dockerfile`: 第 16 行 Zookeeper 下载 URL 从 `https://archive.apache.org/dist/zookeeper/zookeeper-3.9.3/apache-zookeeper-3.9.3-bin.tar.gz` 改为 `https://repo.huaweicloud.com/apache/zookeeper/zookeeper-3.9.3/apache-zookeeper-3.9.3-bin.tar.gz`
 
 ## 修复逻辑
-CI 分析报告将该失败归类为 `infra-error`（置信度：高）。构建日志显示 CI runner（aarch64）无法建立到 `archive.apache.org:443` 的 TCP 连接，curl 在约 133 秒后超时（exit code 28），导致 Zookeeper 下载失败。这是 CI 基础设施与远端服务器的网络连通性问题，Dockerfile 中使用的 `archive.apache.org` URL 格式正确，且与同仓库中已有的 `Bigdata/accumulo/3.0.0/24.03-lts-sp1/Dockerfile` 第 16 行使用的下载源完全一致。根据规范要求，`infra-error` 不应通过修改代码来绕过，应由 CI 运维侧排查网络出口策略或配置代理解决。
+CI 分析报告指出根因是 CI 的 aarch64 runner 无法与 `archive.apache.org` 建立 TCP 连接（curl exit code 28），属于基础设施网络限制。`dlcdn.apache.org` 不托管 Zookeeper 3.9.3 版本（仅托管 3.7.2、3.8.6、3.9.5），因此切换为构建环境中可达的华为云镜像站。经验证，华为云镜像站 `https://repo.huaweicloud.com/apache/zookeeper/zookeeper-3.9.3/` 路径下制品存在且可下载（HTTP 200，文件大小超过 5MB）。
 
 ## 潜在风险
-无（无代码修改）
+- Hadoop（`dlcdn.apache.org`）和 Accumulo（`dlcdn.apache.org`）的下载源仍在同上 Dockerfile 的后续步骤中使用，若 CI 环境同样无法访问 `dlcdn.apache.org`，后续构建步骤也可能失败，但目前无此现象。
+- Dockerfile 第 13 行 `ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk` 与第 8 行安装的 `java-11-openjdk-devel` 不一致（hadoop-env.sh 中正确指向 `/usr/lib/jvm/java-11-openjdk`），此问题与当前构建失败无关，但可能导致运行时 Java 版本混乱，建议后续单独修复。
