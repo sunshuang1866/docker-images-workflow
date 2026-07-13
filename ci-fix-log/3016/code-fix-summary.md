@@ -1,14 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-移除 `cython=0.29` 的版本 pin，修复因 Miniforge3 默认 Python 3.13 与 `cython=0.29`（仅支持到 Python 3.12）不兼容导致的 conda 依赖解析失败。
+将 Miniforge3 下载 URL 从 `latest` 滚动版本锁定为固定版本 `24.3.0-0`，解决 Python 3.13 私有 C API 不兼容导致的 pytraj 编译失败。
 
 ## 修改的文件
-- `HPC/ambertools/24.8/24.03-lts-sp4/UseMiniconda.cmake`: 第 174 行，将 `cython=0.29` 改为 `cython`（移除版本约束）
+- `HPC/ambertools/24.8/24.03-lts-sp4/UseMiniconda.cmake`: 将 `INSTALLER_URL` 中的 `releases/latest/download/` 改为 `releases/download/24.3.0-0/`
 
 ## 修复逻辑
-CI 失败的直接原因是 `LibMambaUnsatisfiableError`：`cython=0.29` 在 conda-forge 中最高仅支持 Python 3.12，无法与 Miniforge3 默认的 Python 3.13 兼容。将 `cython=0.29` 改为 `cython` 后，conda 解析器会自动选择与当前 Python 版本兼容的最新 cython 构建。此修改与 sp4 版本中已对 `numpy` 做的同类处理（相比 sp2 版本已移除 `numpy=1.26.4` 的 pin）保持一致。
+分析报告指出根因是 `UseMiniconda.cmake` 通过 `/latest/download/` 路径动态下载最新版 Miniforge3，而 2026 年 7 月最新版内置 Python 3.13，移除了 AmberTools 24 pytraj 预生成 C++ 代码依赖的私有 C API（`_PyList_Extend`、`_PyInterpreterState_GetConfig`、`_PyUnicode_FastCopyCharacters`、`_PyGen_SetStopIterationValue` 等），导致 g++ 编译失败。修复方案为锁定 Miniforge3 版本至 `24.3.0-0`（该版本内置 Python 3.12），与 AmberTools 24 的 Cython 预生成代码兼容。
+
+已从上游 `conda-forge/miniforge` 的 tag `24.3.0-0` 验证：`Miniforge3-Linux-x86_64.sh` 和 `Miniforge3-Linux-aarch64.sh` 均存在且可下载。
 
 ## 潜在风险
-- AmberTools 24 的 Cython 扩展模块构建可能与 cython 3.x 存在 API 兼容性问题，但上游 conda-forge 已不再为 cython 0.29 提供 Python 3.13 构建，放弃版本 pin 是唯一可行方案。
-- 若后续编译阶段出现 cython 版本不兼容错误，需进一步调整 AmberTools 源码中的 `.pyx` 文件，但此风险在当前阶段无法规避。
+- Miniforge3 24.3.0-0 的 conda 包索引可能随时间更新，导致后续 `conda install` 步骤安装的某些包版本变化（但 Python 主版本锁定在 3.12，不会引入 3.13 的 API 不兼容问题）
+- 若未来 24.3.0-0 版本从 GitHub Releases 中被移除，需要更新 `INSTALLER_URL` 中的版本号
