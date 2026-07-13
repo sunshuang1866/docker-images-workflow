@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败由 `eulerpublisher` 工具错误地对纯文档 PR（根目录 README 文件变更）执行 appstore 发布规范路径校验导致，属于 CI 基础设施配置问题（infra-error），与 PR 代码内容无关。
+CI appstore 发布规范预检将纯文档 PR 的根目录 README 文件标记为路径错误，属 CI 基础设施问题，无需修改 PR 中的源文件。
 
 ## 修改的文件
-无（CI 基础设施问题，非代码层面可修复）
+无。本次 CI 失败为基础设施/CI 配置问题（`eulerpublisher/update/container/app/update.py` 的 appstore 路径校验逻辑缺少对纯文档变更 PR 的豁免），不涉及 `pr.changed_files` 中 `README.en.md` 和 `README.md` 的代码错误。
 
 ## 修复逻辑
-- CI 的 `eulerpublisher` 工具要求所有 PR 变更文件必须符合 appstore 镜像发布目录路径格式（如 `{Category}/{Image}/{Version}/{OSVersion}/`），但根目录的 `README.md` 和 `README.en.md` 是仓库文档文件，不属于任何 appstore 发布目录。
-- PR #3153 仅更新了这两份文档中加入基础镜像可用 tag 列表，内容正确无误，不应触发 appstore 路径校验。
-- 该问题需要在 CI 流水线或 `eulerpublisher` 工具层面解决（如对仅修改根目录 `*.md` 文件的 PR 跳过 appstore 路径校验，或为根目录文档文件添加白名单例外），不在本次 PR 的代码范围内。
+CI 分析报告（置信度：高）确认：PR #3153 仅修改了仓库根目录下的 `README.en.md` 和 `README.md` 两个文档文件（更新基础镜像可用 tags 列表），无任何 Docker 镜像构建文件变更。CI 的 appstore 预检脚本将这两个根目录文档文件与 Docker 镜像目录结构规范比对，判定路径错误。根因在于 `update.py` 缺少对纯文档变更 PR 的豁免机制，属于 CI 基础设施问题，应由 CI 维护方在 `update.py` 的差异分析阶段添加文件过滤逻辑，排除不在镜像目录下的纯文档文件。
+
+PR 中 README 文件的变更内容（tags 列表 URL 更新）本身正确无误，无需修改。
 
 ## 潜在风险
-无（未修改任何代码文件）
+无。本次未修改任何源文件。
