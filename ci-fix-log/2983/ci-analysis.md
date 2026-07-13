@@ -3,16 +3,15 @@
 ## 基本信息
 - PR: #2983 — chore(fbthrift): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: 构建超时/OOM 被杀
-- 新模式症状关键词: ChannelClosedException, EOFException, fatal: command execution failed, Unexpected termination of the channel, ecs-build-docker-x86-hk
+- 新模式标题: Jenkins Agent 通道中断
+- 新模式症状关键词: ChannelClosedException, EOFException, Unexpected termination of the channel, ecs-build-docker-x86-hk
 
 ## 根因分析
 
 ### 直接错误
 ```
-#11 2130.5 Writing cargo config for fbthrift to /tmp/fbcode_builder_getdeps-ZbuildZbuildZfbcode_builder-root/build/fbthrift/source/thrift/lib/rust/.cargo/config.toml
 FATAL: command execution failed
 java.io.EOFException
 Caused: java.io.IOException: Unexpected termination of the channel
@@ -23,35 +22,41 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:18（`RUN git clone ... && ./getdeps.py build fbthrift` 步骤）的 Docker 构建过程中
-- 失败原因: Docker 构建在耗时约 35 分钟、执行到 fetcher 依赖解析/准备阶段（Writing cargo config）时，Jenkins runner 上的 shell 进程被异常终止，导致 Channel 关闭，整个 Build 被标记为失败。日志中**未出现任何编译错误、依赖缺失或代码层面的错误**，构建输出在终止前进展正常（boost 头文件拷贝→依赖 folly/fizz/mvfst/wangle 版本锁定→cargo config 写入）。结合执行耗时（2130+ 秒）和进程被外部杀掉的特征，根因极可能是 **CI runner 超时（Jenkins job timeout）或 OOM Killer 杀死了 docker build 进程**。
+- 失败位置: Jenkins 构建节点 `ecs-build-docker-x86-hk`（x86_64架构），发生在 `#11`（Docker build 步骤）执行期间
+- 失败原因: Jenkins Master 与构建节点 `ecs-build-docker-x86-hk` 之间的 remoting 通道意外中断（`ChannelClosedException`），导致正在执行中的 Docker build 被强制终止。Docker build 当时已运行约 2130 秒（35 分钟），正处于 fbthrift 及其依赖（boost、folly、fizz、mvfst、wangle）的编译阶段，日志输出量已触发 2MiB 截断限制。
 
 ### 与 PR 变更的关联
-- **PR 直接触发了构建资源需求激增**。该 PR 新增了 openEuler 24.03-LTS-SP4 上 fbthrift 的 Dockerfile，其构建方式为通过 `getdeps.py` 从源码编译 fbthrift 及其全部 C++ 依赖（boost、folly、fizz、mvfst、wangle 等），这是一个极其重量级的构建（仅依赖 fetch/解析就用了 35+ 分钟，完整编译可能需要数小时）。
-- 对比已有的 `24.03-lts-sp3` Dockerfile（同仓库同项目的其他版本），如果旧版本构建时间本就接近超时阈值，新增一个相同量级的构建任务可能恰好触发 runner 的超时/OOM 限制。
-- `fix_getdeps.py` 中的正则 patch（`r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'`）如果未能正确匹配上游 `fetcher.py` 中的 `_verify_hash` 方法签名，patch 将静默失效（原方法保留），但日志在进入实际编译阶段之前就已终止，无法确认该 patch 是否成功执行。
+**无法确定是否存在直接关联**。PR 新增了 fbthrift v2026.06.22.00 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和配套修补脚本 `fix_getdeps.py`。Docker build 在 Jenkins Agent 崩溃前已顺利通过以下阶段：
+1. dnf 安装系统依赖（无报错）
+2. git clone fbthrift 源码（无报错）
+3. 执行 `fix_getdeps.py` 修补脚本（无报错）
+4. getdeps 成功解析并开始安装依赖：boost（525秒起）、folly（901秒）、fizz（1390秒）、mvfst（1606秒）、wangle（2017秒）、fbthrift cargo config（2130秒）
+
+日志中唯一的非致命警告是 `#11 725.2 fatal: not a git repository (or any of the parent directories): .git`，该警告出现在 boost header 安装完毕之后、folly 依赖解析之前，系 getdeps 在构建某依赖的提取 tarball 目录中执行 git 命令所致，不影响构建流程。
+
+由于 Jenkins Agent 通道在 Docker build 完成前中断，**无法判断 Docker build 本身是否会最终成功**。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**构建超时/OOM → 延长 CI timeout 或增加 runner 资源**
-
-检查 Jenkins job 的超时配置和 runner 的内存上限。fbthrift 的 getdeps 全量源码构建在 2C/4G 的 runner 上执行 35+ 分钟仍未进入实际编译阶段，completion 可能需要 > 2 小时。建议增大 runner 规格（内存至少 8G，最好 16G）或将 job timeout 设置为 4 小时以上。
+### 方向 1（置信度: 低）
+**重试构建**。该失败为 Jenkins 基础设施层面的通道中断（可能由网络波动、Agent 资源耗尽或 Jenkins 超时引起），与 PR 代码改动无直接关联。重新触发 CI 流水线有较大概率通过。
 
 ### 方向 2（置信度: 低）
-**fix_getdeps.py 正则未匹配导致 hash 校验失败（预防性）**
+**检查 `fix_getdeps.py` 中 `_verify_hash` 正则表达式的匹配正确性**。该脚本第 17-22 行使用正则 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 替换 `fetcher.py` 中的 `_verify_hash` 方法为空实现。存在以下风险：
+- 如果 `_verify_hash` 是该类的最后一个方法，则 `(?=\n    def )` 前瞻断言无法匹配，正则整体匹配失败，`re.sub` 返回原字符串不变，哈希校验代码未被替换；
+- 如果 `_verify_hash` 方法体内部包含嵌套的 `def` 语句，懒匹配 `.*?` 可能过早终止，导致替换不完整。
 
-`fix_getdeps.py` 第 2 步的正则 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 用于替换 `fetcher.py` 中的 `_verify_hash` 方法体。如果 fbthrift v2026.06.22.00 对应的 fetcher.py 中 `_verify_hash` 的实际签名与此正则不匹配（例如参数模式不同，或 Python 方法换行风格不一致），replace 会静默无操作，后续 libaio 的哈希校验将失败——但本次日志未到达该阶段，无法确认。建议在 runner 资源充足的前提下重试，以观察是否出现后续的 hash mismatch 错误。
-
-### 方向 3（置信度: 低）
-**使用 --allow-system-packages 但 getdeps 仍从源码构建 boost**
-
-Dockerfile 中安装了 `boost-devel` 并通过 `--allow-system-packages` 期望使用系统 boost，但日志显示 getdeps 仍在解压和安装 boost_1_83_0（从 `#11 525.*` 的大量 boost 头文件复制可见）。这意味着 `--allow-system-packages` 未能成功跳过 boost 的源码构建，显著增加了构建时间和资源消耗。可检查是否需额外的 getdeps 参数或 manifest 配置来真正使用系统包。
+由于 Docker build 在到达 libaio 哈希校验步骤之前即被中断，无法从日志确认该正则是否生效。
 
 ## 需要进一步确认的点
+1. **重试 CI 构建**：确认 Docker build 是否能完整通过，排除本次失败为偶发性基础设施问题。
+2. **验证 `fix_getdeps.py` 正则**：从 fbthrift v2026.06.22.00 上游仓库获取 `build/fbcode_builder/getdeps/fetcher.py` 文件，检查 `_verify_hash` 方法的实际签名和位置（是否为类中最后一个方法），确认正则 `r'def _verify_hash\(self[^)]*\)[^:]*:.*?(?=\n    def )'` 能够正确匹配并替换整个方法体。
+3. **检查 Jenkins 节点资源**：确认 `ecs-build-docker-x86-hk` 节点的磁盘空间和内存是否充足，fbthrift 完整构建（含 boost、folly、fizz、mvfst、wangle 等重型 C++ 依赖）对资源消耗较大。
+4. **检查上游 fbthrift v2026.06.22.00 的 `build/fbcode_builder/getdeps/getdeps_platform.py`**：确认 `openeuler` 字符串添加到发行版元组后，getdeps 能正确识别 openEuler 系统并安装对应依赖。
 
-1. **Jenkins job 超时配置**：当前 job 的 timeout 是多少？2100+ 秒（35 分钟）是否是触发阈值？
-2. **Runner 规格**：`ecs-build-docker-x86-hk` 节点的内存和 CPU 配置？是否需要升级到更大规格？
-3. **SP3 版本构建时间**：已有的 `24.03-lts-sp3` 的 fbthrift Dockerfile 构建是否使用了不同的优化策略（如预编译二进制包、多阶段构建）使其在 CI 中能成功？如果 SP3 也使用相同的 getdeps 全量编译方式且能成功，则本次失败更有可能是 runner 节点偶发问题而非超时。
-4. **fix_getdeps.py 正则验证**：需从 fbthrift v2026.06.22.00 的上游仓库获取 `build/fbcode_builder/getdeps/fetcher.py`，验证 `_verify_hash` 方法的实际签名是否与之正则匹配。若未匹配，即使解决超时问题后仍会出现 libaio hash 校验失败。
-5. **是否 OOM**：检查 Jenkins 节点的 dmesg/kernel log 中是否有 `Out of memory` 或 `oom-killer` 记录，以确认是 OOM 而非 timeout。
+## 修复验证要求
+若修复方向 2 被采纳（修改 `fix_getdeps.py` 中的正则），code-fixer 必须：
+1. 从 fbthrift v2026.06.22.00 上游仓库获取 `build/fbcode_builder/getdeps/fetcher.py` 文件（可通过 `git clone -b v2026.06.22.00 --depth 1 https://github.com/facebook/fbthrift.git` 获取）
+2. 在该文件中定位 `_verify_hash` 方法的完整签名和位置（确认参数列表、方法体结构、是否为最后一个方法）
+3. 用实际文件内容验证修改后的正则表达式能否正确匹配 `_verify_hash` 方法并完整替换
+4. 同样验证 `fix_getdeps.py` 中对 `getdeps_platform.py` 发行版列表的字符串替换和 `libaio` manifest 的 `subdir` 替换是否与原文件内容匹配
