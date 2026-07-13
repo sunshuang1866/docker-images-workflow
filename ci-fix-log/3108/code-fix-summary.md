@@ -1,16 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-OpenSSL 1.0.2k 下载源失效（301重定向后404），同时修复了 Dockerfile 中的两个 BuildKit 警告（未定义变量自引用、旧式 ENV 格式）。
+无需代码修改。CI 失败为基础设施网络问题：构建节点无法连接 `downloads.apache.org`（所有 IPv4/IPv6 地址均超时或不可达），与 PR 变更无关。
 
 ## 修改的文件
-- `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile`: 
-  - 第20-22行：将 OpenSSL 1.0.2k 下载源从失效的 `openssl.org` URL 切换为 GitHub 源码归档标签 (`https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_0_2k.tar.gz`)，同步更新解压后的目录名从 `openssl-1.0.2k` 为 `openssl-OpenSSL_1_0_2k`
-  - 第41行：修复 `ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:...` 中对未定义变量的自引用，改为直接设置路径值
-  - 第51行：将旧式 `ENV PATH $PATH:/mesos/bin` 修复为新式 `ENV PATH=$PATH:/mesos/bin` 格式
+无。
 
 ## 修复逻辑
-CI 构建在 `[ 3/10]` 步骤失败，原因是 `https://www.openssl.org/source/old/1.0.2/openssl-1.0.2k.tar.gz` 返回 HTTP 301 重定向至 GitHub Release 附件地址，该附件已被移除（404）。已从上游 `OpenSSL_1_0_2k` tag 获取 GitHub 源码归档（`https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_0_2k.tar.gz`）验证可用（返回完整 tarball 内容）。GitHub 源码归档与正式发布包内容相同（同一 tag 的源码快照），仅解压后顶层目录名不同（`openssl-OpenSSL_1_0_2k` vs `openssl-1.0.2k`），已将相关目录引用同步更新。同时修复了 CI 日志中报告的两个 BuildKit 警告（`UndefinedVar` 和 `LegacyKeyValueFormat`），以保持 Dockerfile 规范。
+分析报告将该失败归类为 **infra-error**（置信度：高）。Dockerfile 第 42 行的 `wget https://downloads.apache.org/mesos/${VERSION}/mesos-${VERSION}.tar.gz` 语法和 URL 格式均正确，前一步（OpenSSL/Python 下载）也成功完成，证明 CI 节点基本出网能力正常，问题仅限 `downloads.apache.org` CDN 节点的临时网络故障。
+
+根据修复原则，对于 infra-error 不应强行修改代码。建议直接重新触发 CI Pipeline 重试，大概率可通过。若持续失败，再考虑切换下载源为 `archive.apache.org`。
 
 ## 潜在风险
-无。GitHub 源码归档是 GitHub 自动从 Git tag 生成的稳定产物，内容与 OpenSSL 官方 1.0.2k 源码完全一致（同一 Git 仓库同一 tag），不会因 Release 附件移除而失效。`LD_LIBRARY_PATH` 的修复移除了自引用，实际路径值未变。`PATH` 的格式修复不改变语义。
+无。
