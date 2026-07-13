@@ -1,20 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败由基础设施问题导致：构建节点无法通过 HTTPS(443) 连接到 `downloads.apache.org` 的所有解析 IP（IPv4 超时 + IPv6 不可达），属于 CI 网络层面的连通性故障。
+CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 超时失败（exit code: 4），将下载源切换为已验证可达的 `dlcdn.apache.org`。
 
 ## 修改的文件
-无
+- `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile`: 第 21 行 Knox 下载 URL 从 `downloads.apache.org` 改为 `dlcdn.apache.org`
 
 ## 修复逻辑
-- 分析报告明确分类为 `infra-error`，根因是 CI 构建节点到 `downloads.apache.org` 的网络路由不通，与 PR 代码变更无关。
-- 同一构建中 `dlcdn.apache.org`（Hadoop 下载）连通正常，说明是特定主机/网段被阻断，而非 PR 代码问题。
-- 按照流程规范，`infra-error` 类型不应强制修改代码来绕过基础设施问题。
-
-**建议的后续操作**：
-1. 在 CI runner 上手动验证 `downloads.apache.org` 的可达性（`curl -v https://downloads.apache.org/knox/2.1.0/knox-2.1.0.zip`）。
-2. 若持续不可达，可考虑将下载源更换为 `https://archive.apache.org/dist/knox/${VERSION}/knox-${VERSION}.zip`（Apache Archive 归档站），作为补充修复方向。
-3. 重试 CI 构建，排除临时性网络波动。
+同一 Dockerfile 中第 12 行的 Hadoop 从 `dlcdn.apache.org` 下载成功（耗时 ~39s），证明 CI 环境可正常访问该 CDN。分析报告也指出 `downloads.apache.org` 所有 IPv4/IPv6 地址均连接超时，属于 CI 网络层面的问题。已通过 WebFetch 验证 `https://dlcdn.apache.org/knox/2.1.0/knox-2.1.0.zip` 可正常访问（返回 200），Knox 制品确实托管在 CDN 上。此修复是最小化改动，仅替换域名，与同文件中 Hadoop 的下载源保持一致。
 
 ## 潜在风险
-无（未修改任何代码）
+无。`dlcdn.apache.org` 是同一次构建中已验证可用的 Apache CDN 地址，Knox 2.1.0 制品在该 CDN 上确认存在且可访问。
