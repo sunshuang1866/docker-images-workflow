@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。此失败为 CI 基础设施问题（infra-error），与 PR 代码变更无关。
+基础设施错误（infra-error），无需代码修改。
 
 ## 修改的文件
-无。所有 PR 变更文件均无需修改。
+无。
 
 ## 修复逻辑
-CI 失败分析报告明确指出，失败原因是 aarch64 构建节点从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 传输层中断（Curl error 92: INTERNAL_ERROR）和 SSL 读取失败（Curl error 56: SSL_ERROR_SYSCALL）。Dockerfile 中的 `yum install` 命令语法正确，173 个依赖包中有 172 个已成功下载，仅 `vim-common` 因网络问题失败。此问题属于 CI 基础设施网络波动，重试构建即可。若频繁出现，需由 CI 运维团队排查网络链路或添加更多镜像源。
+CI 失败由 `repo.openeuler.org` 在 aarch64 构建节点上发生间歇性 HTTP/2 网络故障导致（Curl error 92: HTTP/2 stream INTERNAL_ERROR；Curl error 56: SSL read failure）。失败根因与 PR #2977 的代码变更无关，Dockerfile 本身没有语法或逻辑问题。属于 CI 基础设施问题，建议等待镜像站网络恢复后重新触发 CI 构建（re-run）。
 
 ## 潜在风险
-无
+无。
