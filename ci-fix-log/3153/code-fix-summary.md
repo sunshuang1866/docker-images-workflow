@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error），是 appstore 发布规范预检工具对根目录纯文档变更的过度拦截，与 PR 的 README 文档更新内容无关。
+CI appstore 发布规范预检（`eulerpublisher/update/container/app/update.py`）对纯文档 PR 变更文件进行路径校验时，未对无 Dockerfile 变更的纯文档 PR 做豁免处理，导致合法的 README 文档更新被错误阻断。**无需代码修改**，此为 CI 基础设施问题。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`，根因是 CI 预检工具 `eulerpublisher/update/container/app/update.py:273` 对根目录文件 `README.md` 和 `README.en.md` 执行了 appstore 镜像发布路径校验，而这两个文件不属于应用镜像目录结构，不应受该规范约束。修复方向指向修改 CI 预检工具添加根目录文件白名单/免检逻辑，但该工具不在本 PR 的变更文件列表中，也不在当前仓库内。PR 仅修改了两个 README 文档，内容本身无问题，应通过 CI 旁路合并或其他渠道处理。
+分析报告明确指出根因在 CI 检查器（`update.py`）而非 PR 代码本身（"根因在 CI 检查器（非 PR 代码本身有误）"）。PR 变更了两个根目录文档文件 `README.md` 和 `README.en.md`，均为更新基础镜像可用 Tags 列表的合法文档修改，不含任何 Dockerfile 或镜像构建逻辑变更。CI 检查器未对纯文档 PR 做豁免处理，错误地将路径校验应用于非发布类变更。根据修复原则，infra-error 不应强行修改代码来绕过 CI 工具缺陷。正确修复应在 `eulerpublisher` 仓库的 `update.py` 中增加对无 Dockerfile/docker_img 变更的 PR 跳过 appstore 预检的逻辑。
 
 ## 潜在风险
-无
+无（未修改任何代码）
