@@ -669,3 +669,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #3033: `HPC/seissol/202103.Sumatra/24.03-lts-sp4/Dockerfile` — 修复 SeisSol 在 aarch64 架构上构建失败的问题（x86_64 专属编译标志 `-mno-red-zone
+
+---
+
+## 模式36：pip镜像下载超时
+
+**症状关键词**: Read timed out, HTTPSConnectionPool, mirrors.aliyun.com, nvidia_cudnn, pip install
+
+**根因**: - 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28`（`RUN pip install -r backend/requirements.txt ...` 步骤）
+- 失败原因: pip 从 `mirrors.aliyun.com` 下载 `nvidia_cudnn_cu13`（366 MB）至 96% 时 HTTP 读取超时，整个 RUN 命令失败（exit code: 2）。该 RUN 命令将 npm 构建、npm 安装和大量 pip 包安装串行放在一个 Docker 层中，一旦任何一个子步骤因网络波动失败，整层都需重建。
+
+**修复方法**: 将 Dockerfile 中第28-35行的单体 RUN 指令（串联 npm 构建 + pip 安装 5 个子步骤）拆分为 4 个独立 RUN，并为重型 pip 依赖安装添加 `--retries 5`，利用 Docker 层缓存使网络波动导致的重试无需重建已成功的子步骤。
+
+**历史案例**:
+- PR #3139: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile` — 将 Dockerfile 中第28-35行的单体 RUN 指令（串联 npm 构建 + pip 安装 5 个子步骤）拆分
