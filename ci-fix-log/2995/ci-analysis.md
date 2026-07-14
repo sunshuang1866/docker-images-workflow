@@ -6,34 +6,32 @@
 - 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: 测试脚本CRLF行尾
-- 新模式症状关键词: bad interpreter, ^M, No such file or directory, /bin/sh^M, bwa_test.sh
+- 新模式症状关键词: bad interpreter, ^M, /bin/sh^M, No such file or directory, CRLF
 
 ## 根因分析
 
 ### 直接错误
 ```
 /bin/sh: /usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh: /bin/sh^M: bad interpreter: No such file or directory
-2026-07-10 11:58:06,457 - CRITICAL - [Check] test failed
+2026-07-10 11:58:06,457-/usr/local/lib/python3.9/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 ```
 
 ### 根因定位
-- 失败位置: `/usr/etc/eulerpublisher/tests/container/app/bwa_test.sh`（eulerpublisher 包安装路径，非 PR 代码）
-- 失败原因: `eulerpublisher` Python 包中自带的 `bwa_test.sh` 测试脚本使用 Windows 风格换行符（CRLF），导致 shebang `#!/bin/sh\r` 被内核解析为解释器路径 `/bin/sh\r`（带回车符），该路径不存在而报 `bad interpreter`
+- 失败位置: CI [Check] 阶段，执行 `bwa_test.sh` 测试脚本时
+- 失败原因: eulerpublisher 包中安装的测试脚本 `bwa_test.sh` 包含 Windows 风格行尾（CRLF，即 `\r\n`），导致 shebang 行 `#!/bin/sh\r` 中的回车符 `\r`（显示为 `^M`）被系统当作解释器名的一部分，系统查找名为 `/bin/sh\r` 的解释器失败，报 "bad interpreter: No such file or directory"。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了以下 4 个文件，均为标准镜像定义文件：
-- `HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile`（新增，19 行）
-- `HPC/bwa/README.md`（仅新增一行版本条目）
-- `HPC/bwa/doc/image-info.yml`（新增版本条目，修复末尾换行）
-- `HPC/bwa/meta.yml`（新增 sp4 版本条目）
-
-Docker 镜像构建阶段完全成功——源码下载、gcc 编译、bwa 二进制产物的安装及依赖清理均正常完成，镜像已成功构建并推送至 registry。失败仅发生在 [Check] 阶段，该阶段调用 `eulerpublisher` 包预置的测试脚本 `bwa_test.sh`，该脚本因 CRLF 行尾问题无法被 Shell 执行。
+**与 PR 变更无关。** PR 新增的 Dockerfile（`HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile`）构建成功——日志中 Docker 构建阶段（步骤 #1 至 #8）全部通过，镜像已成功编译（bwa v0.7.18 编译仅产生两个编译警告，均非致命）并推送到 registry。失败发生在构建之后的镜像检查 [Check] 阶段，该阶段调用 eulerpublisher 包中预装于 CI runner 上的测试脚本 `bwa_test.sh`，该脚本自身的 CRLF 行尾问题与本次 PR 的代码改动无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-修复 `eulerpublisher` 包中 `bwa_test.sh`（以及可能存在的其他测试脚本）的 CRLF 行尾问题。该文件位于 eulerpublisher 源码仓库的 `tests/container/app/` 目录下，需将其行尾从 CRLF 转换为 LF。可使用 `dos2unix` 或在编辑器中设置行尾为 LF 后重新提交。
+eulerpublisher 包中的 `bwa_test.sh`（路径 `/etc/eulerpublisher/tests/container/app/bwa_test.sh`）被以 Windows 行尾（CRLF）写入或安装到 CI runner。需由 CI 基础设施维护者做以下任一项：
+- 在 eulerpublisher 源码仓库中将 `bwa_test.sh` 的行尾转换为 LF 后重新发布包
+- 或在 CI 构建脚本中，在调用测试前对测试脚本执行 `dos2unix` 或 `sed -i 's/\r$//'` 去除回车符
+
+**注意：Code Fixer 无需也无法处理此问题**——出问题的是 CI runner 上预安装的 eulerpublisher 包内的测试脚本，不在本次 PR 的仓库范围内。
 
 ## 需要进一步确认的点
-- `bwa_test.sh` 文件在 eulerpublisher 源码仓库中的实际路径（日志显示为 pip 安装后的路径，需确认对应源码位置）
-- eulerpublisher 包中是否还有其他测试脚本同样存在 CRLF 行尾问题（建议批量检查 `tests/` 目录下所有 `.sh` 文件）
+- eulerpublisher 包中 `bwa_test.sh` 的源码是否确实以 CRLF 提交，还是由于 CI runner 上的 git 配置（如 `core.autocrlf=true`）在克隆/安装过程中引入了 CRLF
+- 同一 CI runner 上其他镜像（如已有的 `bwa:0.7.18-oe2203sp3`）的检查是否也因同样的 CRLF 问题失败，还是仅 `bwa_test.sh` 这一个脚本受影响
