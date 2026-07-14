@@ -5,53 +5,47 @@
 - 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: GitLab 发布页面返回 HTML
-- 新模式症状关键词: text/html, File format not recognized, gitlab.freedesktop.org, wayland-protocols, tar, xz
+- 新模式标题: Meson wrap文件hash不匹配
+- 新模式症状关键词: Incorrect hash for source, subproject, meson.build, wayland-protocols, expected, actual
 
 ## 根因分析
 
 ### 直接错误
 ```
-#12 [7/8] RUN wget -O /tmp/wayland-protocols-1.41.tar.xz https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz     && tar -xvf /tmp/wayland-protocols-1.41.tar.xz -C /tmp     && cd /tmp/wayland-protocols-1.41     && meson setup build     && meson install -C build     && rm -rf /tmp/wayland-protocols-1.41 /tmp/wayland-protocols-1.41.tar.xz
-#12 0.855 Length: unspecified [text/html]
-#12 0.855 Saving to: '/tmp/wayland-protocols-1.41.tar.xz'
-#12 0.855      0K ..                                                     68.0M=0s
-#12 0.855 2026-07-14 20:53:14 (68.0 MB/s) - '/tmp/wayland-protocols-1.41.tar.xz' saved [2390]
-#12 0.857 xz: (stdin): File format not recognized
-#12 0.857 tar: Child returned status 1
-#12 0.857 tar: Error is not recoverable: exiting now
-#12 ERROR: process "/bin/sh -c wget -O /tmp/wayland-protocols-1.41.tar.xz ..." did not complete successfully: exit code: 2
+#12 5.418 Downloading wayland-protocols source from https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz
+#12 5.418 Downloading file of unknown size.
+#12 5.418 A fallback URL could be specified using source_fallback_url key in the wrap file
+#12 5.418 ERROR: Subproject wayland-protocols is buildable: NO
+#12 5.418
+#12 5.418 meson.build:2013:21: ERROR: Incorrect hash for source:
+#12 5.418  2786b6b1b79965e313f2c289c12075b9ed700d41844810c51afda10ee329576b expected
+#12 5.418  a802b63e0000e8b87004f6c763faf2f21ba0f660b5de0b7025ae5d2c369a001b actual.
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建的步骤 #12（[7/8]，由 CI 注入的 wayland-protocols 依赖安装步骤）
-- 失败原因: `wget` 请求 `gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz` 时，服务器返回了 HTML 页面（仅 2390 字节，Content-Type 为 `text/html`），而非实际的 `.tar.xz` 压缩包。`tar -xvf` 无法识别 HTML 文件格式，报 `File format not recognized` 后退出。
+- 失败位置: Dockerfile:26-54（`RUN mkdir build && meson setup build ...` 步骤）
+- 失败原因: Mesa 25.3.4 源码包内 `subprojects/wayland-protocols.wrap` 文件记录的 wayland-protocols 1.41 SHA256 hash（`2786b6b..`）与从 GitLab 实际下载到的文件 hash（`a802b63..`）不匹配，meson 配置阶段拒绝继续运行。
 
 ### 与 PR 变更的关联
-**与 PR 改动无直接关联。** PR #2962 新增的 Dockerfile（`Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`）仅有 56 行，包含 dnf 安装依赖、下载 mesa 源码、pip 安装 meson 以及 `meson setup/compile/install` 步骤，**不包含** wayland-protocols 的下载与构建步骤。该步骤（Dockerfile:26 处的 `RUN wget ... wayland-protocols-1.41.tar.xz`）是由 CI 构建管道/builder 模板注入的——因为 mesa 的构建配置中指定了 `-Dplatforms=x11,wayland`，CI 系统自动添加了 wayland-protocols 作为前置依赖。
-
-实际失败原因是 `gitlab.freedesktop.org` 对该 release 下载 URL 返回了 HTML 页面（可能为重定向页、登录页或格式已变更的页面），而非原始压缩包。此问题同样会影响其他需要 wayland-protocols 作为依赖的镜像构建。
+PR 新增了 mesa 25.3.4 在 openEuler 24.03-LTS-SP4 上的 Dockerfile。Dockerfile 通过 `wget` 从 `archive.mesa3d.org` 获取 Mesa 25.3.4 官方源码包后运行 `meson setup` 构建，hash 不匹配的根本原因在上游 Mesa 25.3.4 源码的 wrap 文件中——GitLab 端 wayland-protocols 1.41 的 tar.xz 发布文件可能被重新打包或更换，导致实际 hash 与 wrap 文件中记录的期望值不一致。PR 的代码逻辑本身（dnf 依赖安装、meson 参数配置）无缺陷，但该 Dockerfile 是首次提交，因此触发了此问题。已存在的 SP3 版本（`Others/mesa/25.3.4/24.03-lts-sp3/Dockerfile`）使用相同的 Mesa 25.3.4 源码，若 CI 近期未触发其构建，可能同样受此影响。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-wayland-protocols 的 GitLab release 下载 URL 返回了 HTML 而非 tarball。可能的原因：
-- GitLab 的 release asset 下载 URL 格式已变更（如路径或参数不同）
-- 该 release 的实际 asset 文件名与 URL 中构造的文件名不一致
-- GitLab 实例现在要求认证或已启用防爬机制
-
-修复思路：将 wayland-protocols 的下载源从 `gitlab.freedesktop.org` 的 release 页面下载链接，切换为可直达的源码归档镜像（如 `https://gitlab.freedesktop.org/wayland/wayland-protocols/-/archive/1.41/wayland-protocols-1.41.tar.gz` 使用 GitLab 的 archive API，或从其他镜像站获取）。需确认目标 URL 确实返回有效的 tar 压缩包。
+### 方向 1（置信度: 中）
+在 `meson setup` 之前，用 `sed` 替换 `subprojects/wayland-protocols.wrap` 中的 `source_hash` 值为实际下载得到的 hash `a802b63e0000e8b87004f6c763faf2f21ba0f660b5de0b7025ae5d2c369a001b`。需注意：此 hash 对应的是当前 GitLab 端文件，若上游再次变更，问题将复现。
 
 ### 方向 2（置信度: 中）
-如果 `gitlab.freedesktop.org` 的 archive API 同样返回 HTML，则可考虑从其他可靠源获取 wayland-protocols（如 `github.com/wayland-project/wayland-protocols` 的 GitHub mirror 或直接从 `wayland.freedesktop.org` 下载）。优先验证是否存在 GitHub mirror 提供该版本的发布制品。
+在 `meson setup` 之前，为 wayland-protocols.wrap 添加 `source_fallback_url` 指向 wrapdb 托管版本（如 `https://wrapdb.mesonbuild.com/v2/wayland-protocols_1.41-3/get_patch`），期望 wrapdb 版本的 hash 与 wrap 文件记录一致。此方向更稳健，因为 wrapdb 专为此类场景设计。
+
+### 方向 3（置信度: 低）
+尝试从 openEuler 24.03-LTS-SP4 的 dnf 仓库安装 `wayland-protocols-devel` >= 1.41 版本，让 meson 直接使用系统包而不触发子项目下载。但日志显示系统 wayland-protocols 版本为 1.33，而 meson 要求 >= 1.41，该方向在当前仓库中大概率不可行。
 
 ## 需要进一步确认的点
-1. 该 wayland-protocols 下载步骤是在哪个 CI 模板/builder 脚本中注入的？需要定位对应模板文件以修改 URL。
-2. 确认 `gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41` 页面上实际可下载的 asset 文件名是什么（可能与 URL 中构造的 `wayland-protocols-1.41.tar.xz` 不同）。
-3. 验证替代下载源（如 GitLab archive API `/-/archive/1.41/wayland-protocols-1.41.tar.gz`）是否可用且返回有效的 tar 包。
-4. 检查其他已有的 SP3 或更早版本的 mesa/wayland 相关镜像构建是否也受到相同影响，以判断这是新发问题还是已长期存在的问题。
+1. 确认 `Others/mesa/25.3.4/24.03-lts-sp3/Dockerfile` 在最近一次 CI 构建中是否也失败——若同样失败，说明此问题为上游普遍性问题；若成功通过，需排查 SP3 构建环境是否有缓存或使用了不同的下载源。
+2. 确认 wayland-protocols 1.41 在 GitLab 上的发布文件近期是否被重新打包（检查 GitLab release 页面及 changelog）。
+3. 确认 wrapdb（`https://wrapdb.mesonbuild.com/v2/wayland-protocols_1.41-3/get_patch`）提供的 patch/hash 是否与 wrap 文件一致，优先采用 wrapdb 方案。
 
 ## 修复验证要求
-若修复方向涉及更换 wayland-protocols 的下载 URL：
-- code-fixer 必须在实际 CI 环境中执行 `wget` 测试，验证新 URL 返回的文件确实是有效的 tar 压缩包（文件大小至少数百 KB，`file` 命令输出为 `XZ compressed data` 或 `gzip compressed data`），而非 HTML 页面。
-- 修复后需触发完整构建（包括 x86_64 和 aarch64），确认 wayland-protocols 安装步骤通过且后续的 mesa meson 构建能正常进行。
+若修复方向1采用 `sed` 替换 hash，code-fixer 必须在提交前：
+1. 手动下载 `https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz`，计算其 SHA256 hash，确认与日志中的 `a802b63e0000e8b87004f6c763faf2f21ba0f660b5de0b7025ae5d2c369a001b` 一致。
+2. 若可能，检查 wrapdb 上 wayland-protocols 1.41 的最新 wrap/patch 是否存在匹配的 hash 记录，优先采用 wrapdb 方案而非硬编码 hash。
