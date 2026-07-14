@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败根因为 CI 构建环境无法与 `archive.apache.org` 建立网络连接（IPv4 超时、IPv6 不可达），属于 CI 基础设施问题（infra-error），非代码逻辑缺陷。
+CI 构建时 `archive.apache.org` 不可达，导致 Spark 3.4.2 下载超时失败。
 
 ## 修改的文件
-无
+- `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile`: 将 Spark 下载源从 `archive.apache.org` 切换为 `repo.huaweicloud.com`（第 23 行）
 
 ## 修复逻辑
-- 分析报告确认失败类型为 `infra-error`，直接错误为 wget 下载 `archive.apache.org` 上的 Spark 3.4.2 二进制包时 TCP 连接超时（exit code: 4）。
-- Dockerfile 中已正确使用 `JAVA_ARCH` 自定义变量处理 JDK 下载，报告提及的模式 09（BUILDARCH 冲突）在当前代码中不存在。
-- 按指令规约，对于 `infra-error` 不应强行修改代码。该问题需由 CI 环境网络层面解决，或等待 `archive.apache.org` 恢复可达性后重新触发构建。
+分析报告指出这是一个 `infra-error`（模式33）：CI 构建环境无法与 `archive.apache.org` 建立 TCP 连接，但 Kyuubi 本体从 `dlcdn.apache.org` 下载成功说明网络本身正常。按照 PR #3077 的修复模式（Zookeeper 下载源从 `archive.apache.org` 更换到 `repo.huaweicloud.com`），将 Spark 下载 URL 从 `https://archive.apache.org/dist/spark/...` 改为 `https://repo.huaweicloud.com/apache/spark/...`。已从上游验证 `https://repo.huaweicloud.com/apache/spark/spark-3.4.2/spark-3.4.2-bin-hadoop3.tgz` 文件存在且可访问。`dlcdn.apache.org` 和 `downloads.apache.org` 均不托管 Spark 3.4.2 制品（返回 404），故华为云镜像站是最佳选择。
 
 ## 潜在风险
-无
+无。其他 Kyuubi 版本（1.10.0、1.10.2、1.11.1-sp3）的 Dockerfile 仍使用 `archive.apache.org`，但这些文件不在本次 PR 变更范围内，按最小化原则不做修改。
