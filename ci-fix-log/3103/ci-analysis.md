@@ -2,46 +2,43 @@
 
 ## 基本信息
 - PR: #3103 — chore(kyuubi): add openEuler 24.03-LTS-SP4 support
-- 失败类型: dependency-error
+- 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式03
-- 新模式标题: (不适用)
-- 新模式烟雾关键词: (不适用)
+- 知识库匹配: 模式33、模式09（叠加）
 
 ## 根因分析
 
 ### 直接错误
 ```
-#10 [builder 5/5] RUN if [ "amd64" = "amd64" ]; then BUILDARCH="x64"; ...
-#10 0.061 --2026-07-10 05:10:31--  https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/x64/linux/OpenJDK11U-jre_x64_linux_hotspot_11.0.30_7.tar.gz
-#10 0.091 Resolving mirrors.tuna.tsinghua.edu.cn (mirrors.tuna.tsinghua.edu.cn)... 101.6.15.130, 2402:f000:1:400::2
-#10 0.092 Connecting to mirrors.tuna.tsinghua.edu.cn|101.6.15.130|:443... connected.
-#10 0.364 HTTP request sent, awaiting response... 404 Not Found
-#10 0.464 2026-07-10 05:10:31 ERROR 404: Not Found.
-#10 ERROR: process "/bin/sh -c ..." did not complete successfully: exit code: 8
-ERROR: failed to solve: ...
+#8 [builder 3/5] RUN wget https://downloads.apache.org/kyuubi/kyuubi-1.11.1/apache-kyuubi-1.11.1-bin.tgz && ...
+#8 0.220 Connecting to downloads.apache.org (downloads.apache.org)|95.216.224.44|:443... failed: Connection timed out.
+#8 135.2 Connecting to downloads.apache.org (downloads.apache.org)|88.99.208.237|:443... failed: Connection timed out.
+#8 270.4 Connecting to downloads.apache.org (downloads.apache.org)|2a01:4f8:10a:39da::2|:443... failed: Network is unreachable.
+#8 270.4 Connecting to downloads.apache.org (downloads.apache.org)|2a01:4f9:2b:1cc2::2|:443... failed: Network is unreachable.
+#8 ERROR: process "/bin/sh -c wget https://downloads.apache.org/kyuubi/kyuubi-${KYUUBI_VERSION}/apache-kyuubi-${KYUUBI_VERSION}-bin.tgz && ..." did not complete successfully: exit code: 4
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile:28-36`（JDK 下载 RUN 指令块）
-- 失败原因: Dockerfile 中硬编码的 `JDK_VERSION=11.0.30_7` 对应的 JDK 二进制包已被清华 TUNA 镜像站移除（Adoptium 镜像站仅保留最新 build，旧 build 覆盖后返回 404）
+- 失败位置: `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile:17`（Kyuubi 下载步骤）
+- 失败原因: CI aarch64 构建环境（`ecs-build-docker-aarch64-01-sp`）无法与 `downloads.apache.org` 建立 TCP 连接，所有 IPv4 地址均 Connection timed out，IPv6 地址 Network is unreachable，wget 退出码 4
 
 ### 与 PR 变更的关联
-- **直接关联**。本次 PR 新增的 Dockerfile `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile` 直接硬编码了 `JDK_VERSION=11.0.30_7`。
-- 该版本号与 kyuubi SP3 版本 Dockerfile（`1.11.1/24.03-lts-sp3/Dockerfile`）中使用的 JDK 版本相同，该版本曾在 PR #2105 中作为修复从 `11.0.28_6` 升级而来。但 `11.0.30_7` 现已同样被镜像站轮转下线。
-- 其他文件（README.md、image-info.yml、meta.yml）的改动均为文档和元数据更新，与构建失败无关。
+PR 新增的 Dockerfile 使用 `https://downloads.apache.org/kyuubi/...` 作为 Kyuubi 下载源，该域名在 CI aarch64 runner 构建环境中网络不可达。**该问题与 PR 代码逻辑无关**，系 CI 基础设施网络限制所致，但可通过换用其他下载源在 Dockerfile 层面绕过。
 
-### 次要发现
-- Docker BuildKit 输出一条风格警告（非错误）：`FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 3)`，即第 3 行 `FROM ${BASE} as builder` 中 `as` 使用了小写。不影响构建结果，仅风格问题。
+此外，Dockerfile 第 29-35 行的 JDK 下载步骤中使用了 `BUILDARCH` 变量（BuildKit 预定义全局 ARG），在 `RUN` 中对其重新赋值不会生效（**模式09**）。当前构建在 Kyuubi 下载阶段即失败，未触发该问题，但修复网络问题后 JDK 下载步骤将因 `BUILDARCH` 变量冲突而导致架构字符串错误、产生 404——这个问题在 PR #2105 中已为 SP3 版本修复过。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 `ENV JDK_VERSION=11.0.30_7` 升级为镜像站当前可用的最新 JDK 11 build 号。需先确认 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/x64/linux/` 目录下当前托管的最新版本文件名，取对应的完整 build 号（如 `11.0.XX_Y`）更新 `JDK_VERSION` 环境变量。
+将 Kyuubi 下载源从 `downloads.apache.org` 切换为 `dlcdn.apache.org`（或其他 CI 环境可访问的镜像源，如 `archive.apache.org/dist/kyuubi/`），参考模式33历史案例（PR #3101 Knox、PR #3108 Mesos）。
+
+### 方向 2（置信度: 高）
+将 JDK 下载步骤中的 `BUILDARCH` 变量重命名为自定义名称（如 `JAVA_ARCH`），避免与 BuildKit 预定义变量冲突，参考模式09历史案例（PR #2105 曾为 Kyuubi SP3 修复同类问题）。
 
 ## 需要进一步确认的点
-- 需确认 TUNA 镜像站上 Adoptium JDK 11 当前可用的最新 build 号。可以通过访问 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/x64/linux/` 目录列表获取实际文件名。
-- 需确认 arm64（aarch64）架构下对应的 JDK 二进制包同样存在于镜像站。
+1. 确认 `dlcdn.apache.org` 或 `archive.apache.org` 在 CI aarch64 runner 上可以正常访问（通过查看同类仓库其他成功构建的镜像所使用的 Apache 下载域名确认）
+2. 确认 `https://dlcdn.apache.org/kyuubi/kyuubi-1.11.1/apache-kyuubi-1.11.1-bin.tgz` 路径下的制品确实存在（非 404）
 
 ## 修复验证要求
-- code-fixer 在修改 `JDK_VERSION` 前，必须访问 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/x64/linux/` 和 `https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jre/aarch64/linux/` 确认目标版本的 `OpenJDK11U-jre_{arch}_linux_hotspot_{version}.tar.gz` 文件实际存在，然后再更新 Dockerfile 中的 `JDK_VERSION` 值。
+- code-fixer 必须确认所选替代下载源（如 `dlcdn.apache.org`）上确有 Kyuubi 1.11.1 对应制品，再行提交
+- code-fixer 必须确认 `BUILDARCH` 重命名后，JDK 下载 URL 中的架构字符串（`x64` / `aarch64`）构造正确，且在 aarch64 runner 上 JDK 下载 URL 返回 200 而非 404
