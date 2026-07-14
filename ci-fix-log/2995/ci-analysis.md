@@ -5,40 +5,39 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 测试脚本CRLF行尾
-- 新模式症状关键词: /bin/sh^M, bad interpreter, No such file or directory, bwa_test.sh
+- 新模式标题: 测试脚本CRLF换行符
+- 新模式症状关键词: bad interpreter, ^M, /bin/sh^M, No such file or directory, bwa_test.sh
 
 ## 根因分析
 
 ### 直接错误
 ```
 /bin/sh: /usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh: /bin/sh^M: bad interpreter: No such file or directory
-2026-07-10 11:58:06,457 CRITICAL: [Check] test failed
+2026-07-10 11:58:06,457-/usr/local/lib/python3.9/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 ```
 
 ### 根因定位
-- 失败位置: CI 工具 `eulerpublisher` 的内置测试脚本 `/etc/eulerpublisher/tests/container/app/bwa_test.sh`（非 PR 代码文件）
-- 失败原因: `bwa_test.sh` 文件使用 Windows 风格的 CRLF 行尾（`\r\n`），导致 shebang 行 `/bin/sh` 被解析为 `/bin/sh^M`（`^M` 即 `\r`），系统找不到名为 `/bin/sh\r` 的解释器，shell 执行失败。
+- 失败位置: `/etc/eulerpublisher/tests/container/app/bwa_test.sh`（eulerpublisher CI 工具链中的 bwa 容器测试脚本）
+- 失败原因: `bwa_test.sh` 脚本文件含有 Windows 风格换行符（CRLF，`\r\n`），其 shebang 行 `#!/bin/sh` 末尾携带不可见的回车符 `\r`（日志中显示为 `^M`）。内核尝试以 `/bin/sh\r` 作为解释器执行该脚本，而系统不存在名为 `/bin/sh\r` 的二进制，导致 `bad interpreter` 错误。
 
 ### 与 PR 变更的关联
-该失败与 PR 代码变更**完全无关**。Docker 镜像构建和推送均成功完成：
-- 编译阶段（`yum install` + `make`）成功，历时约 199 秒
-- 镜像构建成功导出并推送至 `openeulertest/bwa:0.7.18-oe2403sp4-x86_64`
-- 构建日志中无任何编译错误，仅有 `bwt_gen.c` 中的两个 harmless 编译警告
+**与 PR 变更无关。** PR #2995 仅提交了以下文件：
+- `HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile`（新增，19 行）
+- `HPC/bwa/README.md`（新增一行标签文档）
+- `HPC/bwa/doc/image-info.yml`（新增一条镜像信息）
+- `HPC/bwa/meta.yml`（新增 `0.7.18-oe2403sp4` 条目）
 
-失败发生在 CI 后处理阶段的 `[Check]` 步骤，由 `eulerpublisher` 工具调用其内置测试脚本 `bwa_test.sh` 时触发。该脚本不属于 PR 提交范围，其 CRLF 行尾是 CI 运行环境中 `eulerpublisher` 包自身的缺陷。
+Docker 镜像构建阶段 **完全成功**（`#7 DONE 199.0s`，编译通过，产物导出并推送成功）。失败发生在构建完成后 CI 工具链（eulerpublisher）的 `[Check]` 阶段——该阶段调用 eulerpublisher 仓库中预置的 `bwa_test.sh` 脚本来验证镜像功能，而该脚本文件本身存在 CRLF 换行符缺陷。此问题在 PR 提交前即已存在于 eulerpublisher 仓库中，本次 PR 仅是触发了该测试脚本被执行。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-此失败为 CI 基础设施问题，非 PR 代码缺陷。需由 CI 维护者修复 `eulerpublisher` 包中 `bwa_test.sh` 的行尾格式，将 CRLF 转换为 LF：
-```bash
-sed -i 's/\r$//' /etc/eulerpublisher/tests/container/app/bwa_test.sh
-```
-或重新打包 `eulerpublisher`，确保所有测试脚本以 Unix 行尾（LF）分发。
-
-PR #2995 的 Dockerfile 和其他代码变更本身无问题，无需修改。
+eulerpublisher 仓库中 `tests/container/app/bwa_test.sh` 脚本文件包含 Windows 风格 CRLF 换行符，需将其转换为 Unix 风格 LF 换行符。修复不在本次 PR 的代码范围内，应由 eulerpublisher 仓库维护者执行以下操作之一：
+- 使用 `dos2unix` 工具转换：`dos2unix tests/container/app/bwa_test.sh`
+- 使用 `sed` 去除回车符：`sed -i 's/\r$//' tests/container/app/bwa_test.sh`
+- 在 eulerpublisher 仓库的 `.gitattributes` 中设置 `* text=auto` 或针对 `.sh` 文件强制 LF
 
 ## 需要进一步确认的点
-- 确认 `eulerpublisher` 包中 `bwa_test.sh` 是否确实包含 CRLF 行尾（可通过 `file` 命令或 `cat -v` 验证）
-- 确认其他镜像（如已有的 `bwa/0.7.18/22.03-lts-sp3`）的 CI 检查是否同样受此影响（若 `bwa_test.sh` 是 bwa 镜像共享的测试脚本，则所有 bwa 镜像的检查都应失败，可验证是否为近期才引入的回归）
+1. **eulerpublisher 仓库克隆来源**：CI 日志中执行了 `Cloning into 'eulerpublisher'...`，需确认克隆的是哪个分支/版本，以及该脚本是否仅在特定分支存在 CRLF 问题。
+2. **其他镜像是否受影响**：其他同样依赖 eulerpublisher 测试脚本的镜像（非 bwa 专用脚本可能也存在 CRLF 问题），建议排查 eulerpublisher `tests/container/app/` 目录下所有 `.sh` 文件的换行符格式。
+3. **CI 节点 git autocrlf 配置**：确认 CI 构建节点的 git 全局配置中 `core.autocrlf` 是否为 `true`，如果是，可能在克隆时将 LF 自动转换为 CRLF，导致该问题。
