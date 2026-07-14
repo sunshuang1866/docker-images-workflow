@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败类型为 `infra-error`，根因是 `repo.openeuler.org` 的 aarch64 仓库在构建时段出现 HTTP/2 连接不稳定，与 PR 代码变更无关。
+无代码修复。CI 失败为基础设施错误（infra-error），由 openEuler 官方软件仓库 `repo.openeuler.org` 在构建期间的 HTTP/2 协议层网络故障导致，与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，无需代码变更）
+无。PR 变更的所有文件（Dockerfile、README.md、image-info.yml、meta.yml）均无代码问题。
 
 ## 修复逻辑
-CI 分析报告明确判定此失败为 `infra-error`（置信度：中），直接错误是 `Curl error (92): Stream error in the HTTP/2 framing layer`，发生在 `yum install` 从 `repo.openeuler.org` 下载 RPM 包时。173 个包中有 172 个最终下载成功，仅 `vim-common` 因所有镜像源重试耗尽而失败。PR 的 Dockerfile 中 `yum install` 命令语法和包列表均正确无误。
-
-按照规范要求，`infra-error` 类型失败不应修改代码，应重试触发 CI 重新构建。
+CI 失败根因为 `yum install` 从 `repo.openeuler.org` 下载依赖包时遭遇 `Curl error (92): Stream error in the HTTP/2 framing layer` 和 `Curl error (56): SSL_ERROR_SYSCALL` 等临时性网络/协议故障。Dockerfile 中 `yum install` 的包列表语法和内容均正确。此失败非代码层面问题，属于 CI 基础设施（openEuler 软件仓库临时故障），只需在 CI 平台重新触发 aarch64 构建 job 即可。
 
 ## 潜在风险
 无
