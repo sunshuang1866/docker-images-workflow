@@ -5,36 +5,33 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2 测试依赖缺失
-- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
+- 新模式标题: shunit2测试框架缺失
+- 新模式症状关键词: shunit2: No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
-[Check] checking openeulertest/go:1.25.6-oe2403sp4-aarch64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
+2026-07-09 12:32:51,082-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 2026-07-09 12:32:51,082 - CRITICAL - [Check] test failed
+Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 流水线的 `[Check]` 阶段中，eulerpublisher 测试框架的 `common_funs.sh` 脚本第 13 行尝试 source `shunit2`（Shell 单元测试框架），但 shunit2 未安装在 CI 测试 runner 环境中，导致测试脚本加载失败，整个 Check 阶段报 CRITICAL。
+- 失败位置: CI 测试框架脚本 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI Runner 上缺少 `shunit2` 测试框架，`common_funs.sh` 在第 13 行尝试 source `shunit2` 时找不到该文件/命令，导致后置检查（[Check] 阶段）直接失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了一个 Go 1.25.6 的 Dockerfile 及相关的元数据文件（README.md、image-info.yml、meta.yml）。Docker 镜像构建阶段（#7 → #11）全部成功完成——包括 Go 源码下载、解压、环境配置、镜像构建、以及推送到 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64`，无任何错误。失败发生在镜像构建和推送完成之后的 `[Check]` 测试验证阶段，原因是 CI 测试 runner 环境缺少 `shunit2` 依赖，与 PR 改动的 Dockerfile 内容无关。
+**与 PR 变更无关**。PR 仅新增了一个 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及对应的元数据条目（README.md、image-info.yml、meta.yml）。Docker 镜像构建阶段（Build + Push）已成功完成（所有 5/5 个 Dockerfile 步骤均通过，镜像已推送到 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64`）。失败发生在构建完成之后的镜像测试（[Check]）阶段，是 CI Runner 自身的测试框架依赖缺失问题，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI 的测试 runner 环境（运行 eulerpublisher container Check 的节点）上安装 shunit2（Shell 单元测试框架）。shunit2 可通过以下方式安装：
-- 包管理器安装（如 `dnf install shunit2` / `apt install shunit2`）
-- 或从 GitHub 下载并放置到 `/usr/local/etc/eulerpublisher/tests/container/app/../common/` 或 `PATH` 可及的位置
-
-此为基础设施层面的修复，不属于代码变更范畴。
+CI Runner 环境缺少 `shunit2` 测试框架。需要在构建该镜像的 CI Runner 节点上安装 `shunit2`（如在 openEuler 上可通过 `dnf install shunit2` 安装），确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 脚本第 13 行的 `source shunit2` 能正常解析到该库。此修复由 CI 基础设施管理员执行，Code Fixer 无需处理。
 
 ## 需要进一步确认的点
-1. 确认 CI 测试 runner 节点上 shunit2 是否确实未安装，以及安装后是否需要配置 `common_funs.sh` 中的 source 路径。
-2. 确认同一 runner 上运行的其他镜像（如已有的 Go 1.25.6-oe2403sp3）的 `[Check]` 阶段是否也因相同原因失败，以排除是新镜像类型触发了不同的测试路径导致的问题。
-3. 如 shunit2 无法安装到该 runner，确认是否可跳过特定镜像类型的 Check 阶段或调整测试框架配置。
+- 确认 `shunit2` 在 openEuler 24.03-LTS-SP4 的软件源中是否可用，以及包名是否为 `shunit2`。
+- 确认该 CI Runner 节点（aarch64）上其他镜像的 Check 阶段是否同样因 `shunit2` 缺失而失败——如果是，说明这是一个全局 runner 环境问题，而非本次 PR 独有。
