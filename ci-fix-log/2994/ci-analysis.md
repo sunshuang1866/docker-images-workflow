@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 低
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 断连
-- 新模式症状关键词: closing transport, rpc error, Unavailable, no builder found, graceful_stop
+- 新模式标题: BuildKit构建器意外终止
+- 新模式症状关键词: failed to receive status, rpc error, closing transport, goaway, graceful_stop, no builder found
 
 ## 根因分析
 
@@ -19,22 +19,26 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker build 步骤 `#7 [2/4]`（`dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）
-- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 期间被优雅关闭（graceful_stop），导致 Docker 构建连接中断，构建失败。
+- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install ...`（OS 元数据下载阶段）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载 OS 软件包元数据时被意外终止（`graceful_stop` goaway 帧），导致 gRPC 连接断开，构建无法继续
 
 ### 与 PR 变更的关联
-此次失败与 PR 代码变更**无直接关联**。PR 新增的 Dockerfile 在语法和逻辑上均正确：
-- 基础镜像 `openeuler/openeuler:24.03-lts-sp4` 成功拉取并解压
-- `dnf install` 步骤开始执行，在下载 OS 元数据阶段 BuildKit builder 被外部因素终止
-
-失败根因为 CI 基础设施问题——BuildKit 远程 builder 实例在构建中途被关闭。
+**与 PR 变更无关。** 本次 PR 仅新增一个 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）及相关元数据和文档。Dockerfile 内容为常规的依赖安装和 Python/Scann 编译流程，语法正确，不存在导致 BuildKit 构建器崩溃的逻辑。构建在第一个 `dnf install` 命令的 OS 元数据下载阶段就已因构建器基础设施故障而失败，属于 CI 环境问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-**重新触发 CI 构建**。由于此次失败疑似为临时性的 CI 基础设施问题（builder 实例意外终止），且 PR 代码本身无明显问题，最直接的验证方式是 re-run 该 CI job。若重新构建后通过，则可确认本次为偶发性 infra 故障。
+### 方向 1（置信度: 高）
+**重试 CI 构建。** BuildKit 构建器 `euler_builder_20260709_224657` 在构建过程中向客户端发送了 `graceful_stop` goaway 帧后关闭连接，这不是代码问题。可能的原因包括：
+- CI runner 资源不足（内存/磁盘耗尽导致 BuildKit 构建器被 OOM killer 终止）
+- 构建器会话超时（日志显示 dnf 下载元数据速率仅 77 kB/s，下载 2.8 MB 耗时约 37 秒，若构建器设置了较短的 idle 超时可能在此阶段超时）
+- CI runner 节点瞬时不稳定
+
+直接重新触发 CI 构建即可，无需修改任何代码。
+
+### 方向 2（置信度: 低）
+若多次重试均在同一位置失败，可能需排查 CI runner 的 BuildKit 构建器配置（如超时阈值、资源限制）或 runner 节点的网络/存储健康状况。
 
 ## 需要进一步确认的点
-1. **BuildKit builder 被 graceful_stop 的原因**：日志中 `debug data: "graceful_stop"` 表明 builder 实例是被主动关闭的，而非崩溃。需要确认是否是 CI 平台对该 builder 设置了超时限制被触发、资源回收策略导致、还是运维人员手动终止。
-2. **是否存在跨架构 job 日志**：当前提供的日志为 x86-64 架构的构建日志。若 CI pipeline 包含 aarch64 等架构的并行构建 job，需确认其他架构的构建状态是否也失败，以判断是否为全域性基础设施问题。
-3. **重试是否复现**：若 rerun 后仍然在同一位置失败，需进一步排查 `dnf install` 步骤是否因网络超时或镜像源不可达导致 builder 空闲超时被 kill，而非代码层面的问题。
+- 本次构建所在的 runner 节点 `ecs-build-docker-x86-hk` 是否存在资源压力（内存/磁盘不足）
+- BuildKit 构建器的 `--timeout` 配置是否过短，导致在低速网络下（77 kB/s）`dnf install` 被判定为超时并触发 graceful_stop
+- 是否需要获取 aarch64 架构的构建日志以确认是否两个架构均失败（日志仅展示了 x86-64 job 的信息）
