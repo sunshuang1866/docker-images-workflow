@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误 — Docker daemon 在创建 buildx builder 容器时发生故障（`Could not find the file / in container`），与 PR 代码变更无关。
+CI 基础设施故障：BuildKit 引导失败（Docker daemon 创建 moby/buildkit:buildx-stable-1 容器后无法访问根文件系统 "Could not find the file /"），属于 infra-error，与 PR 代码变更无关。
 
 ## 修改的文件
-无代码变更。
+无代码修改（infra-error，无需代码变更）。
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`，置信度高。失败发生在 Docker 镜像构建开始之前（buildx 创建 builder 容器的纯基础设施环节），而非 Dockerfile 的 RUN/COPY 等构建步骤。PR 变更仅包含 glibc 2.42 的 Dockerfile、README、image-info.yml、meta.yml 四个文件，不可能导致 Docker daemon 容器运行时层面的错误。
-
-修复方向：排查 CI runner 节点 `ecs-build-docker-x86-hk` 上 Docker daemon 状态（磁盘空间、inode、存储驱动、遗留 buildx builder 实例等），重新触发 CI 构建通常可恢复。
+CI 分析报告明确指出该错误发生在 BuildKit builder 容器引导阶段，此时尚未进入任何 Dockerfile 的构建执行。PR 仅新增一个标准的 glibc 源码编译 Dockerfile 和更新三个元数据文件条目，不涉及任何能触发 Docker daemon 或 BuildKit 内部错误的操作。此错误属于 CI runner 节点的 Docker daemon 瞬时故障，建议直接重试 CI 即可恢复。
 
 ## 潜在风险
 无
