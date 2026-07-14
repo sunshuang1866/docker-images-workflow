@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），非本次 PR 代码引入。
+无需代码修改——此失败为 CI 基础设施问题（infra-error），非 PR 代码缺陷。
 
 ## 修改的文件
-无
+无（PR 代码无需改动）
 
 ## 修复逻辑
-CI 失败分析报告明确判定为 **infra-error**（置信度：高）。失败发生在 eulerpublisher CI 框架的 `[Check]` 阶段，根因是 eulerpublisher 软件包中的 `bwa_test.sh` 测试脚本包含 Windows 风格 CRLF（`\r\n`）换行符，导致 shebang 行 `#!/bin/sh` 被内核解析为 `#!/bin/sh\r`，无法找到合法的解释器。
+CI 失败发生在 Docker 镜像构建成功之后的「Check」阶段，由 CI 基础设施自带的测试脚本 `bwa_test.sh` 包含 Windows 风格换行符（CRLF）导致 shebang 解析失败（`#!/bin/sh^M`），与本次 PR 变更的 4 个文件（`Dockerfile`、`README.md`、`image-info.yml`、`meta.yml`）均无关联。Docker 镜像构建阶段已完全成功（编译无错误，镜像已构建并推送至 registry）。
 
-本次 PR 的 Dockerfile 构建完全成功（编译、安装、导出、推送均正常），失败与 PR 代码变更无关。修复需要联系 CI 基础设施团队在 eulerpublisher 源码仓库中将 `tests/container/app/bwa_test.sh` 的行尾从 CRLF 转换为 LF（使用 `dos2unix` 或 Git `core.autocrlf` 配置预防），并在 CI 节点上更新 eulerpublisher 包或重新部署。
-
-根据工作流程规范，对于 infra-error 类型的失败，不应强行修改源码代码。
+修复应由 CI 平台维护者在 `eulerpublisher` 工具包层面进行：将 `bwa_test.sh` 的换行符从 CRLF 转换为 LF（如使用 `dos2unix` 或 `sed -i 's/\r$//'` 处理后重新部署）。PR 作者无需修改本仓库代码。
 
 ## 潜在风险
-无
+无——未对任何源码文件进行修改。
