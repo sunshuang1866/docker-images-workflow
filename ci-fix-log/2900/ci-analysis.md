@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2测试框架缺失
-- 新模式症状关键词: shunit2: file not found, common_funs.sh, Check test failed
+- 新模式标题: CI测试框架缺失shunit2
+- 新模式症状关键词: shunit2: file not found, common_funs.sh, eulerpublisher, [Check] test failed
 
 ## 根因分析
 
@@ -24,24 +24,21 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 上的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 执行容器镜像的 `[Check]` 测试阶段时，`common_funs.sh` 脚本尝试 source `shunit2` 测试框架，但该框架未安装于 CI runner 环境，导致测试无法运行，检查表格为空，CI 判定失败。
+- 失败位置: CI [Check] 阶段 — eulerpublisher 容器测试框架
+- 失败原因: CI 测试环境中的 `eulerpublisher` 测试框架依赖 `shunit2` Shell 单元测试库，但该库未安装在 CI runner 上。测试脚本 `common_funs.sh:13` 试图通过 `. shunit2` 源引用该库时失败，导致容器 image check 步骤直接报错退出，所有测试项未执行（check 结果表为空）。
+
+Docker 镜像的**构建和推送阶段均成功**（Build/Compile/Install/Push 全部通过），失败仅发生在构建后的镜像验证（[Check]）阶段。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 `Others/httpd/2.4.66/24.03-lts-sp4/Dockerfile` 及其配套的 `httpd-foreground` 脚本、metadata 文件更新。Docker 镜像的构建和推送阶段均成功完成（`#14 DONE 31.3s`），`[Check]` 阶段的失败完全由 CI 运行环境中缺失 `shunit2` 测试框架导致。
+**与 PR 变更无关。** 本次 PR 新增了两个文件（Dockerfile + httpd-foreground 启动脚本）并更新了三个元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 中的所有构建步骤（yum install、源码编译、make install、配置等）均正常完成且镜像成功推送至 registry。失败原因是 CI runner 上缺少 `shunit2` 测试依赖，属于基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI 管理员在运行 `eulerpublisher` 的 CI runner 节点上安装 `shunit2` shell 单元测试框架，确保 `common_funs.sh` 第 13 行的 `source` 命令能找到该文件。
-
-### 方向 2（置信度: 低）
-如果 `shunit2` 已安装在非标准路径，则需检查 CI runner 上的 `PATH` 环境变量配置或 `common_funs.sh` 中对 `shunit2` 的引用路径是否正确。
+在 CI runner 环境中安装 `shunit2` 包。对于 openEuler 系统，可通过 `yum install shunit2 -y` 或 `dnf install shunit2 -y` 安装。如果 CI runner 的测试环境由容器镜像预置，则需要在 CI 测试镜像的构建过程中添加该依赖。
 
 ## 需要进一步确认的点
-1. 确认 CI runner 节点上 `shunit2` 是否已安装：`which shunit2` 或 `find / -name "shunit2" 2>/dev/null`
-2. 确认同一 CI 环境中其他已通过 `[Check]` 测试的镜像（如其他 httpd 版本或同类应用镜像）是否也缺失该框架，以排除本次 PR 特有问题
-3. 确认 `eulerpublisher` 的安装文档中是否将 `shunit2` 列为必需依赖
+（无需进一步确认，根因明确。）
 
 ## 修复验证要求
-无需 code-fixer 处理。此为 CI 基础设施问题，需由 CI 运维人员修复 runner 环境。
+无需 code-fixer 介入。此问题属于 CI 基础设施配置问题，需由 CI 管理员在 runner 环境中安装 `shunit2` 后重试。
