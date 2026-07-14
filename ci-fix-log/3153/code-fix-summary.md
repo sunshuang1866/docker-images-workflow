@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 **infra-error**：CI 自身的 appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py:273`）对仓库根目录 `README.md` 的路径校验逻辑存在缺陷（路径前导 `/` 归一化缺失），导致 `README.md` 与 `/README.md` 比较被判为 FAILURE。
+无需代码修改。该 CI 失败为基础设施错误（infra-error），由 eulerpublisher 工具的 appstore 发布规范检查对根目录 README.md 产生误判导致，与 PR 改动内容无因果关系。
 
 ## 修改的文件
-无。本 PR 的代码变更（`README.md` 中的基础镜像 Tags 文档更新）正确无误，与 CI 失败无关。
+无。PR #3153 仅修改了 README.md 和 README.en.md 的文档内容（新增基础镜像可用 tags 条目），改动本身正确无误，与 CI 报出的 `[Path Error]` 无关。
 
 ## 修复逻辑
-分析报告明确指出："CI 失败与 PR 代码变更无直接关联——失败原因是 CI 自身的 appstore 路径校验脚本对仓库根目录 README.md 的路径比较逻辑存在缺陷"。根据 infra-error 处理规则，不对源码仓库做任何代码修改。
-
-CI 校验工具应在 `eulerpublisher/update/container/app/update.py` 中修复路径归一化问题，或增加过滤条件跳过仓库根目录的非 appstore 文档文件。该修复需由 CI 基础设施维护方在 eulerpublisher 仓库中完成，不在本次 PR 范围内。
+CI 分析报告确认该失败类型为 `infra-error`，置信度为"低"。eulerpublisher 工具对根目录 `/README.md` 报出 "The expected path should be /README.md" 的路径错误，但实际路径与期望路径完全一致，属于 CI 工具内部的路径校验逻辑缺陷或误判。该问题需由 CI 平台/工具维护者排查 `eulerpublisher/update/container/app/update.py:273` 附近的路径校验逻辑，与源代码无关，因此不做代码修改。
 
 ## 潜在风险
-无（未修改任何代码）。
+无。未修改任何源代码，不引入任何风险。
