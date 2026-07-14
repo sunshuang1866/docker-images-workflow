@@ -5,48 +5,48 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: pip镜像站下载超时
-- 新模式症状关键词: ReadTimeoutError, mirrors.aliyun.com, pip install, nvidia_cudnn_cu13
+- 新模式标题: 阿里云镜像站下载超时
+- 新模式症状关键词: ReadTimeoutError, mirrors.aliyun.com, Read timed out, pip install, nvidia-cudnn
 
 ## 根因分析
 
 ### 直接错误
 ```
-#12 257.5      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸  353.4/366.2 MB 23.0 MB/s eta 0:00:01
 #12 257.5 ERROR: Exception:
 #12 257.5 Traceback (most recent call last):
 #12 257.5   File "/usr/lib/python3.11/site-packages/pip/_vendor/urllib3/response.py", line 452, in _error_catcher
 #12 257.5     yield
 #12 257.5   ...
 #12 257.5 TimeoutError: The read operation timed out
-#12 257.5 ...
+...
 #12 257.5 pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='mirrors.aliyun.com', port=443): Read timed out.
-#12 ERROR: process "/bin/sh -c npm config set registry ... && pip install -r backend/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && pip install fastapi_sso ... did not complete successfully: exit code: 2
 ```
 
 ### 根因定位
-- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`（pip install 阶段）
-- 失败原因: pip 从 `mirrors.aliyun.com` 下载 `nvidia_cudnn_cu13-9.20.0.48`（366 MB）时发生读取超时，已传输 353.4 MB（96.5%）时连接中断。`npm i` 和 `npm run build` 均已完成成功，仅 pip 下载阶段失败。
+- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`（`pip install -r backend/requirements.txt` 步骤）
+- 失败原因: 在通过阿里云 PyPI 镜像站（`mirrors.aliyun.com`）安装依赖时，下载大体积包 `nvidia-cudnn-cu13==9.20.0.48`（366.2 MB）至 353.4/366.2 MB（约 96%）处发生 Socket 读取超时，导致 pip 依赖解析阶段失败。
+
+### 分析说明
+
+npm 构建阶段（`npm i && npm run build`）已成功完成，失败发生在后续的 pip install 阶段。日志显示在超时前大量 Python 包已成功从 `mirrors.aliyun.com` 下载完成（见 Build tail 中数十个包的成功下载记录），仅在大文件 `nvidia-cudnn-cu13` 接近下载完成时触发超时。这属于网络层面的读超时异常，与 Dockerfile 代码逻辑或依赖版本声明无关。
 
 ### 与 PR 变更的关联
-PR 新增了 AI/open-webui 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，该 Dockerfile 将 `npm i`、`npm run build` 和 `pip install -r backend/requirements.txt` 合并为单个 RUN 指令（Dockerfile:28-35），且所有 pip 安装均指向 `mirrors.aliyun.com`。失败发生在 `pip install -r backend/requirements.txt` 尝试下载 `nvidia_cudnn_cu13` 依赖时（该依赖由 `torch` → `sentence_transformers` 链条引入），属于远端镜像站网络超时，**非代码逻辑错误**。
+
+PR 变更的 Dockerfile（`AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile`）沿用了同一应用其他 os-version 变体（`22.03-lts-sp4`、`24.03-lts-sp1`）的 pip 镜像站配置（`https://mirrors.aliyun.com/pypi/simple/`），未引入新的代码逻辑问题。失败是 CI 构建环境与阿里云镜像站之间的网络波动所致，与 PR 本身的内容无直接代码缺陷关联。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**重试构建**。该超时发生于大文件（366 MB）下载至 96.5% 时，极有可能为阿里云镜像站临时网络波动所致。在没有修改任何代码的情况下，重新触发 CI 构建大概率可以通过。（若多次重试均在同一包、同一位置超时，则需考虑方向 2。）
+**重试构建**：该超时为网络波动导致的一次性失败（大文件下载接近完成时中断），后续 CI 重试可能自动恢复。建议先触发一次重跑，观察是否通过。
 
 ### 方向 2（置信度: 低）
-**增加 pip 下载超时 + 拆分 RUN 指令**。
-- 在 pip install 命令中增加 `--default-timeout=300`（或更大值），延长每次 HTTP 读取的超时阈值。
-- 将 `npm i && npm run build` 与 `pip install` 拆分为两个独立的 RUN 指令，利用 Docker 层缓存：npm 阶段成功后下次重试可直接复用缓存，避免每次失败都从头执行 npm。
+**换用其他镜像站**：若 `mirrors.aliyun.com` 对大文件下载持续不稳定，可将 pip 安装的镜像站更换为其他源（如 `https://pypi.tuna.tsinghua.edu.cn/simple/` 或 `https://repo.huaweicloud.com/repository/pypi/simple/`），降低大体积包下载超时风险。
+
+### 方向 3（置信度: 低）
+**增加 pip 超时重试机制**：在 pip install 命令中增加 `--timeout` 和 `--retries` 参数（如 `pip install --timeout 120 --retries 5 ...`），提高对大文件下载的网络容忍度。但需注意这会增加构建时间。
 
 ## 需要进一步确认的点
-1. **是否为可复现问题**：重试构建是否仍然在同一包（`nvidia_cudnn_cu13`）超时？若多次重试均在同一文件同一进度附近超时，可能是阿里云镜像站对该特定大文件存在服务端侧限制或 CDN 节点问题，需考虑换用其他镜像源（如 `pypi.tuna.tsinghua.edu.cn`）或直接从 PyPI 官方源下载该包。
-2. **SP4 基础镜像的网络环境**：`openEuler 24.03-LTS-SP4` 基础镜像中的 Python 3.11 / pip 默认超时配置是否与其他版本（SP1、SP3）一致，是否存在更短默认超时的可能性。
-3. **Dockerfile 中 tab 字符**：第 34-35 行 `\ttransformers` 和 `\taccelerate` 使用了 tab 而非空格作为续行前导，虽未导致本次失败，建议统一为空格以避免潜在 shell 解析问题。
 
-## 修复验证要求
-若修复方向涉及修改 pip 命令行参数或更换镜像源，code-fixer 必须在修改后验证以下几点：
-- 从 `mirrors.aliyun.com`（或更换后的镜像源）确实能完整下载 `nvidia_cudnn_cu13-9.20.0.48` 这个 366 MB 的 wheel 包。
-- 新超时值（如 `--default-timeout=300`）在 CI 环境中生效，且不会无限挂起。
+- 该超时是否为一次性的网络波动，还是 `mirrors.aliyun.com` 对于超大 PyPI 包（>300MB）存在持续的服务端限速/断开策略。
+- 同样使用 `mirrors.aliyun.com` 的 `24.03-lts-sp1` 和 `22.03-lts-sp4` 变体是否也出现过类似超时（用于判断是镜像站普适性问题还是本次 CI 环境的临时网络问题）。
+- `nvidia-cudnn-cu13==9.20.0.48` 是否可替换为更小的本地缓存版本或以其他方式获取（避免依赖远程大文件下载）。
