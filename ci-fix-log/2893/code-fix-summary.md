@@ -1,17 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败根因是 CI Runner 上缺少 `shunit2` shell 测试框架，属于 CI 基础设施问题（infra-error），与 PR #2893 的代码变更无关。
+CI 基础设施问题（infra-error），无需代码修改。CI [Check] 阶段因 runner 环境缺少 `shunit2` Shell 测试库而失败，与 PR 代码变更无关。
 
 ## 修改的文件
-无。PR 变更的所有文件（Dockerfile、named.conf、README.md、image-info.yml、meta.yml）均正确无误，Docker 镜像构建和推送阶段已成功完成。
+无代码修改。
 
 ## 修复逻辑
-分析报告明确指出：
-1. Docker 镜像构建（Build）和推送（Push）两个阶段均完全成功，镜像已成功推送至 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`。
-2. 失败发生在构建完成后的 [Check] 阶段，根因是 CI runner 上 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh` 脚本第 13 行 `source`（`.`）`shunit2` 时找不到该文件，属于 CI 基础设施缺失，与 PR 代码无关。
-
-如需解决该 CI 失败，应在 CI runner 节点（`ecs-build-docker-aarch64-01-sp` 或对应 aarch64 节点）上安装 `shunit2` 框架（如 `yum install shunit2`），然后重新触发 Check 步骤。
+1. 分析报告确认：Docker 镜像构建（meson 编译 422 个目标）全部成功，镜像推送成功（`docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`）。
+2. 失败仅发生在 `eulerpublisher` 测试框架的 [Check] 后处理阶段，`common_funs.sh:13` 尝试 `source shunit2` 时找不到文件。
+3. 这是 CI runner 镜像/环境缺少 `shunit2` 依赖的纯基础设施问题，与 PR 新增的 Dockerfile、meta.yml、named.conf 等文件无任何关联。
+4. 需要在 CI runner 环境中预装 `shunit2` Shell 测试框架，或由 CI 管理员排查同一批次其他 PR 是否在相同 runner（aarch64）上也出现相同报错，以判断是单点环境问题还是镜像模板层面的系统性缺陷。
 
 ## 潜在风险
-无
+无。此修复未修改任何代码。
