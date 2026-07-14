@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是 `repo.openeuler.org` 镜像站 HTTP/2 服务瞬时故障导致的基础设施问题（infra-error），与 PR #2991 的代码变更无关。
+CI 构建失败为基础设施网络错误（infra-error），无需代码修改。
 
 ## 修改的文件
-无。本次 CI 失败属于基础设施层面，不需对任何源文件进行修改。
+无
 
 ## 修复逻辑
-CI 分析报告确认：失败根因是 `repo.openeuler.org` 在向 aarch64 构建节点提供 openEuler 24.03-LTS-SP4 仓库的 RPM 包时，HTTP/2 流反复出现 `INTERNAL_ERROR (err 2)`，导致 `guile` 包（git 的传递依赖）下载失败，`dnf install` 退出。Dockerfile 语法和内容无误，无需修改。
-
-建议操作：重新触发 CI 构建。若镜像站已恢复，下一次构建可正常通过。
+CI 失败由 `repo.openeuler.org` 仓库服务器在处理 HTTP/2 请求时出现瞬时流错误（Curl error 92: `INTERNAL_ERROR (err 2)`）导致，多个不同 RPM 包（`git-core`、`gcc-c++`、`guile`）下载时均遇到相同错误，排除了特定包损坏的可能性。PR 代码（Dockerfile 及元数据文件）无缺陷，`dnf install` 命令格式正确，与同仓库其他 24.03-lts-sp4 镜像写法一致。建议重新触发 CI 构建即可。
 
 ## 潜在风险
 无
