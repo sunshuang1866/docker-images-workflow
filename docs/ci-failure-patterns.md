@@ -717,3 +717,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2944: `Others/activemq/6.1.7/24.03-lts-sp4/Dockerfile:28` — ActiveMQ 6.1.7 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 下载 UR
+
+---
+
+## 模式39：CI工具依赖缺失
+
+**症状关键词**: ModuleNotFoundError, eulerpublisher, distroless
+
+**根因**: - 失败位置: `/usr/local/lib/python3.9/site-packages/eulerpublisher/container/cli.py:5`
+- 失败原因: CI 编排工具 `eulerpublisher` 在 executor 关闭阶段启动时因缺少 `eulerpublisher.container.distroless` 模块而崩溃。Docker 镜像构建和推送本身均已成功完成（`#10 DONE 38.8s`，`[Build] finished`，`[Push] finished`），失败仅发生在 `eulerpublisher` 工具的后处理/清理阶段。
+
+**修复方法**: CI 失败为 infra-error（`eulerpublisher` 包缺少 `distroless` 模块），与 PR 代码变更无关，无需修改 Dockerfile 或构建逻辑。顺带修正了 README.md 和 image-info.yml 中新镜像版本描述的文字笔误（`22.03` → `24.03`）。
+
+**历史案例**:
+- PR #2894: `Others/bisheng-jdk/README.md` — CI 失败为 infra-error（`eulerpublisher` 包缺少 `distroless` 模块），与 P
