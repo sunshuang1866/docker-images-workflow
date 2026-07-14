@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败由网络基础设施问题（镜像站下载超时）导致，非代码缺陷。
+无代码修复。该 CI 失败为基础设施错误（infra-error）：pip install 从 `mirrors.aliyun.com` 下载 `nvidia-cudnn-cu13`（366 MB）时发生瞬时网络读超时，与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。无需对任何源代码文件进行修改。
 
 ## 修复逻辑
-CI 构建在 `pip install -r backend/requirements.txt` 步骤从 `mirrors.aliyun.com` 下载 366 MB 的 `nvidia_cudnn_cu13==9.20.0.48` wheel 包时发生 `ReadTimeoutError`（已下载 353.4/366.2 MB 后连接中断）。该失败与代码逻辑无关，属于网络基础设施层面的瞬态问题。同仓库中已有 `24.03-lts-sp1` 版本的 Dockerfile 使用完全相同的镜像源和 pip install 命令，说明此问题为偶发性网络超时。建议触发 CI 重跑验证。
+CI 分析报告明确指出该失败是 `infra-error`——构建环境与阿里云镜像站之间的瞬时网络波动导致大文件下载超时，并非代码缺陷。`nvidia-cudnn-cu13` 在已完成 96.5% 进度后触发 `ReadTimeoutError`，为典型的网络瞬断。npm install 和 pip install 的前期依赖均正常下载完成，同一镜像源下的其他包也未出现问题。根据分析报告建议，直接重新触发 CI 构建即可，大概率通过。
 
 ## 潜在风险
-无
+无。
