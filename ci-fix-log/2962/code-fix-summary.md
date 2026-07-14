@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-meson 构建时 wayland-protocols 子项目从 GitLab 下载的 tarball 哈希值与源码 wrap 文件中的预期值不一致，导致构建失败。
+删除了 Dockerfile 中两行错误的 `sed` 命令——它们将 wayland-protocols wrap 文件的 `source_url` 和 `source_hash` 覆盖为错误值，导致 meson 配置阶段下载 wayland-protocols 1.41 时返回 HTTP 404。
 
 ## 修改的文件
-- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 在 `meson setup` 前添加 `sed` 命令，将 `subprojects/wayland-protocols.wrap` 中的 `source_url` 和 `source_hash` 替换为稳定的 freedesktop.org 官方发布地址及其对应 SHA256。
+- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 移除第 26-27 行的两行 `sed` 命令（原 `RUN sed -i ... subprojects/wayland-protocols.wrap` 的行），保留其余构建步骤不变。
 
 ## 修复逻辑
-根因是 GitLab 动态生成 release tarball 的 SHA256 哈希值不稳定（同一 URL 在不同时间/请求下可能返回不同内容），导致 meson 的哈希校验失败。将源码下载源从 GitLab（`https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz`）改为 freedesktop.org 官方发布页（`https://wayland.freedesktop.org/releases/wayland-protocols-1.41.tar.xz`，SHA256: `cea75b0a503a77e1c60a39c02d8849c285aed5d983b1e96c6e7c90b735982d32`）。freedesktop.org 的 release tarball 是由维护者签名发布的稳定文件，哈希值永久不变。已从该地址两次下载文件确认哈希一致，正则匹配方式为宽松模式（`s|source_url = .*|...`），兼容 wrap 文件的格式变化。
+1. mesa 25.3.4 源码中自带的 `subprojects/wayland-protocols.wrap` 上游文件已包含正确的值：
+   - `source_url = https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz`
+   - `source_hash = 2786b6b1b79965e313f2c289c12075b9ed700d41844810c51afda10ee329576b`
+2. 原 Dockerfile 中的 `sed` 命令将 `source_url` 错误地覆盖为 `https://wayland.freedesktop.org/releases/wayland-protocols-1.41.tar.xz`（该 URL 返回 404），`source_hash` 也覆盖为不匹配的值（`cea75b0a...`）。
+3. 同一 mesa 版本的 sp3 Dockerfile（`Others/mesa/25.3.4/24.03-lts-sp3/Dockerfile`）没有这些 sed patch，构建正常。
+4. 修复方案：直接删除两行 sed 命令，让 meson 使用上游 wrap 文件中的正确值进行子项目下载。已从上游 `mesa-25.3.4` tag 获取 `subprojects/wayland-protocols.wrap` 验证，确认其中 `source_url` 和 `source_hash` 正确。
 
 ## 潜在风险
-- 替换后的 source_url 依赖 freedesktop.org 的持续可用性，但该域名为 wayland 项目官方发布渠道，稳定性高。
-- 若未来 mesa 版本升级且 wayland-protocols 需求版本变化，wrap 文件路径（`subprojects/wayland-protocols.wrap`）仍应有效。
-- 不影响 SP3 构建或其他版本，仅修改 SP4 Dockerfile 的构建步骤。
+无。该修改使 sp4 Dockerfile 与已验证可工作的 sp3 Dockerfile 模式一致，仅移除了错误的覆盖操作，不影响其他构建步骤。
