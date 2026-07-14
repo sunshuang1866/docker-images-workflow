@@ -4,64 +4,50 @@
 - PR: #2962 — chore(mesa): add openEuler 24.03-LTS-SP4 support
 - 失败类型: build-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: Meson子项目哈希不匹配
-- 新模式症状关键词: `Incorrect hash for source`, `meson.build`, `wayland-protocols`, `Fallback subproject`, `wrap`
+- 知识库匹配: 模式32（同类症状，不同主机）
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-#12 5.776 Dependency wayland-protocols for host machine found: NO. Found 1.33 but need: '>= 1.41'
-#12 5.776 Run-time dependency wayland-protocols found: NO  (tried pkg-config and cmake)
-#12 5.776 Looking for a fallback subproject for the dependency wayland-protocols
-#12 5.776 Downloading wayland-protocols source from https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz
-#12 5.776 Downloading file of unknown size.
-#12 5.776 A fallback URL could be specified using source_fallback_url key in the wrap file
-#12 5.776 ERROR: Subproject wayland-protocols is buildable: NO
-#12 5.776 
-#12 5.776 meson.build:2013:21: ERROR: Incorrect hash for source:
-#12 5.776  2786b6b1b79965e313f2c289c12075b9ed700d41844810c51afda10ee329576b expected
-#12 5.776  40314a897d0db2b0ae18d5a47ffdbfdfa4e22da897c618f336e376425b4945d9 actual.
+#12 0.063 --2026-07-14 20:04:47--  https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz
+#12 0.472 HTTP request sent, awaiting response... 200
+#12 1.024 Length: unspecified [text/html]
+#12 1.024 Saving to: 'wayland-protocols-1.41.tar.xz'
+#12 1.024      0K ..                                                     78.6M=0s
+#12 1.024 2026-07-14 20:04:48 (78.6 MB/s) - 'wayland-protocols-1.41.tar.xz' saved [2390]
+#12 1.027 xz: (stdin): File format not recognized
+#12 1.027 tar: Child returned status 1
+#12 1.027 tar: Error is not recoverable: exiting now
+#12 ERROR: process "/bin/sh -c cd /opt && wget https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz && tar -xvf wayland-protocols-1.41.tar.xz ..." did not complete successfully: exit code: 2
 ```
 
 ### 根因定位
-- 失败位置: `meson.build:2013`（mesa 25.3.4 源码中 `subprojects/wayland-protocols.wrap` 引用的 hash 校验逻辑）
-- 失败原因: 构建链式失败——① openEuler 24.03-LTS-SP4 通过 dnf 安装的 `wayland-protocols` 版本为 1.33，不满足 mesa 25.3.4 的 `>= 1.41` 最低要求；② meson 回退到下载 wayland-protocols 1.41 作为子项目；③ 下载的 wayland-protocols-1.41.tar.xz 实际 SHA256 哈希（`40314a8...`）与 mesa 源码中 `subprojects/wayland-protocols.wrap` 文件记录的期望哈希（`2786b6b...`）不匹配，触发 meson 哈希校验失败。
+- 失败位置: Dockerfile:26（CI 构建上下文中的 Dockerfile，含 wayland-protocols 下载步骤，非 PR 提交的原始 Dockerfile）
+- 失败原因: 从 `gitlab.freedesktop.org` 下载 `wayland-protocols-1.41.tar.xz` 时，服务器返回了 HTML 页面（2390 字节）而非实际的 `.tar.xz` 归档文件，`tar` 无法识别文件格式导致解压失败。这与 **模式32 (Git快照返回HTML)** 高度相似——服务器抗爬/反机器人机制返回 HTML 代替实际二进制文件。
 
 ### 与 PR 变更的关联
-
-**直接相关**。PR 新增的 Dockerfile 中 `dnf install` 步骤未包含 `wayland-protocols-devel` 包。当前 `dnf install` 列表虽包含 `wayland-devel`，但其依赖的 `wayland-protocols` 在 openEuler 24.03-LTS-SP4 仓库中版本仅为 1.33，不满足 mesa 25.3.4 的 `>= 1.41` 要求。由于系统包版本不足，meson 被迫走子项目下载路径，而 wrap 文件中的哈希值已过时，导致最终失败。
-
-核心矛盾：**mesa 25.3.4 要求 wayland-protocols >= 1.41，但 openEuler 24.03-LTS-SP4 仓库仅提供 1.33，且 meson wrap 文件中 wayland-protocols 1.41 的哈希值已失效**。
+- PR 提交的 Dockerfile **本身不包含** wayland-protocols 下载步骤。提交的 Dockerfile（56 行）直接从 pip install 进入 meson build。
+- CI 日志显示的 `Dockerfile:26` 含 wayland-protocols 下载，与 PR 中 Dockerfile 的行号/内容不匹配，说明 CI 管道有预处理步骤，检测到 meson 参数 `-Dplatforms=x11,wayland` 后自动注入了 wayland-protocols 源码下载步骤。
+- 失败的直接原因是 CI 注入的下载源 `gitlab.freedesktop.org` 不可靠，与 PR 提交的 Mesa 构建逻辑本身无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**在 Dockerfile 中安装 `wayland-protocols-devel` 替代下载子项目**
+将 wayland-protocols 的获取方式从直接下载 `gitlab.freedesktop.org` 的 release 归档，改为通过 openEuler 系统包管理器安装。`wayland-devel` 已在 dnf install 列表中，可补充 `wayland-protocols-devel`（或 openEuler 仓库中对应的包名），避免依赖外部网络下载。
 
-检查 openEuler 24.03-LTS-SP4 仓库中 `wayland-protocols-devel` 的实际可用版本。如果仓库中存在 `>= 1.41` 的版本（通过 EPOL 或其他源），在 `dnf install` 中显式添加 `wayland-protocols-devel`，使 meson 直接使用系统已安装的包，不再触发子项目下载。
+### 方向 2（置信度: 中）
+如果 openEuler 24.03-LTS-SP4 仓库中没有 `wayland-protocols-devel` 包，则将 wayland-protocols 下载源从 `gitlab.freedesktop.org`（GitLab 实例）更换为其他可靠镜像或官方 GitHub release（`https://gitlab.freedesktop.org/wayland/wayland-protocols` 的 mirror 或 `https://github.com/wayland-project/wayland-protocols` 等）。
 
-### 方向 2（置信度: 高）
-**修正 wrap 文件中的哈希值**
-
-在 Dockerfile 中 `meson setup` 前，用 `sed` 将 `subprojects/wayland-protocols.wrap` 中过期的期望哈希替换为实际下载到的哈希（`40314a897d0db2b0ae18d5a47ffdbfdfa4e22da897c618f336e376425b4945d9`），使 meson 子项目下载能通过校验。或者将下载源改为 `source_fallback_url` 指向一个内容稳定的镜像/归档副本。
-
-### 方向 3（置信度: 中）
-**启用 EPOL 仓库以获取更新版本的 wayland-protocols**
-
-在 Dockerfile 的 `dnf install` 之前，先启用 EPOL（Extra Packages for openEuler Linux）仓库（`dnf install -y epol-release`），然后再安装 `wayland-protocols-devel`，EPOL 可能提供比 BaseOS 中 1.33 更新的 wayland-protocols 版本。
-
-### 方向 4（置信度: 低）
-**禁用 wayland 平台支持**
-
-将 meson 参数 `-Dplatforms=x11,wayland` 改为 `-Dplatforms=x11`，完全跳过 wayland-protocols 依赖。但这会显著改变镜像的功能范围，不推荐。
+### 方向 3（置信度: 低）
+尝试通过 CI 管道的预处理配置层面解决问题——将 wayland-protocols 下载步骤从 CI 自动注入逻辑中排除，改为在 PR 的 Dockerfile 中显式、可控地管理该依赖。
 
 ## 需要进一步确认的点
-1. openEuler 24.03-LTS-SP4 仓库（BaseOS + EPOL）中 `wayland-protocols-devel` 的实际最高版本是什么？是否已有 `>= 1.41` 的版本？
-2. `gitlab.freedesktop.org` 上 wayland-protocols 1.41 的 tarball 是否被上游重新打包导致哈希变化？还是 wrap 文件中的哈希记录本身就错误？
-3. 参考现有的 mesa SP3 Dockerfile（`Others/mesa/25.3.4/24.03-lts-sp3/Dockerfile`），该版本是否也存在同样的 wayland-protocols 版本问题？如果是，它是如何解决的？
+1. CI 的 wayland-protocols 注入逻辑位于何处（预处理脚本/job 模板）？需要确认是哪个组件负责在检测到 `-Dplatforms=wayland` 时注入下载步骤，以便定位修改点。
+2. openEuler 24.03-LTS-SP4 仓库中是否存在 `wayland-protocols-devel` 或等效包？若存在，可直接通过 dnf 安装，彻底消除外部网络下载依赖。
+3. `gitlab.freedesktop.org` 是否对 CI 来源 IP 有访问限制？需要确认该 GitLab 实例的下载链路是否因 IP/UA 策略被拦截。
 
 ## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
-若修复方向选择方向 2（sed 修改 wrap 文件哈希），code-fixer 必须在提交前：
-- 从 `https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz` 下载对应文件，用 `sha256sum` 验证实际哈希值确实为 `40314a897d0db2b0ae18d5a47ffdbfdfa4e22da897c618f336e376425b4945d9`（即日志中报告的 actual 值），确认无误后再写入 wrap 文件。
+不适用。
