@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error，根因是 CI Runner 环境中的 `eulerpublisher` Python 包缺少 `eulerpublisher.container.distroless` 子模块，Docker 镜像构建与推送本身已成功完成。
+CI 失败为 infra-error（`eulerpublisher` 包缺少 `distroless` 模块），与 PR 代码变更无关，无需修改 Dockerfile 或构建逻辑。顺带修正了 README.md 和 image-info.yml 中新镜像版本描述的文字笔误（`22.03` → `24.03`）。
 
 ## 修改的文件
-无
+- `Others/bisheng-jdk/README.md`: 修正 `21.0.5-oe2403sp4` 行中基础镜像版本描述 `22.03-LTS-SP4` → `24.03-LTS-SP4`
+- `Others/bisheng-jdk/doc/image-info.yml`: 同上修正
 
 ## 修复逻辑
-CI 日志显示构建、验证、推送三个阶段均已完成：
-- `#8 DONE` — JDK 提取成功
-- `#9 DONE` — Smoke test 通过（`javac 21.0.5`, `openjdk 21.0.5 BiSheng`）
-- `#10 DONE` — 镜像推送成功
-- 日志明确记录 `[Build] finished` 和 `[Push] finished`
-
-失败发生在构建完成后的 CI 流水线 shutdown 阶段，`eulerpublisher` CLI 工具因 `ModuleNotFoundError: No module named 'eulerpublisher.container.distroless'` 崩溃。该模块缺失与 PR 代码变更无关，需由 CI 运维团队在 Runner 环境中重新安装或升级 `eulerpublisher` 包解决。
+1. **CI 失败部分**：分析报告明确判定为 `infra-error`。Docker 镜像构建和推送均已成功，`eulerpublisher` 模块缺失是 CI 基础设施问题，需 CI 运维团队介入处理，不属于 Code Fixer 可修复范围。
+2. **文档笔误部分**：该镜像基于 `openeuler/openeuler:24.03-lts-sp4`，但 README.md 和 image-info.yml 的表格中错误地写成了 `22.03-LTS-SP4`，属于笔误，已修正为 `24.03-LTS-SP4`。
 
 ## 潜在风险
 无
