@@ -2,21 +2,20 @@
 
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
-- 失败类型: lint-error
+- 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 根README路径校验
-- 新模式症状关键词: Path Error, expected path, README.md, appstore specification, eulerpublisher, update.py
+- 新模式标题: 根目录路径格式校验
+- 新模式症状关键词: Path Error, expected path, README.md, eulerpublisher, appstore
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:27:51,489-/home/jenkins/agent-working-dir/workspace/multiarch/****/x86-64/****-docker-images/eulerpublisher/update/container/app/update.py[line:356]-INFO: Difference: [
+2026-07-14 11:27:51,489 - update.py[line:356] - INFO: Difference: [
     "README.md"
 ]
-...
-2026-07-14 11:28:17,839-/home/jenkins/agent-working-dir/workspace/multiarch/****/x86-64/****-docker-images/eulerpublisher/update/container/app/update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:28:17,839 - update.py[line:273] - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
@@ -25,30 +24,24 @@
 ```
 
 ### 根因定位
-- 失败位置: `README.md`（仓库根目录），检测由 `eulerpublisher/update/container/app/update.py:273` 触发
-- 失败原因: CI 的 appstore 发布规范检查工具对 git diff 中检测到的变更文件 `README.md` 应用了镜像路径格式校验，根级 README.md 不符合镜像子目录的路径规范（如 `{category}/{image}/{version}/{os-version}/README.md`），被判定为路径错误
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`
+- 失败原因: CI appstore 发布规范预检工具 `update.py` 对 PR 中变更的根目录文件 `README.md` 执行路径校验时，工具内部路径格式为 `README.md`（无前导 `/`），但 appstore 规范要求根目录文件路径格式为 `/README.md`（带前导 `/`），字符串比较不匹配导致检查失败。
 
 ### 与 PR 变更的关联
-**直接关联**。PR #3153 修改了仓库根的 `README.md`（更新基础镜像可用 tags 列表：将 latest 标签从 `24.03-lts-sp2` 更新为 `24.03-lts-sp4`，新增 `24.03-lts-sp3`、`25.09`、`24.03-lts-sp2` 条目）。CI 的 diff 检测发现该文件变更后，将其纳入 appstore 发布规范路径检查流程。根级 README.md 作为仓库整体文档，本身不属于任何镜像目录，因此无法通过针对镜像子目录设计的路径校验。
-
-PR 同时修改了 `README.en.md`，但 CI 的 diff 检测结果 `Difference: ["README.md"]` 中未包含该文件（可能被 CI diff 过滤或单独处理），故未触发同类校验失败。
+**与 PR 代码变更无关。** PR #3153 为纯文档变更——仅更新 `README.md` 和 `README.en.md` 中基础镜像的 Tags 列表（新增 24.03-lts-sp4/sp3/sp2 和 25.09 等标签），不涉及任何 Dockerfile、meta.yml、image-info.yml 或其他应用镜像构建文件的修改。CI 的 appstore 发布规范检查应针对实际新增/修改的应用镜像目录触发，而不应在纯文档 PR 上执行并报错。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 检查工具（`update.py:273`）应在路径校验前增加文件过滤逻辑，排除仓库根级文件（如 `/README.md`、`/README.en.md`、`.gitignore` 等非镜像子目录文件），仅对 `{category}/` 下的镜像子目录文件执行 appstore 发布规范路径检查。
+CI 工具端（`eulerpublisher/update/container/app/update.py`）路径比对逻辑存在缺陷：在处理 git diff 产生的文件路径与 appstore 规范中定义的预期路径格式时，未进行路径格式归一化（normalization）。根目录文件在 git diff 中通常表示为 `README.md`（无前导 `/`），而规范中可能定义为 `/README.md`（带前导 `/`），应在此类预检中统一为绝对路径或相对路径后再比对。
 
 ### 方向 2（置信度: 低）
-CI 工具可能存在路径字符串格式化问题——git diff 产出的路径为 `README.md`（无前导 `/`），而工具内部预期格式为 `/README.md`（带 `/` 前缀），两者字符串不等导致校验失败。需查阅 `update.py` 中路径比较逻辑确认。
+CI 预检流程的触发条件可能存在误判——对纯文档类变更（仅修改 README 文件、不涉及任何镜像构建文件）不应触发 appstore 发布规范检查。可在 `update.py` 的变更文件过滤阶段增加白名单/黑名单逻辑，跳过不涉及镜像构建目录的文档变更。
 
 ## 需要进一步确认的点
-- `eulerpublisher/update/container/app/update.py` 中第 273 行附近路径校验函数的具体实现——校验的是 filepath 格式还是目录层级深度
-- 根级 `README.md` 的历史 PR 中是否也曾触发同类校验失败，还是近期 CI 工具升级后新增的检查规则
-- CI diff 检测为何仅报告 `README.md` 而未报告 `README.en.md`（是否为文件扩展名过滤逻辑）
-- `Finished: FAILURE` 与 PR 状态一致，日志证据充分，无需额外确认
+1. `eulerpublisher/update/container/app/update.py` 中路径比对的具体实现逻辑（第 273 行附近的文件路径处理代码），以确认是否是字符串字面量比较缺少归一化所致。
+2. CI 预检流程的触发条件——该 appstore 规范检查是否对所有 PR 无条件执行，还是应有文件变更范围过滤。
+3. CI 日志中 Jenkins 上游触发信息提到 `PR 3184 [sunshuang1866:fix/3153 -> master]`，但上下文 PR 编号为 3153，需确认日志是否属于 PR #3153 的同一次失败。
 
 ## 修复验证要求
-无需从上游仓库获取文件进行正则匹配验证。但 code-fixer 在修改 CI 过滤逻辑时，需确认以下回归场景：
-- 排除根级文件后，正常镜像子目录（如 `AI/xxx/1.0/24.03-lts-sp4/README.md`）的路径校验仍正常通过
-- `README.en.md` 等其他根级非代码文件是否也需要加入排除列表
-- 排除逻辑是否应与现有 `Difference` 检测（`update.py:356`）的过滤规则保持一致
+无需在本 PR 提交代码修复。该问题属于 CI 基础设施（`eulerpublisher` 工具）的路径比对逻辑缺陷，应由 CI 平台侧修正。
