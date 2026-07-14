@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 被终止
-- 新模式症状关键词: graceful_stop, no builder, closing transport, rpc error, connection error, EOF
+- 新模式标题: BuildKit builder 异常终止
+- 新模式症状关键词: graceful_stop, rpc error, Unavailable, no builder found, euler_builder
 
 ## 根因分析
 
@@ -17,20 +17,21 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`（正在下载 OS 元数据时）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被外部触发优雅终止（`graceful_stop`），导致 Docker 客户端与 builder 之间的 gRPC 连接断开（`connection error: EOF`），构建被迫中断。
+- 失败位置: Docker build 步骤 `#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel` 执行期间
+- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 在执行 dnf 元数据下载过程中被服务端主动发送 `graceful_stop` goaway 帧终止，随后 RPC 连接中断（EOF），构建器实例销毁，导致后续重试时无法找到该 builder。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。PR 仅新增 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 和对应的元数据文件（meta.yml、README.md、image-info.yml），Dockerfile 内容正确、结构合理。失败发生在 Docker build 基础设施层——BuildKit builder 在 `dnf install` 下载阶段被提前回收，属于 CI 平台的临时不稳定问题，不反映任何代码缺陷。
+PR 变更内容为新增 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及配套元数据文件，Dockerfile 语法和内容均符合现有同类镜像的规范模式，未见明显错误。失败发生在 Dockerfile 中常规的 `dnf install -y` 包安装步骤，并非由 PR 代码变更的逻辑缺陷触发。失败更可能是 CI 基础设施侧（BuildKit builder 进程）的临时性问题引起。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修改代码**。这是 CI 基础设施的瞬时故障（BuildKit builder 被提前回收）。直接重新触发 CI 构建即可，大概率会成功。如果持续复现，需要 CI 平台管理员排查 builder 实例的存活时间（TTL）配置是否过短，导致耗时较长的 `dnf install` 步骤尚未完成 builder 就被回收。
+### 方向 1（置信度: 中）
+CI 基础设施问题，非代码问题。建议：
+1. **重新触发 CI 构建**：该 Dockerfile 无逻辑错误，重试构建大概率可成功。
+2. **排查 BuildKit builder 终止原因**：检查 CI 节点（`ecs-build-docker-x86-hk`）是否因资源不足（内存/OOM、磁盘空间）或超时策略导致 builder 被 kill。日志中 dnf 元数据下载速度为 77 kB/s，2.8MB 元数据需约 37 秒完成；若 CI 对 builder 有生存时间限制或节点负载过高，可能导致 builder 在这段时间内被清理。
+3. **检查 dnf 仓库连通性**：确认 CI 节点到 openEuler 24.03-LTS-SP4 软件源（`OS` repo）的网络延迟和带宽是否正常，77 kB/s 的下载速度偏低。
 
 ## 需要进一步确认的点
-- builder `euler_builder_20260709_224657` 被优雅终止的具体原因（手动回收、超时回收、还是节点资源不足导致的驱逐）
-- 若重试后仍然在同一位置失败，需要检查 `dnf install` 的网络连通性和 OS 仓库可达性（当前日志中 OS 元数据下载耗时 38.59 秒下载 2.8MB，速度正常，未出现超时）
-
-## 修复验证要求
-无需验证。本次失败属于 infra-error，不涉及任何代码修改，重试 CI 即可。
+- `graceful_stop` 是 BuildKit daemon 主动发出的关闭信号，需要确认触发原因：是 CI Job 超时策略、Jenkins 节点清理机制，还是 Builder 进程自身的内存/crash 问题。
+- 检查同一时间段内其他类似 PR（同为 24.03-lts-sp4 基础镜像的构建）是否也出现相同错误，以区分是节点级问题还是该基础镜像的 dnf 仓库问题。
+- 若重试后仍失败，需获取 BuildKit builder 容器的日志（`docker logs buildx_buildkit_euler_builder_20260709_2246570`）以确定 builder 侧崩溃的精确原因。
