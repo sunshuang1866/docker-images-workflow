@@ -18,35 +18,30 @@
 #9 0.459 Connecting to dlcdn.apache.org (dlcdn.apache.org)|151.101.2.132|:443... connected.
 #9 0.470 HTTP request sent, awaiting response... 404 Not Found
 #9 0.655 2026-07-10 04:55:51 ERROR 404: Not Found.
+#9 ERROR: process "/bin/sh -c wget https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz ..." did not complete successfully: exit code: 8
+------
+Dockerfile:9
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9-12`（wget 下载步骤）
-- 失败原因: `dlcdn.apache.org` 对 Druid 35.0.0 的二进制包 `apache-druid-35.0.0-bin.tar.gz` 返回 HTTP 404。Apache CDN（dlcdn）遵循与 Maven 类似的策略，仅保留最新若干版本，旧/特定版本下架后返回 404。
+- 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9`
+- 失败原因: `dlcdn.apache.org` CDN 已下架 Apache Druid 35.0.0 的二进制包（404 Not Found），与模式01机制一致——Apache CDN 仅托管最新版本，旧版本下架后即不可用。
 
 ### 与 PR 变更的关联
-PR 新增的 Dockerfile 将下载源设为 `dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`，其中 `VERSION=35.0.0`。该版本在 `dlcdn.apache.org` 上已不可用，直接导致构建失败。此失败完全由本次 PR 新增的 Dockerfile 引起。
+本次 PR 新增了 Druid 35.0.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile。Dockerfile 中硬编码使用 `dlcdn.apache.org/druid/${VERSION}/` 作为下载源（`Dockerfile:9`）。该 URL 在 Druid 35.0.0 仍为 CDN 当前版本时有效（现有 SP2 的 Dockerfile 在提交时可用），但当前 CDN 上 35.0.0 已被下架，导致新 SP4 Dockerfile 构建时下载失败。失败直接由 PR 新增的 Dockerfile 触发。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将下载源从 `dlcdn.apache.org` 换为 `archive.apache.org/dist/druid`，Apache 归档站保留所有历史版本，不受 CDN 下架影响：
-```
-https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz
-```
-此方案与模式01和模式02中多处历史修复一致（如 PR #1932 phoenix、PR #2267 haproxy 等），从 CDN 切换到 archive 归档站。
+将 Druid 35.0.0 的下载源从 `dlcdn.apache.org` 更换为 `archive.apache.org/dist/druid/`。Apache 官方归档站 `archive.apache.org` 保留所有历史版本的二进制包，不受 CDN 仅保留最新版的限制。需要确认目标 URL `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 确实存在且可访问。
 
 ### 方向 2（置信度: 中）
-如果 `archive.apache.org` 同样不可达（参考模式33中 `downloads.apache.org` 网络不通的历史案例），可将下载源替换为华为云镜像站或其他国内可达镜像：
-```
-https://repo.huaweicloud.com/apache/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz
-```
+若 `archive.apache.org` 不可用（参考模式33，`archive.apache.org` 在 CI 环境中存在网络不通的历史案例），可将下载源更换为华为云镜像站等国内镜像，例如 `repo.huaweicloud.com/apache/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz`，但需确认该镜像仓中是否包含 Druid 制品。
 
 ## 需要进一步确认的点
-- 验证 Druid 35.0.0 在 `archive.apache.org/dist/druid/35.0.0/` 目录下确实存在 `apache-druid-35.0.0-bin.tar.gz`
-- 确认同一版本已有的 `35.0.0-oe2403sp2` Dockerfile 是否使用相同下载源（若 SP2 仍可构建，需对比其下载 URL 是否已采用 archive 镜像站）
-- 若 archive.apache.org 也无法连接到 CI 构建环境，需要先验证网络可达性
+- `archive.apache.org/dist/druid/35.0.0/` 路径下是否确实存在 `apache-druid-35.0.0-bin.tar.gz` 文件
+- CI 构建环境是否能正常访问 `archive.apache.org`（历史上出现过网络不通的情况，见模式33）
+- 同镜像已有 SP2 版本的 Dockerfile 是否也使用了相同的问题 URL 模式，若 SP2 后续触发 rebuild 是否需要同步修复
 
 ## 修复验证要求
-- code-fixer 在提交前，需手动验证 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz`（或所选替代 URL）确实可访问且返回 200
-- 若替换为华为云镜像站或其他镜像源，同样需确认对应 URL 返回 200 后再提交
+code-fixer 在提交前，需手动验证目标下载 URL（如 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz`）确实返回 HTTP 200 且文件可正常下载。若 archive 站不可达，需验证候选镜像站（如华为云镜像站）上对应路径是否存在该 Druid 版本制品。
