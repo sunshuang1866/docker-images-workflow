@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（infra-error）：构建环境无法连接 `archive.apache.org`（TCP 连接超时），与 PR 代码逻辑无关。
+无需代码修改。CI 失败类型为 `infra-error`，根因是 CI 构建环境无法连接 `archive.apache.org`（IPv4 连接超时、IPv6 网络不可达），导致 wget 下载 Spark 3.4.2 失败。Dockerfile 代码本身正确，此问题与 PR 代码逻辑无关。
 
 ## 修改的文件
-无
+无（未对任何文件做修改）
 
 ## 修复逻辑
-1. 失败类型确认为 `infra-error`，CI 构建环境到 `archive.apache.org` 的网络不可达导致 wget 下载 Spark 3.4.2 失败。
-2. 验证了替代下载源：
-   - `dlcdn.apache.org/dist/spark/spark-3.4.2/` → **404**（CDN 不保留旧版本）
-   - `downloads.apache.org/dist/spark/spark-3.4.2/` → **404**（主下载站仅保留 3.5.8+ 版本）
-   - `archive.apache.org` → 文件存在（已确认目录列表），但 CI 网络不可达
-3. 该 Dockerfile 使用的 `archive.apache.org` 是项目通用模式：全仓库 34 处 Spark 下载（包括所有 Kyuubi 版本和 Spark 自身 Dockerfile）均使用同一域名，此 Dockerfile 与项目规范一致。
-4. 根据修复规则："如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"。
+分析报告明确指出失败类型为 `infra-error`（置信度: 高），根因是 CI 基础设施网络连通性问题，而非代码缺陷。Dockerfile 中 Spark 下载源 `archive.apache.org` 的 URL 格式与其他 20+ 个同类 Dockerfile（Bigdata/spark/、Bigdata/kyuubi/、Bigdata/livy/ 等）完全一致，代码无错误。CI runner 在当前网络环境下无法访问该域名属于基础设施问题，需要 CI 运维团队排查网络连通性或在 CI 环境中配置代理/镜像。
+
+分析报告虽提供了将下载源切换为 `dlcdn.apache.org` 的修复方向，但根据任务指令中"如果分析报告指出是 infra-error，不要强行改代码"的要求，不对 Dockerfile 做任何代码修改。
 
 ## 潜在风险
-无。此为 CI 基础设施网络波动问题，建议重试构建。若问题持续出现，需排查 CI 环境到 `archive.apache.org`（65.108.204.189）的网络路由。
+无（未做任何代码变更）
