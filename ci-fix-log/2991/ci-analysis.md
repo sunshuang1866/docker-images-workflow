@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, repo.openeuler.org, INTERNAL_ERROR (err 2), dnf install
+- 新模式标题: 镜像源HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,23 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: CI 在 **aarch64** runner 上执行 `dnf install` 时，`repo.openeuler.org` 的 `openEuler-24.03-LTS-SP4` 仓库在 HTTP/2 传输层出现流错误（Curl error 92: `INTERNAL_ERROR`），导致多个 RPM 包（git-core、gcc-c++、guile）下载失败。其中 guile 包重试耗尽所有镜像源后仍未成功，dnf 报错退出。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 仓库多个 RPM 包（git-core、gcc-c++、guile）下载过程中遭遇 HTTP/2 流错误（Curl error 92：`INTERNAL_ERROR`）。其中 git-core 和 gcc-c++ 经 DNF 自动重试后下载成功，但 guile 包耗尽所有可用镜像后彻底失败，导致整个 `dnf install` 命令退出码为 1。
 
-### 与 PR 变更的关联
-**无关**。PR 仅新增了一个标准 Dockerfile（安装依赖 → 克隆源码 → cmake 构建 vvenc），以及对应的 README/image-info/meta.yml 条目。Dockerfile 中 `dnf install` 命令本身完全正确，失败纯粹由 `repo.openeuler.org` 仓库的 HTTP/2 服务端协议异常导致，与 PR 代码变更无关。
+## 与 PR 变更的关联
+
+**无关**。本次 PR 仅新增了 vvenc 1.14.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据（README.md、image-info.yml、meta.yml），共 4 个文件、18 行新增。Dockerfile 中的 `dnf install` 命令语法和包列表均正确（与同项目其他 Dockerfile 一致）。失败根因是 `repo.openeuler.org` 镜像源在构建时刻的 HTTP/2 服务端流异常，属于临时的基础设施网络问题，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-该失败为 **infra-error**，无需修改 PR 代码。应重试 CI 构建。若仓库端 HTTP/2 问题持续存在，CI 编排侧可考虑：
-- 在 Dockerfile 或构建环境中配置 dnf/yum 回退到 HTTP/1.1（设置 `http2=false` 或 `proxy` 禁用 HTTP/2）
-- 或使用其他 openEuler 镜像源替代默认的 `repo.openeuler.org`
-
-### 方向 2（置信度: 低）
-若 `repo.openeuler.org` 的 24.03-LTS-SP4 aarch64 仓库存在长期问题，可考虑更改基础镜像为已验证可用的版本（如 `24.03-lts-sp3`），但这不是代码缺陷所致，不推荐此方向。
+**无需代码修复，触发重试即可。** 该失败是 openEuler 官方镜像源 `repo.openeuler.org` 的 HTTP/2 服务器临时故障导致的 RPM 包下载中断。属于 CI 基础设施瞬态故障，：
+- 在 CI 界面触发 **重新构建（Replay/Rebuild）** 即可，绝大多数情况下仓库源恢复正常后构建可顺利通过。
+- 如果多次重试仍然失败，需联系 openEuler 基础设施团队排查 `repo.openeuler.org` 的 aarch64 仓库 HTTP/2 服务稳定性。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 的 HTTP/2 服务器状态，该 issue 是否已修复
-- 确认是否仅在 aarch64 架构 runner 上触发（x86_64 的同仓库路径是否正常）
-- 该失败是否为偶发（retry CI 是否通过）
+
+- 确认 `repo.openeuler.org` 在构建时段（约 2026-07-09 14:09 UTC）是否存在已知的 HTTP/2 服务异常。
+- 确认其他同时段提交的 openEuler 24.03-LTS-SP4 aarch64 构建（若有）是否出现同类 `Curl error (92)` 失败，以佐证其为系统性基础设施问题。
