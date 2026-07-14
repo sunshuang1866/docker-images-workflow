@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 被终止
-- 新模式症状关键词: goaway, graceful_stop, no builder found, euler_builder, docker-container driver
+- 新模式标题: BuildKit Builder 异常终止
+- 新模式症状关键词: graceful_stop, closing transport, error reading from server: EOF, no builder found
 
 ## 根因分析
 
@@ -19,29 +19,20 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile `[2/4] RUN dnf install ...` 步骤（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile:8`）
-- 失败原因: BuildKit 的 `docker-container` 驱动 builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被**优雅终止**（`graceful_stop` goaway），导致正在执行的 `dnf install` 步骤的 gRPC 连接断开，构建器无法恢复。
+- 失败位置: Docker 构建步骤 `#7 [2/4]`（`dnf install` 安装系统依赖阶段）
+- 失败原因: BuildKit 构建容器 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据期间被优雅终止（`graceful_stop`），导致 RPC 传输关闭。构建器随后不再可用，构建无法继续。
 
 ### 与 PR 变更的关联
-**与 PR 改动无关**。PR 仅新增了 scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和相关元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 的 `RUN dnf install ...` 步骤语法正确、包名合理（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`），与同仓库其他同类 Dockerfile（如 `24.03-lts-sp3` 版本）的依赖声明模式一致。
-
-失败发生在 BuildKit 基础设施层——builder 实例在 dnf 下载元数据过程中（进度 37 秒，已下载 2.8 MB）被外部主动终止，属于 CI runner/节点层面的问题。
+**与 PR 代码变更无关。** 该 PR 仅新增了一个 Dockerfile（scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的构建定义）及相关元数据文件。构建失败发生在 BuildKit 基础设施层面——构建器容器被意外终止，而非 Dockerfile 指令执行出错。第一步（拉取基础镜像）已成功完成，第二步（`dnf install` 安装系统包）刚开始下载元数据即被中断，属于 CI runner 侧的资源/环境问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**重新触发 CI 构建**。这是一个典型的 CI 基础设施瞬时故障，BuildKit builder 被 `graceful_stop` 终止的常见原因包括：
-- CI runner 节点资源紧张触发 OOM killer / 自动清理
-- Jenkins 的 build timeout 机制在 Docker 构建步骤超时前终止了 builder
-- Runner 节点维护/调度触发了容器清理
-
-由于 Dockerfile 本身逻辑无问题（依赖声明正确、步骤顺序合理），重新提交构建大概率可以成功。如果重试仍失败在同一位置，则可排查是否是 dnf 下载阶段耗时过长（openEuler 24.03-LTS-SP4 镜像首次 pull 后 `dnf` 需要下载约 2.8 MB 元数据 + 安装多个 `-devel` 包），可考虑在 Dockerfile 中添加 `--setopt=timeout=300` 等 dnf 超时参数缓解。
-
-### 方向 2（置信度: 低）
-**检查 Jenkins job 的构建超时配置**。如果该 Jenkins job 对单个 Docker 构建步骤设定了较短的超时，而 `dnf install`（含元数据下载）在网络波动下耗时逼近阈值，可能触发了 builder 的优雅终止。可从 Jenkins 侧调整 `Build step 'Execute shell'` 的超时设置，或为 `docker buildx build` 命令添加 `--builder` 参数的显式超时控制。
+### 方向 1（置信度: 高）
+**重新触发 CI 构建。** 本次失败是 BuildKit 构建器容器的瞬时性基础设施故障（容器被优雅终止或资源回收），与 PR 代码完全无关。重新运行 CI job 极大概率可以成功通过。此类型的 `graceful_stop` / `closing transport` 错误通常是 CI 节点资源压力、调度策略或构建器生命周期管理异常导致的一次性问题。
 
 ## 需要进一步确认的点
-1. Jenkins 构建节点的资源使用情况（内存/磁盘）在 builder 被终止时刻是否触达限制
-2. 同批次其他镜像的构建是否也出现相同失败（判断是单节点问题还是集群性问题）
-3. `euler_builder_20260709_224657` 是否因 Jenkins node 的 idle cleanup 策略被回收
-4. 确认是否存在对 `docker buildx build` 或 `docker-container` driver 的显式超时限制
+- 构建节点 `ecs-build-docker-x86-hk` 在失败时段的资源使用状态（CPU/内存/磁盘），以排查是否因资源耗尽触发了 BuildKit 容器被清理
+- CI 调度器是否对构建器容器有最大运行时间或资源限制，可能导致 `dnf install`（含网络下载）阶段的长时间等待触发回收
+
+## 修复验证要求
+无需代码修复。重新触发 CI 构建即可验证。
