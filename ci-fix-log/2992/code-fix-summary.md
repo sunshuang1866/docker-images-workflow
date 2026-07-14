@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是 openEuler 24.03-LTS-SP4 RPM 仓库镜像源的 HTTP/2 协议临时故障（curl error 92: HTTP/2 stream INTERNAL_ERROR），属于 CI 基础设施问题（infra-error）。
+无需代码修复。CI 失败属于基础设施故障（infra-error），非代码问题。
 
 ## 修改的文件
-无。所有 PR 变更文件（Dockerfile、meta.yml、README.md、image-info.yml）语法正确，与失败无关。
+无（无需修改任何文件）
 
 ## 修复逻辑
-该失败发生在 `dnf install` 下载 RPM 包阶段（gcc-gfortran、glibc-devel、guile、gcc 等包反复遭遇 HTTP/2 协议层 INTERNAL_ERROR），而非 Dockerfile 命令语法或包名错误。日志中部分包在重试后成功下载，但 gcc 大包（34 MB）最终耗尽重试次数。Dockerfile 本身无需修改，建议在确认 openEuler 24.03-LTS-SP4 仓库服务正常后重新触发 CI 构建。
+CI 失败分析报告结论：openEuler 24.03-LTS-SP4 的 RPM 仓库在通过 HTTP/2 协议传输大型 RPM 文件时，服务端频繁发出 `INTERNAL_ERROR` 流重置，导致 curl/dnf 下载失败。PR #2992 仅做了纯增量的文档和配置变更（新增 Dockerfile、更新 README/meta/image-info），Dockerfile 中 `dnf install` 的包列表和构建逻辑均语法正确、无逻辑缺陷。失败根因是仓库服务端的 HTTP/2 流控制问题，与镜像构建代码无关。须由 CI 运维或仓库运营方排查 HTTP/2 服务问题，或等待仓库恢复后重试 CI。
 
 ## 潜在风险
-无。
+无
