@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit builder 断连
-- 新模式症状关键词: closing transport, connection error, EOF, goaway, graceful_stop, no builder found, euler_builder
+- 新模式标题: BuildKit构建器崩溃
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, euler_builder, buildkit
 
 ## 根因分析
 
@@ -19,17 +19,17 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile 第 9 行 `dnf install` 步骤（日志中标记为 `#7 [2/4]`）
-- 失败原因: CI 构建环境的 BuildKit builder 实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载操作系统仓库元数据期间被优雅关闭（`graceful_stop` goaway），导致 gRPC 传输层连接断开（EOF），构建客户端无法与 builder 通信。这与 PR 代码变更无关，属于 CI 基础设施层面的偶发性故障。
+- 失败位置: Docker BuildKit 构建器 `euler_builder_20260709_224657`
+- 失败原因: CI 构建过程中，Docker BuildKit 构建器实例（`euler_builder_20260709_224657`）在执行 Dockerfile 第 2/4 步（`dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`）期间被异常终止（`graceful_stop`），导致 gRPC 传输连接中断（`EOF`），后续尝试重连时构建器已不存在（`no builder found`）。这是一次 CI 基础设施层面的故障，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-**无关。** PR 新增了一个全新的 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）以及配套的 README、meta.yml、image-info.yml 更新，所有变更均为标准的新镜像注册操作。故障发生在 `dnf install` 下载仓库元数据的网络 I/O 阶段，是 BuildKit builder 节点意外退出所致，Dockerfile 内容本身没有问题。
+PR 变更仅新增了标准化的 Dockerfile（安装编译工具链 + Python 3.9.19 + pip 安装 scann）、更新 README.md、image-info.yml 和 meta.yml。Dockerfile 内容、语法和构建步骤均无异常——基础镜像拉取成功（步骤 1/4 完成），失败发生在 BuildKit 构建器进程自身崩溃，与 PR 代码逻辑无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** 这是一个典型的 CI 基础设施故障（BuildKit builder 节点崩溃/被回收），与代码无任何关联。Code Fixer 无需修改任何文件，只需重新触发 CI pipeline 即可。若连续多次重试均在同一阶段失败，则需排查 CI 构建节点的资源配额或 BuildKit daemon 稳定性。
+CI 基础设施问题，无需代码修复。等待 CI 基础设施恢复后重新触发构建即可。BuildKit 构建器 `graceful_stop` 通常由宿主机资源不足、OOM killer、或 docker-container 驱动实例被外部终止导致。
 
 ## 需要进一步确认的点
-- 若重试后仍然在 `dnf install` 步骤失败，需检查 `openeuler/openeuler:24.03-lts-sp4` 基础镜像的仓库配置是否正确、构建节点是否能正常访问 openEuler 官方 yum 源。
-- 若重试后构建成功但在后续 check/test 阶段失败，需获取下游架构专属构建 job（如 aarch64）的日志进一步分析。
+- 确认 CI 构建节点 `ecs-build-docker-x86-hk` 在构建时刻是否存在资源耗尽（内存/磁盘）或 BuildKit 守护进程异常重启的情况。
+- 确认是否有其他 PR 在同一时段出现相同的 BuildKit builder 崩溃问题——若为普遍现象，需运维介入排查 BuildKit 集群健康状态。
