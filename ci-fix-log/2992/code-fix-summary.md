@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。该 CI 失败属于 **infra-error**（基础设施问题），是 openEuler 24.03-LTS-SP4 仓库镜像 (`repo.****.org`) 的 HTTP/2 协议层间歇性错误（Curl error 92: INTERNAL_ERROR），导致 `dnf install` 下载 RPM 包失败。
+无需修改任何代码。CI 失败由 openEuler 24.03-LTS-SP4 软件源镜像服务器的 HTTP/2 传输层故障（Curl error 92: INTERNAL_ERROR）导致，属于 CI 基础设施问题（infra-error）。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：Dockerfile 本身的语法和 `dnf install` 包列表均无问题，失败根因是仓库镜像在构建时段的 HTTP/2 不稳定，属于基础设施问题，与 PR 代码变更无关。
+失败根因是 openEuler 软件源镜像服务器在 HTTP/2 传输层发生流错误，导致 `gcc`、`gcc-gfortran`、`glibc-devel`、`guile` 等多个 RPM 包下载失败，dnf 耗尽所有可用镜像后报错退出。Dockerfile 中 `dnf install` 命令的语法和包名完全正确，与 PR 代码变更无关。
 
-**建议操作**：直接 re-run CI。stage-1 最终成功恢复表明该问题为间歇性，重新触发构建有较高概率通过。
-
-如果连续多次重试后仍失败，可考虑在 Dockerfile 的 `dnf install` 之前添加 `RUN echo "http2=false" >> /etc/dnf/dnf.conf` 强制 dnf 使用 HTTP/1.1 下载。
+此为临时基础设施故障，无需对 PR 涉及的任何文件进行修改。待镜像源恢复后重新触发 CI 构建即可。
 
 ## 潜在风险
 无
