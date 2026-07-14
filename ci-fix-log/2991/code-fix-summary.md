@@ -1,17 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 该 CI 失败为 openEuler 官方镜像站 `repo.openeuler.org` 的 HTTP/2 服务端瞬时网络故障（infra-error），与 PR 代码无关。
+无需代码修复。CI 失败类型为 `infra-error`，根因是 `repo.openeuler.org` 镜像站 aarch64 仓库的 HTTP/2 传输层间歇性故障（Curl error 92: INTERNAL_ERROR），与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-CI 构建在执行 `dnf install` 下载 `guile` 包时，`repo.openeuler.org` 的 HTTP/2 连接反复报 `Curl error (92): Stream error in the HTTP/2 framing layer ... INTERNAL_ERROR`，`guile` 耗尽所有镜像重试后下载失败，导致 dnf 事务中断。
-
-Dockerfile 第 6 行的 `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 命令语法和所请求的包均完全正确，问题在于构建时段 openEuler 镜像站对 aarch64 节点的 HTTP/2 服务不稳定。同一命令在其他构建任务中可正常执行。
-
-**建议：在 CI 中重新触发该 job 的构建。** 如果连续多次重试仍失败，需联系 openEuler 镜像站运维排查 `guile` 包在 `openEuler-24.03-LTS-SP4/OS/aarch64/` 下的存储完整性。
+分析报告明确将此失败归类为 CI 基础设施问题：
+- 失败发生在 `dnf install` 下载 RPM 包阶段（`guile` 包在重试耗尽所有镜像后失败），而非 Dockerfile 中的构建指令有误。
+- Dockerfile 中的 `dnf install` 命令为标准写法，与仓库中其他 Dockerfile 一致。
+- 建议措施：重试 CI 构建（re-run），等待上游镜像站 HTTP/2 服务恢复正常。
 
 ## 潜在风险
 无
