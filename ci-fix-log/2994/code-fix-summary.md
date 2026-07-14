@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），非代码缺陷，无需修改代码。
+本次 CI 失败为基础设施问题（BuildKit builder 意外终止），与 PR 代码变更无关，无需代码修改。
 
 ## 修改的文件
-无。PR 中所有文件均无需修改。
+无
 
 ## 修复逻辑
-CI 分析报告指出失败类型为 `infra-error`，直接错误为 BuildKit builder `euler_builder_20260709_224657` 在执行 `dnf install -y` 步骤期间被服务端发送 `graceful_stop` goaway 帧终止，随后 RPC 连接中断，构建器实例销毁。根因定位为 CI 基础设施侧（BuildKit builder 进程）的临时性问题，而非 PR 代码变更的逻辑缺陷。PR 新增的 Dockerfile 及配套元数据文件语法和内容均符合现有同类镜像的规范模式，未见明显错误。建议重新触发 CI 构建。
+CI 失败分析报告明确指出：失败类型为 `infra-error`，根因是 CI 的 BuildKit builder 实例（`euler_builder_20260709_224657`）在 `dnf install` 下载仓库元数据阶段被意外终止，gRPC 层收到服务端 `graceful_stop` GOAWAY 帧后连接断开。Dockerfile 中 `dnf install` 命令语法正确，失败发生在 CI 基础设施层面，与 PR 新增的 Dockerfile、README、image-info.yml、meta.yml 无关。
+
+建议重新触发 CI 构建（re-run job），大概率能通过。若反复失败，需排查 CI runner 的资源配额或 BuildKit daemon 端日志。
 
 ## 潜在风险
 无
