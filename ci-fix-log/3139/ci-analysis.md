@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #3139 — chore(open-webui): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: 阿里云镜像站下载超时
-- 新模式症状关键词: ReadTimeoutError, mirrors.aliyun.com, Read timed out, pip install, nvidia-cudnn
+- 新模式标题: 镜像站下载超时
+- 新模式症状关键词: ReadTimeoutError, Read timed out, mirrors.aliyun.com, pip install, HTTPSConnectionPool
 
 ## 根因分析
 
@@ -15,38 +15,40 @@
 #12 257.5 ERROR: Exception:
 #12 257.5 Traceback (most recent call last):
 #12 257.5   File "/usr/lib/python3.11/site-packages/pip/_vendor/urllib3/response.py", line 452, in _error_catcher
-#12 257.5     yield
-#12 257.5   ...
 #12 257.5 TimeoutError: The read operation timed out
 ...
 #12 257.5 pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='mirrors.aliyun.com', port=443): Read timed out.
 ```
 
+关键上下文：超时发生在下载 `nvidia_cudnn_cu13==9.20.0.48`（366.2 MB wheel）时，已下载 353.4/366.2 MB 后连接中断：
+```
+#12 227.3   Downloading ... nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_x86_64.whl (366.2 MB)
+#12 257.5      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸  353.4/366.2 MB 23.0 MB/s eta 0:00:01
+#12 257.5 ERROR: Exception:
+```
+
 ### 根因定位
-- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28-35`（`pip install -r backend/requirements.txt` 步骤）
-- 失败原因: 在通过阿里云 PyPI 镜像站（`mirrors.aliyun.com`）安装依赖时，下载大体积包 `nvidia-cudnn-cu13==9.20.0.48`（366.2 MB）至 353.4/366.2 MB（约 96%）处发生 Socket 读取超时，导致 pip 依赖解析阶段失败。
-
-### 分析说明
-
-npm 构建阶段（`npm i && npm run build`）已成功完成，失败发生在后续的 pip install 阶段。日志显示在超时前大量 Python 包已成功从 `mirrors.aliyun.com` 下载完成（见 Build tail 中数十个包的成功下载记录），仅在大文件 `nvidia-cudnn-cu13` 接近下载完成时触发超时。这属于网络层面的读超时异常，与 Dockerfile 代码逻辑或依赖版本声明无关。
+- 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28`（RUN 指令中的 `pip install -r backend/requirements.txt` 步骤）
+- 失败原因: CI 构建环境通过 `mirrors.aliyun.com` 镜像站下载 366 MB 的 `nvidia_cudnn_cu13` wheel 包时，TCP 读取超时（约 30 秒后连接中断）。npm 构建阶段（npm i / npm run build）已成功完成，失败仅发生在 pip 安装大文件阶段。
 
 ### 与 PR 变更的关联
-
-PR 变更的 Dockerfile（`AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile`）沿用了同一应用其他 os-version 变体（`22.03-lts-sp4`、`24.03-lts-sp1`）的 pip 镜像站配置（`https://mirrors.aliyun.com/pypi/simple/`），未引入新的代码逻辑问题。失败是 CI 构建环境与阿里云镜像站之间的网络波动所致，与 PR 本身的内容无直接代码缺陷关联。
+PR 新增了 `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile`，该 Dockerfile 在 pip install 步骤中指定了 `-i https://mirrors.aliyun.com/pypi/simple/` 镜像源。由于 `nvidia_cudnn_cu13` 包体积巨大（366 MB），在 CI 网络条件下从该镜像站下载时发生读超时。此失败与代码逻辑无直接关联，属于网络基础设施问题，但可能具有可重复性（同一大包每次都可能超时）。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**重试构建**：该超时为网络波动导致的一次性失败（大文件下载接近完成时中断），后续 CI 重试可能自动恢复。建议先触发一次重跑，观察是否通过。
+### 方向 1（置信度: 低）
+在 Dockerfile 的 pip install 命令中添加 `--default-timeout=300` 参数，将 pip 默认下载超时从 15 秒延长到 300 秒，给大文件下载留足时间。如果超时仍发生，可进一步加大或改用 `--retries` 参数增加重试次数。
 
-### 方向 2（置信度: 低）
-**换用其他镜像站**：若 `mirrors.aliyun.com` 对大文件下载持续不稳定，可将 pip 安装的镜像站更换为其他源（如 `https://pypi.tuna.tsinghua.edu.cn/simple/` 或 `https://repo.huaweicloud.com/repository/pypi/simple/`），降低大体积包下载超时风险。
+### 方向 2（置信度: 中）
+将 nvidia 相关依赖（`nvidia_cudnn_cu13` 等 CUDA toolkit 包）的下载源从 `mirrors.aliyun.com` 切换为 `https://pypi.tuna.tsinghua.edu.cn/simple/`（清华 PyPI 镜像），或直接使用 `https://pypi.org/simple/` 官方源。aliyun 镜像对超大文件的 CDN 回源或带宽可能不稳定。
 
 ### 方向 3（置信度: 低）
-**增加 pip 超时重试机制**：在 pip install 命令中增加 `--timeout` 和 `--retries` 参数（如 `pip install --timeout 120 --retries 5 ...`），提高对大文件下载的网络容忍度。但需注意这会增加构建时间。
+将 `nvidia_cudnn_cu13` 等超大 CUDA 依赖从 wheel 安装改为使用系统包管理器（dnf）安装 NVIDIA CUDA 仓库中的 RPM 包，避免 pip 下载大文件。
 
 ## 需要进一步确认的点
+- 是否为瞬态网络故障：触发 CI 重跑后是否能成功通过同一个下载步骤。
+- 同仓库中已有 `24.03-lts-sp1` 版本的 open-webui Dockerfile 是否也使用 `mirrors.aliyun.com`，以及其 CI 构建是否成功——若成功，则说明本次失败更可能是瞬态网络问题。
+- `nvidia_cudnn_cu13` 在 `mirrors.aliyun.com` 上是否已完整同步（对比 pypi.org 的 MD5/SHA256），排除镜像站缓存不完整的问题。
 
-- 该超时是否为一次性的网络波动，还是 `mirrors.aliyun.com` 对于超大 PyPI 包（>300MB）存在持续的服务端限速/断开策略。
-- 同样使用 `mirrors.aliyun.com` 的 `24.03-lts-sp1` 和 `22.03-lts-sp4` 变体是否也出现过类似超时（用于判断是镜像站普适性问题还是本次 CI 环境的临时网络问题）。
-- `nvidia-cudnn-cu13==9.20.0.48` 是否可替换为更小的本地缓存版本或以其他方式获取（避免依赖远程大文件下载）。
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+（不适用。本次失败为网络超时，不涉及正则 patch 外部文件。）
