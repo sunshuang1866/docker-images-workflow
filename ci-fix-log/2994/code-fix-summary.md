@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（infra-error）：Docker BuildKit 构建器节点在 `dnf install` 下载系统元数据阶段被异常终止（`graceful_stop`），与 PR 代码变更无关。
+无需代码修改。CI 失败属于基础设施故障（infra-error），BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载仓库元数据时被外部系统发送 `graceful_stop` 信号强制终止，与本次 PR 的代码变更无关。
 
 ## 修改的文件
-无（infra-error，无代码变更需要）
+无
 
 ## 修复逻辑
-CI 失败分析报告明确指出该失败类型为 `infra-error`，根因是 Docker BuildKit 构建器实例被外部信号关闭（`graceful_stop`）。失败发生在 `dnf install` 下载 openEuler 官方仓库元数据阶段（dnf 下载速度仅 77 kB/s），尚未执行到 PR 新增的 Python 编译或 pip 安装步骤。PR 仅新增 scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据，这些文件本身正确无误。
-
-**解决方案：重新触发 CI 构建即可，大概率通过。**
+CI 分析报告结论为 **infra-error**（置信度: 高），根因是 CI Runner 节点上的 BuildKit daemon 因资源回收、节点维护或 OOM 等原因被终止。PR 仅新增了标准的 Dockerfile、README、image-info.yml 和 meta.yml，不存在任何会导致构建器崩溃的操作。建议重新触发 CI 构建；若问题复现，需由 CI 运维团队排查 BuildKit daemon 的资源状况。
 
 ## 潜在风险
-无。若重试后仍失败，需联系 CI 运维团队排查构建节点健康状态或网络配置。
+无
