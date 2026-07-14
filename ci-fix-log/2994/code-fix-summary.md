@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败为基础设施问题（infra-error），无需代码修改。
+无需代码修复。CI 失败为 BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 阶段被优雅停止（`graceful_stop`）导致的临时性基础设施故障（infra-error），与 PR #2994 的代码变更无任何关联。
 
 ## 修改的文件
-无。该失败为 BuildKit 构建器 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据时被基础设施层面终止（`graceful_stop`），与 PR 的代码变更无关。
+无
 
 ## 修复逻辑
-CI 分析报告已明确指出：
-- 失败类型为 `infra-error`，根因是 BuildKit 构建器因超时或资源回收被终止
-- PR 仅新增了 scann 1.4.2 的 Dockerfile 及配套元数据文件，Dockerfile 中 `dnf install` 命令语法正确、包名有效
-- PR 的代码变更不会触发 Builder 生命周期管理问题
-- 建议重新触发 CI 构建（retry）即可通过
-
-按照流程规范，infra-error 不应强行修改代码。
+分析报告明确指出该失败类型为 `infra-error`，根因是 BuildKit 构建器崩溃（gRPC 连接断开 + `no builder found`），而非代码问题。失败发生在通用编译依赖安装阶段（`dnf install gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`），尚未进入与本次 PR 变更（新增 openEuler 24.03-LTS-SP4 的 Dockerfile）相关的任何自定义步骤。根据修复原则中关于 `infra-error` 的处理规定，无需进行代码修改，应重新触发 CI 构建。
 
 ## 潜在风险
-无。
+无。无需修改任何代码文件。
