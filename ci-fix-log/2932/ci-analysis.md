@@ -3,16 +3,15 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 容器启动失败
-- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, docker-container driver
+- 新模式标题: BuildKit启动失败
+- 新模式症状关键词: Could not find the file / in container buildx_buildkit, docker-container driver
 
 ## 根因分析
 
 ### 直接错误
 ```
-euler_builder_20260709_205700
 #0 building with "euler_builder_20260709_205700" instance using docker-container driver
 
 #1 [internal] booting buildkit
@@ -28,24 +27,28 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: CI 基础设施层，BuildKit builder 启动阶段（`[internal] booting buildkit`）
-- 失败原因: Docker daemon 在创建 BuildKit 容器后无法访问其根文件系统（`Could not find the file / in container`），导致 buildx 构建器启动失败。该错误发生在 Dockerfile 任何指令被执行之前，属于 Docker 守护进程存储驱动或容器运行时层面的基础设施故障。
+- 失败位置: CI 基础设施层（BuildKit builder 启动阶段）
+- 失败原因: Docker daemon 在创建 buildx `docker-container` 驱动的 BuildKit 容器时，无法访问容器内的 `/` 路径（`Could not find the file /`），BuildKit builder 启动失败。Dockerfile 的构建步骤从未开始执行。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。错误发生在 BuildKit 容器启动阶段（`[internal] booting buildkit`），此时 Dockerfile 尚未被解析或执行。PR 新增的 glibc Dockerfile 及元数据文件的内容对这个阶段的错误没有任何影响力。从日志中可以看到，CI 前置步骤（仓库克隆、diff 检测、镜像规范校验）均正常通过。
+**与 PR 变更无关。** PR 新增了 glibc 2.42 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据文件。CI 在前期检查（镜像规格校验通过、变更文件识别正确）均正常完成后，在初始化 buildx builder 时因 Docker daemon 基础设施故障而失败，未进入任何 Dockerfile 实际构建步骤。PR 代码本身无错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。该错误为 Docker daemon / BuildKit 基础设施的瞬时故障（容器根文件系统访问异常），与代码无关。最可能的解决方式是让 CI 系统重新调度一次构建任务，新的 runner 节点大概率不会复现此问题。
+**重试 CI 构建。** 该错误为 Docker daemon / BuildKit 基础设施的瞬时故障，可能原因包括：
+- Runner 节点 Docker daemon 存储驱动状态异常
+- buildx `docker-container` 驱动在容器创建与文件系统挂载之间存在竞态条件
+- Runner 节点磁盘或文件系统瞬时 I/O 故障
+
+建议重新触发流水线，绝大多数情况下重试即可通过。
 
 ### 方向 2（置信度: 低）
-若多次重试均复现，需排查 CI 构建节点（`ecs-build-docker-x86-hk`）上 Docker daemon 的存储驱动（如 overlay2）状态、磁盘空间或 inode 耗尽情况。此为 CI 运维层面问题，Code Fixer 无需处理。
+若多次重试均失败且错误一致，排查 Runner 节点（`ecs-build-docker-x86-hk`）的 Docker daemon 状态：
+- 检查 Docker daemon 日志是否有存储驱动（overlay2/devicemapper）异常
+- 检查磁盘空间是否充足
+- 检查 buildx builder 实例是否有残留状态需要清理（`docker buildx rm`）
 
 ## 需要进一步确认的点
-1. 如果重试后仍然失败，需检查构建节点 `ecs-build-docker-x86-hk` 上 Docker daemon 日志（`journalctl -u docker`），确认是否有存储驱动或文件系统相关错误。
-2. 确认该节点上 `moby/buildkit:buildx-stable-1` 镜像是否完整可用（可尝试 `docker pull` 重新拉取并清理旧镜像层）。
-3. 排除该节点磁盘空间不足或 inode 耗尽的可能性。
-
-## 修复验证要求
-无需验证——该失败与代码变更无关，不需要 Code Fixer 进行代码修复。建议直接重新触发 CI 构建。
+- 该 Runner 节点（`ecs-build-docker-x86-hk` / `ecs-build-docker-x86-01`）在同一时间段是否有其他构建任务也因相同 BuildKit 错误失败，以判断是节点故障还是全局问题
+- Docker daemon 日志中关于容器 `buildx_buildkit_euler_builder_20260709_2057000` 创建过程的详细错误堆栈
