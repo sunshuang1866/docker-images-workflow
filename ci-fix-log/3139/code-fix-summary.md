@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施网络问题（`infra-error`）：`pip install` 从 `mirrors.aliyun.com` 下载大型依赖包 `nvidia-cudnn-cu13`（366 MB）时发生传输超时（`ReadTimeoutError`），非代码逻辑问题。
+无需代码修复。CI 失败属于基础设施问题（infra-error），pip 从 `mirrors.aliyun.com` 下载 `nvidia-cudnn-cu13` (366MB) 时发生网络读取超时，与 PR 代码变更无直接关联。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告明确指出该失败属于 `infra-error`，根因为 Aliyun 镜像站在传输大文件时网络不稳定导致的 TCP 读超时，与 PR 新增的代码逻辑无关。报告中置信度最高（高）的修复方向为"重试 CI 构建"，因为超时很可能是暂时性网络波动。
-
-同应用 SP1 版本的 Dockerfile（`AI/open-webui/0.1.108/24.03-lts-sp1/Dockerfile`）亦使用相同镜像源 `mirrors.aliyun.com` 且 Dockerfile 内容除基础镜像外与 SP4 版本完全一致，若 SP1 能正常构建，说明镜像站本身可用，本次失败为偶发网络问题。建议重新触发 CI 构建重试。
+分析报告明确指出失败类型为 `infra-error`，根因是 CI 构建环境到 `mirrors.aliyun.com` 的网络带宽/稳定性问题导致大文件下载超时，而非 Dockerfile 或代码逻辑错误。该 Dockerfile 与已有的 sp1 版本逻辑一致，PR 新增的适配工作本身没有问题。建议重试 CI 构建，若持续失败则考虑更换 PyPI 镜像源或联系 CI 基础设施团队排查网络问题。
 
 ## 潜在风险
 无
