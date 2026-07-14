@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: CI工具模块缺失
-- 新模式症状关键词: ModuleNotFoundError, eulerpublisher.container.distroless, No module named
+- 新模式标题: CI工具依赖缺失
+- 新模式症状关键词: ModuleNotFoundError, eulerpublisher, distroless
 
 ## 根因分析
 
@@ -21,31 +21,33 @@ Traceback (most recent call last):
   File "/usr/local/lib/python3.9/site-packages/eulerpublisher/container/cli.py", line 5, in <module>
 ModuleNotFoundError: No module named 'eulerpublisher.container.distroless'
 Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
 - 失败位置: `/usr/local/lib/python3.9/site-packages/eulerpublisher/container/cli.py:5`
-- 失败原因: CI 运行环境中的 `eulerpublisher` Python 包缺少 `eulerpublisher.container.distroless` 子模块，导致 `eulerpublisher` 命令行工具在 import 阶段崩溃。Docker 镜像构建与推送本身已成功完成。
+- 失败原因: CI 编排工具 `eulerpublisher` 在 executor 关闭阶段启动时因缺少 `eulerpublisher.container.distroless` 模块而崩溃。Docker 镜像构建和推送本身均已成功完成（`#10 DONE 38.8s`，`[Build] finished`，`[Push] finished`），失败仅发生在 `eulerpublisher` 工具的后处理/清理阶段。
 
 ### 与 PR 变更的关联
-与 PR 变更**无关**。Docker 镜像构建（#8 解压 JDK → #9 验证 JDK → #10 导出/推送镜像）全程成功：
-- `#8 DONE 39.0s` — JDK 提取成功
-- `#9 DONE 3.5s` — Smoke test 通过（`javac 21.0.5`, `openjdk 21.0.5 BiSheng`）
-- `#10 DONE 38.8s` — 镜像成功推送到 `docker.io/openeulertest/bisheng-jdk:21.0.5-oe2403sp4-aarch64`
-- 日志明确记录 `[Build] finished` 和 `[Push] finished`
+**与 PR 变更无关。** 本次 PR 仅新增 `Others/bisheng-jdk/21.0.5/24.03-lts-sp4/Dockerfile` 及配套元数据文件（`meta.yml`、`image-info.yml`、`README.md`），均为标准 Dockerfile 和文档改动。Docker 构建阶段全部通过（JDK 下载、解压、smoke test 均成功），镜像已成功推送到 `docker.io/openeulertest/bisheng-jdk:21.0.5-oe2403sp4-aarch64`。`ModuleNotFoundError` 是 `eulerpublisher` Python 包自身的依赖问题，与 PR 代码变更无关。
 
-真正的失败发生在构建/推送完成后的 CI 流水线 shutdown/cleanup 阶段，`eulerpublisher` CLI 工具自身因缺少 Python 模块而崩溃。PR 新增的 Dockerfile 及相关元数据文件（meta.yml、image-info.yml、README.md）均未引入任何会导致此错误的内容。
-
-### 附加发现（非失败原因）
-README.md 和 image-info.yml 中对新增条目的描述存在笔误：写成了 "openEuler **22**.03-LTS-SP4"，应为 "openEuler **24**.03-LTS-SP4"。该笔误不会导致 CI 失败，但建议修正。
+### 附注：README/image-info.yml 文档描述不一致
+PR 在 `README.md` 和 `image-info.yml` 中将该镜像描述为 "BiSheng JDK 21.0.5 on openEuler 22.03-LTS-SP4"，但实际基础镜像为 `openeuler/openeuler:24.03-lts-sp4`（即 24.03-LTS-SP4）。此处 `22.03` 应为 `24.03`，是文档笔误，不导致 CI 构建失败，但应在修复时一并更正。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 运维侧修复：在 CI Runner 环境中重新安装或升级 `eulerpublisher` Python 包，确保 `eulerpublisher.container.distroless` 子模块存在。此问题与代码无关，Code Fixer Agent 无需对 PR 内容做任何修改。
+CI 运维需检查 `eulerpublisher` Python 包在对应 Jenkins runner 上的安装完整性。具体而言，`eulerpublisher.container.distroless` 模块可能未被安装或随包版本升级后路径变更。修复手段为在 runner 上重新安装/更新 `eulerpublisher` 包，确保 `distroless` 子模块存在。**此问题不是 Code Fixer 可处理的范围，需 CI 运维团队介入。**
+
+### 方向 2（置信度: 低）
+如果 `distroless` 模块是新版本 `eulerpublisher` 新增的依赖但尚未在所有 runner 上部署，可能需要回退 `eulerpublisher` 版本或确保新旧版本的兼容性处理。
 
 ## 需要进一步确认的点
-- `eulerpublisher` 包的 `distroless` 子模块是近期新增的依赖还是因 CI Runner 环境部署不完整导致缺失？
-- 同一 CI Runner 在其他 PR 上是否也出现此错误？若为系统性故障，需通知 CI 运维团队修复环境。
-- 建议重新触发 CI 构建以确认故障是否可复现；若重新触发后通过，则说明为偶发 infra 问题。
+1. `eulerpublisher` 包的版本及其 `distroless` 子模块的安装状态——在本次构建的 aarch64 runner（以及对应的 amd64 runner）上是否一致。
+2. 是否其他 PR 的 CI 构建也出现了相同的 `ModuleNotFoundError`——若为普适性问题，则确认是 CI 基础设施问题而非 PR 特有。
+3. `eulerpublisher` 源码仓库中 `eulerpublisher/container/cli.py` 是否确实引用了 `distroless` 模块，以及该模块是否存在于源码中但在构建 wheel/包时被遗漏。
+4. 本次构建为 aarch64（tag 中包含 `aarch64`），am64 架构的构建 job 日志未提供，无法确认两架构是否均触发此问题。
+
+## 修复验证要求
+无。本失败为 infra-error，与 PR 代码变更无关。Code Fixer 无需对 Dockerfile 或元数据文件做任何修改（但建议顺带修正 README.md 和 image-info.yml 中 `22.03` → `24.03` 的笔误）。
