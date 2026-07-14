@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。本次 CI 失败为 BuildKit 基础设施瞬时故障（构建器容器 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据期间被优雅终止），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无。所有 PR 文件（Dockerfile、README.md、image-info.yml、meta.yml）无需修改。
+无
 
 ## 修复逻辑
-CI 分析报告明确结论为 infra-error，错误特征为 `graceful_stop` / `closing transport` / `no builder found`，这是 CI runner 侧 BuildKit 构建器容器因资源压力或调度策略被意外回收导致的一次性基础设施问题。PR 仅新增了 scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的构建定义文件，Dockerfile 内容无语法或逻辑错误。重新触发 CI 构建即可验证。
+CI 分析报告确认失败类型为 `infra-error`。Docker BuildKit 临时构建器 `euler_builder_20260709_224657` 在构建过程中被外部信号终止（`graceful_stop`），导致 gRPC 连接断开，随后构建器实例被移除，报 `no builder found`。错误发生在 `dnf install` 阶段（下载 OS 仓库元数据时，速率仅 77 kB/s），未抵达任何与 PR 新增 Dockerfile 内容相关的执行点。该失败属于 CI 基础设施的 BuildKit 构建器过期/网络波动问题，与 `Others/scann/1.4.2/24.03-lts-sp4/` 下的四个新增文件无因果关系。
+
+**修复方向**：触发 CI 重试。若重试后持续失败，需检查 CI runner 节点的 BuildKit 服务健康状态及网络连通性。
 
 ## 潜在风险
 无
