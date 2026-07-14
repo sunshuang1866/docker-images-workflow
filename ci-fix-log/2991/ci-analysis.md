@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2991 — chore(vvenc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, repo.openeuler.org
+- 新模式标题: 仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,21 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6
-- 失败原因: CI 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 仓库镜像出现 HTTP/2 协议层面的流中断错误（Curl error 92），导致多个 RPM 包（git-core、gcc-c++、guile）下载失败。其中 `guile` 包耗尽所有镜像重试后下载仍失败，最终 `dnf` 命令退出码为 1。
+- 失败位置: Dockerfile:6 — `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`
+- 失败原因: CI 在 aarch64 runner 上构建时，`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 软件仓库在 HTTP/2 传输中多次出现 `INTERNAL_ERROR`（Curl error 92），导致多个 aarch64 RPM 包（`git-core`、`gcc-c++`、`guile`）下载失败。其中 `git-core` 重试后成功，`gcc-c++` 两次重试均失败，`guile` 在耗尽所有镜像重试后最终导致 dnf 安装失败。
 
 ### 与 PR 变更的关联
-与 PR 变更**无关**。PR 仅新增了一个标准的 vvenc Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 中 `dnf install` 命令格式正确、无语法错误。失败根源是 `repo.openeuler.org` 仓库服务器的 HTTP/2 连接在 aarch64 构建期间不稳定，为瞬时基础设施问题。
+**与 PR 无关。** PR 新增的 vvenc Dockerfile 内容正确，`dnf install -y git gcc gcc-c++ make cmake` 是标准操作。失败根因是 openEuler 软件仓库（`repo.openeuler.org`）的 HTTP/2 服务端问题，属于 CI 基础设施/网络层面故障，任何在该时刻尝试从该仓库下载 aarch64 包的构建都会遇到同样问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需代码修复**。这是 CI 基础设施中的瞬时网络问题（openEuler 官方 RPM 仓库的 HTTP/2 服务端在下载时段出现流错误）。直接重新触发 CI 构建，大概率可以成功通过。若重试后仍然失败，可联系 openEuler 基础设施团队排查 `repo.openeuler.org` 的 HTTP/2 服务端配置或负载均衡问题。
+### 方向 1（置信度: 低）
+**重试构建。** HTTP/2 流错误（INTERNAL_ERROR）通常是临时的服务端/CDN 问题，重新触发 CI 构建有较大概率通过。Code Fixer 无需修改任何代码。
+
+### 方向 2（置信度: 低）
+**配置 dnf 回退到 HTTP/1.1。** 如果问题持续出现，可在 Dockerfile 的 `dnf install` 前配置 dnf/libcurl 禁用 HTTP/2（如设置 `http2=false` 或通过环境变量），绕过 HTTP/2 流错误。但这属于服务端问题的工作绕过（workaround），不应作为长期修复方案。
 
 ## 需要进一步确认的点
-- 重新触发 CI 后是否恢复正常（预期是）。
-- 若多次重试仍失败，需确认 `repo.openeuler.org` 的 HTTP/2 服务端是否有已知问题或维护窗口。
-- aarch64 runner 所在网络到 `repo.openeuler.org` 的链路是否存在波动（可从 runner 端手动 `curl` 测试验证）。
-
-## 修复验证要求
-无需填写（infra-error，由基础设施团队而非 code-fixer 处理）。
+1. 该仓库的 x86_64 构建（trigger 层）是否成功？日志中仅显示 aarch64 runner 的构建失败，需确认 x86_64 侧的状态以判断是否为 aarch64 仓库独有问题。
+2. `repo.openeuler.org` 的 HTTP/2 服务是否存在已知问题？建议联系 openEuler 基础设施团队确认 CDN/仓库服务状态。
+3. 观察近期其他 PR（特别是同样使用 `24.03-lts-sp4` + aarch64 的构建）是否也出现类似的 HTTP/2 流错误，以判断是否为该仓库的持续性故障。
