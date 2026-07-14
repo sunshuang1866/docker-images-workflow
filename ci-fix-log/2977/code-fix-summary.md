@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误，无需代码修改。
+无需代码修改。CI 失败由 openEuler 官方软件仓库 `repo.openeuler.org` 在构建期间的网络抖动（HTTP/2 流层错误 Curl error 92，SSL 连接中断 Curl error 56）导致，属于 CI 基础设施问题（infra-error）。
 
 ## 修改的文件
-无
+无（无需修改任何代码）
 
 ## 修复逻辑
-CI 失败分析报告明确指出失败类型为 `infra-error`，与 PR #2977 的代码变更无关。构建失败是因为在 aarch64 runner 上从 `repo.openeuler.org` 下载 openEuler 24.03-LTS-SP4 的 RPM 包时，遭遇 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），属于上游镜像站的临时网络波动。173 个包中有 169 个成功下载，仅 `vim-common` 因累计重试耗尽而失败。
-
-修复方式：重新触发 CI 构建（retry），在非高峰时段大概率可成功通过。
+分析报告明确指出此失败与 PR 变更无关。Dockerfile 中的 `yum install` 命令语法正确、包列表无逻辑错误。构建过程中 172/173 个包已成功下载安装，仅最后一个包 `vim-common` 因持续的网络错误而失败。根本原因是上游仓库服务器临时性不稳定，而非代码问题。修复方向为重新触发 CI 构建（如 `/retest` 或重新 push），待仓库服务恢复后即可通过。
 
 ## 潜在风险
 无
