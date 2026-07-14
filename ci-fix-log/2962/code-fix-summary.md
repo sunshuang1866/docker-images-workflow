@@ -1,21 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败：meson setup 解包 wayland-protocols 子项目时，缓存的 `wayland-protocols-1.41.tar.xz` 为无效文件（非压缩 tar 格式），导致构建失败。
+meson 配置阶段因 wayland-protocols 子项目 wrap 下载 hash 校验失败导致构建中断。
 
 ## 修改的文件
-- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 移除手动 wget 下载 wayland-protocols 的步骤（原第26-31行）及 dnf 中的 `wayland-protocols-devel` 包（原第9行），使构建配置与已验证可用的 SP3 版本一致。
+- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 在 `dnf install` 命令中添加 `wayland-protocols-devel` 包
 
 ## 修复逻辑
-1. **根因**：Dockerfile 中通过 `wget -q` 从 GitLab 下载 wayland-protocols-1.41.tar.xz 并预填充到 meson 的 `subprojects/packagecache/`。GitLab 的 Anubis 防护机制向 CI runner 返回 HTML 挑战页面（而非实际 tar.xz 文件），而 `wget -q` 静默模式掩盖了下载错误，导致 HTML 被错误保存为 .tar.xz 文件。随后 meson setup 尝试解包时报告 "not a compressed or uncompressed tar file"。
+CI 失败的直接原因是 mesa 25.3.4 的 `subprojects/wayland-protocols.wrap` 记录的 SHA256 与 GitLab 实际提供的 tarball 不匹配。由于 Dockerfile 中未安装 `wayland-protocols-devel`，meson 无法通过 pkg-config 找到系统级 wayland-protocols，只能回退到 wrap 下载方式从而触发 hash 校验失败。
 
-2. **修复方案**：参考同目录下已验证可用的 `25.3.4/24.03-lts-sp3/Dockerfile`，该文件不使用手动 wget 下载步骤，依赖 meson 内置的 subproject wrap 机制自动处理 wayland-protocols 的下载。meson 内部使用 Python urllib 进行下载，可能使用不同的传输层，避免或缓解了 Anubis 拦截问题。
-
-3. **改动内容**：
-   - 从 dnf install 列表中移除 `wayland-protocols-devel`（SP3 中亦未安装此包，且其版本 1.33 不满足 mesa 25.3.4 的 >= 1.41 要求，安装后反而触发版本检查导致不必要的回退逻辑）
-   - 移除整个手动 wget 下载及 packagecache 预填充步骤（共6行）
-   - meson 在找不到系统 wayland-protocols 后会自然回退到 subproject wrap 机制自行下载 1.41 版本
+添加 `wayland-protocols-devel` 后，meson 在配置阶段通过 pkg-config 发现已安装的系统包，会优先使用系统包而跳过 wrap 子项目下载，完全规避 hash 不匹配问题。此方案遵循分析报告中的方向 1（高置信度）。
 
 ## 潜在风险
-- 如果 meson 内置下载机制同样被 GitLab Anubis 拦截，构建仍可能失败。但 SP3 版本的 Dockerfile（无此下载步骤）已验证可成功构建，降低了此风险。
-- 移除 `wayland-protocols-devel` 后，若构建过程中其他环节依赖该包提供的 XML 协议文件，可能引发新问题。但 SP3 验证显示此依赖不存在。
+- 若 openEuler 24.03-LTS-SP4 仓库中的 `wayland-protocols-devel` 版本低于 mesa 25.3.4 要求的最低版本（1.41），meson 可能仍然拒绝使用系统包。但从同一 Dockerfile 已安装 `wayland-devel` 且其他 mesa 版本在同系列 Dockerfile 中同样依赖系统 wayland-protocols 来看，该风险较低。
+- 无其他风险。
