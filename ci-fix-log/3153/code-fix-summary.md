@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是由 appstore 发布规范预检工具（eulerpublisher）误报导致，该工具对根目录级纯文档变更（`README.md`）执行了镜像发布路径校验，属于 CI 基础设施误报（infra-error）。
+无需代码修复。CI 失败为 infra-error（基础设施误报），非代码缺陷。
 
 ## 修改的文件
-无。PR 仅修改了 `README.md`（根目录文档），内容为更新基础镜像可用 tags 列表，属于纯文档变更，不涉及任何镜像构建或发布，不应受 appstore 路径校验约束。
+无（未修改任何文件）
 
 ## 修复逻辑
-根据 CI 失败分析报告，失败根因位于 `eulerpublisher/update/container/app/update.py:273`，eulerpublisher 的路径校验逻辑未正确处理根目录级文档文件变更的场景。本 PR 变更内容（`README.md` / `README.en.md` 中的 tags 列表更新）完全正确，CI 检查工具不应将根目录文档纳入 appstore 镜像发布路径校验范围。此问题需由 CI 流水线维护方修复 eulerpublisher 工具或调整触发条件，PR 代码本身无需任何修改。
+CI 分析报告明确指出失败类型为 `infra-error`，根因是 CI 流水线中的 AppStore 发布规范检查工具（`eulerpublisher`）错误地对纯文档类 PR 触发了路径校验。该 PR 仅修改了仓库根目录的 `README.md`（更新基础镜像可用 Tags 列表），不包含任何 Dockerfile、`meta.yml`、`image-info.yml` 或 `image-list.yml` 等镜像构建/发布相关文件。CI 的 AppStore 规范检查不应针对纯文档类 PR 中根目录 README 变更触发路径校验，此为 CI 检查流程的误报，需由 CI 侧修复（在 `eulerpublisher` 或 CI 触发条件中增加对纯文档变更 PR 的豁免逻辑）。
 
 ## 潜在风险
-无。`README.md` 内容变更仅限于更新文档中的镜像 tags 列表，不影响任何构建或发布逻辑。
+无（未修改任何代码）
