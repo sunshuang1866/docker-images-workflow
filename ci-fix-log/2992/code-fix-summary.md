@@ -1,18 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败由 openEuler 24.03-LTS-SP4 仓库镜像的 HTTP/2 流传输临时故障导致（Curl error 92），属于基础设施问题，与 PR 代码变更无关。
+无代码修改。此次 CI 失败为 **infra-error**（基础设施故障），非代码缺陷。
 
 ## 修改的文件
-无。该失败类型为 infra-error，不需要对任何源文件进行修改。
+无。原始 PR 的 Dockerfile 结构正确，与同目录下已验证通过的 `24.03-lts-sp3/Dockerfile` 模式一致，无需任何代码修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 失败类型为 **infra-error**（基础设施错误），置信度高
-- 根因：openEuler 24.03-LTS-SP4 仓库镜像在 CI 构建期间出现 HTTP/2 协议层问题，多个 RPM 包（gcc-gfortran、glibc-devel、guile、gcc）下载时遭遇 `Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`，重试耗尽所有镜像后 dnf 安装失败
-- PR 新增的 Dockerfile 语法正确、结构合理，与失败无关
+CI 失败的直接原因是 openEuler 24.03-LTS-SP4 仓库镜像服务器在通过 HTTP/2 协议传输 RPM 包时反复返回 `INTERNAL_ERROR`（服务端流错误），导致 `dnf install` 在耗尽所有镜像重试后失败。具体证据：
+1. 基础镜像拉取成功（`DONE 11.2s`），说明基础镜像层不受影响。
+2. 仓库元数据全部成功下载，说明仓库本身可达。
+3. 仅具体 RPM 包的 HTTP/2 流传输出现问题，且错误发生在服务端（`INTERNAL_ERROR`），非客户端网络或 DNS 问题。
+4. builder 阶段和 final 阶段均遭遇同样错误。
 
-建议操作：重新触发 CI 构建（retry），等待仓库镜像恢复后构建即可通过。
+此问题属于 openEuler 24.03-LTS-SP4 仓库镜像的临时性服务端问题，**与 PR 变更无关，无需代码修复**。建议仓库镜像服务恢复后重新触发 CI 构建。
 
 ## 潜在风险
-无
+无。
