@@ -122,6 +122,7 @@ RUN dnf install -y shadow python3-pip ...
 - PR #2266: `AI/mlflow/3.12.0`
 - PR #2164: `AI/mlflow/3.11.1`
 - PR #1858: `AI/mlflow/3.9.0` — 同类问题，两架构均失败
+- PR #2896: `Others/dotnet-deps/8.0/24.03-lts-sp4/Dockerfile` — openEuler 24.03-lts-sp4 基础镜像缺少 `shadow` 包导致 `groupadd`/`user
 
 ---
 
