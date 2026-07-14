@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需代码修改。CI Runner 节点缺少 `shunit2` 测试框架，导致镜像构建完成后的 [Check] 后置测试阶段失败。
+无需代码修改。CI 失败为基础设施问题（`infra-error`），CI runner 环境缺少 `shunit2` 测试依赖，与 PR 代码变更无关。
 
 ## 修改的文件
-无。所有 PR 变更文件（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，Docker 镜像构建阶段（Build + Push）已成功完成（5/5 步骤通过，镜像已推送到 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64`）。
+无
 
 ## 修复逻辑
-此失败与 PR 代码变更无关，属于 CI Runner 环境问题。CI 测试脚本 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 在第 13 行执行 `source shunit2` 时找不到该框架。需要 CI 基础设施管理员在对应 Runner 节点（aarch64）上安装 `shunit2`（例如 `dnf install shunit2`）。
+CI 分析报告中明确指出：
+- 失败类型：`infra-error`
+- 失败阶段：CI 流水线的 Check（测试验证）阶段
+- 直接原因：`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 尝试加载 `shunit2` 失败，该 shell 测试框架未安装在 CI runner 的 PATH 中
+- 与 PR 变更的关联：**无关**。Docker 构建和推送阶段已成功完成，镜像 `openeulertest/go:1.25.6-oe2403sp4-aarch64` 已成功构建并推送
+
+PR 的 4 个变更文件（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，无需任何代码修改。
 
 ## 潜在风险
-无。本摘要未对源码仓库做任何修改。
+无。此为 CI 基础设施问题，需 CI 运维人员在 aarch64（及可能涉及的 x86_64）构建节点上安装 `shunit2` 包（例如 `dnf install shunit2 -y`）来修复。
