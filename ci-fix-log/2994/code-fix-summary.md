@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-本次 CI 失败为基础设施问题（BuildKit builder 意外终止），与 PR 代码变更无关，无需代码修改。
+无需代码修复。CI 失败为基础设施故障（BuildKit 构建器实例被外部回收/关闭），与 PR #2994 的代码变更无关。
 
 ## 修改的文件
-无
+无（无需修改任何文件）
 
 ## 修复逻辑
-CI 失败分析报告明确指出：失败类型为 `infra-error`，根因是 CI 的 BuildKit builder 实例（`euler_builder_20260709_224657`）在 `dnf install` 下载仓库元数据阶段被意外终止，gRPC 层收到服务端 `graceful_stop` GOAWAY 帧后连接断开。Dockerfile 中 `dnf install` 命令语法正确，失败发生在 CI 基础设施层面，与 PR 新增的 Dockerfile、README、image-info.yml、meta.yml 无关。
+CI 分析报告确认：
+- 失败类型: **infra-error**（置信度: 高）
+- 根因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 构建步骤 `[2/4]`（`RUN dnf install ...`）执行期间被外部因索关闭（`graceful_stop`），导致 gRPC 连接断开
+- 与 PR 变更关联: **无关**。Dockerfile 语法正确、依赖声明完整，构建未进入编译或 pip install 阶段即已失败
 
-建议重新触发 CI 构建（re-run job），大概率能通过。若反复失败，需排查 CI runner 的资源配额或 BuildKit daemon 端日志。
+修复方向：重试 CI 构建即可。若多次重试仍失败，需联系 CI 基础设施运维团队排查 BuildKit 构建器资源池稳定性。
 
 ## 潜在风险
 无
