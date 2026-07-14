@@ -3,15 +3,16 @@
 ## 基本信息
 - PR: #2894 — chore(bisheng-jdk): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: CI工具Python模块缺失
-- 新模式症状关键词: ModuleNotFoundError, eulerpublisher.container.distroless, cli.py
+- 新模式标题: CI工具模块缺失
+- 新模式症状关键词: ModuleNotFoundError, eulerpublisher.container.distroless, No module named
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-09 20:31:20,936 - INFO - [Build] finished
 2026-07-09 20:31:20,936 - INFO - [Push] finished
 2026-07-09 20:31:20,936 - DEBUG - Shutting down executor...
 Traceback (most recent call last):
@@ -20,28 +21,31 @@ Traceback (most recent call last):
   File "/usr/local/lib/python3.9/site-packages/eulerpublisher/container/cli.py", line 5, in <module>
 ModuleNotFoundError: No module named 'eulerpublisher.container.distroless'
 Build step 'Execute shell' marked build as failure
-Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
 - 失败位置: `/usr/local/lib/python3.9/site-packages/eulerpublisher/container/cli.py:5`
-- 失败原因: CI 工具 `eulerpublisher` 在其 `cli.py` 中 `import` 了 `eulerpublisher.container.distroless` 模块，但该模块未安装或不存在，导致 Python 导入失败。
+- 失败原因: CI 运行环境中的 `eulerpublisher` Python 包缺少 `eulerpublisher.container.distroless` 子模块，导致 `eulerpublisher` 命令行工具在 import 阶段崩溃。Docker 镜像构建与推送本身已成功完成。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 BiSheng JDK 21.0.5 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（README.md, image-info.yml, meta.yml）。日志显示 Docker 构建和推送已成功完成：
-- `#8 DONE 39.0s`（tar 解压 BiSheng JDK）
-- `#9 DONE 3.5s`（javac/javac 冒烟测试通过）
-- `#10 exporting to image ... DONE`（镜像导出并推送成功）
-- `[Build] finished` + `[Push] finished`
+与 PR 变更**无关**。Docker 镜像构建（#8 解压 JDK → #9 验证 JDK → #10 导出/推送镜像）全程成功：
+- `#8 DONE 39.0s` — JDK 提取成功
+- `#9 DONE 3.5s` — Smoke test 通过（`javac 21.0.5`, `openjdk 21.0.5 BiSheng`）
+- `#10 DONE 38.8s` — 镜像成功推送到 `docker.io/openeulertest/bisheng-jdk:21.0.5-oe2403sp4-aarch64`
+- 日志明确记录 `[Build] finished` 和 `[Push] finished`
 
-失败发生在 Docker 构建/推送完成之后，`eulerpublisher` 工具执行 shutdown/post-processing 阶段时的 Python 模块导入错误，属于 CI 基础设施问题。
+真正的失败发生在构建/推送完成后的 CI 流水线 shutdown/cleanup 阶段，`eulerpublisher` CLI 工具自身因缺少 Python 模块而崩溃。PR 新增的 Dockerfile 及相关元数据文件（meta.yml、image-info.yml、README.md）均未引入任何会导致此错误的内容。
+
+### 附加发现（非失败原因）
+README.md 和 image-info.yml 中对新增条目的描述存在笔误：写成了 "openEuler **22**.03-LTS-SP4"，应为 "openEuler **24**.03-LTS-SP4"。该笔误不会导致 CI 失败，但建议修正。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-CI 环境中的 `eulerpublisher` Python 包缺少 `container/distroless` 子模块。需要在 CI runner 环境上修复 `eulerpublisher` 包的安装，确保 `eulerpublisher.container.distroless` 模块存在。这是一个纯 CI 基础设施问题，Code Fixer 无需对此 PR 的 Dockerfile 做任何修改。
+### 方向 1（置信度: 中）
+CI 运维侧修复：在 CI Runner 环境中重新安装或升级 `eulerpublisher` Python 包，确保 `eulerpublisher.container.distroless` 子模块存在。此问题与代码无关，Code Fixer Agent 无需对 PR 内容做任何修改。
 
 ## 需要进一步确认的点
-- `eulerpublisher` 包的最新版本是否包含 `container/distroless` 子模块；如果是新模块，CI runner 上的包版本是否已更新。
-- 该错误是否也发生在其他同时期的 PR 上（如果是，说明是 CI 环境的系统性问题，与特定 PR 无关）。
+- `eulerpublisher` 包的 `distroless` 子模块是近期新增的依赖还是因 CI Runner 环境部署不完整导致缺失？
+- 同一 CI Runner 在其他 PR 上是否也出现此错误？若为系统性故障，需通知 CI 运维团队修复环境。
+- 建议重新触发 CI 构建以确认故障是否可复现；若重新触发后通过，则说明为偶发 infra 问题。
