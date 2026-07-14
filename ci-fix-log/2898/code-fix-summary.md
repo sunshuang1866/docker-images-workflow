@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复 — 这是 CI 基础设施问题（infra-error），CI runner 缺少 `shunit2` Shell 单元测试框架。
+CI 基础设施问题（`infra-error`）——CI 运行环境缺少 `shunit2` Shell 测试框架，错误发生在 `[Check]` 阶段加载 `common_funs.sh` 时，与 PR 代码变更无关。
 
 ## 修改的文件
-无。CI 失败与 PR 代码变更无关。
+无（无需修改任何代码文件）
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- Docker 镜像构建（`[Build]`）和推送（`[Push]`）均已成功完成
-- 失败仅发生在构建后的 `[Check]` 验证阶段，原因是 CI runner 的 `common_funs.sh` 脚本第 13 行尝试加载 `shunit2`，但该工具未安装在 CI runner 节点上
-- 这是 CI 基础设施环境问题，非 PR #2898 中 Dockerfile 或任何代码变更导致
-- 应由 CI 基础设施团队在 runner 节点上安装 `shunit2`（如 `dnf install shunit2`），或重试 CI 以调度到已安装该工具的节点
+此次失败为 `infra-error`：
+- Docker 镜像构建和推送均成功完成
+- 失败发生在构建完成后的 `[Check]` 阶段，`common_funs.sh:13` 尝试 `source shunit2` 但该工具未安装在 CI aarch64 构建节点上
+- PR 变更内容（Dockerfile、README.md、image-info.yml、meta.yml）均为声明式配置，不涉及 CI 测试框架的运行时依赖
+- 修复应由 CI 基础设施管理员在构建节点上安装 `shunit2` 包（如 `yum install shunit2`），然后重新触发构建
 
 ## 潜在风险
 无
