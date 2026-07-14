@@ -5,13 +5,14 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit容器启动失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, docker-container driver
+- 新模式标题: BuildKit 容器启动失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
 
 ### 直接错误
 ```
+euler_builder_20260709_205700
 #0 building with "euler_builder_20260709_205700" instance using docker-container driver
 
 #1 [internal] booting buildkit
@@ -27,24 +28,25 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: CI Runner（`ecs-build-docker-x86-hk`）上的 Docker buildx BuildKit 启动阶段
-- 失败原因: Docker buildx 在启动 `docker-container` 驱动的 BuildKit 构建器实例时，BuildKit 守护进程容器 `buildx_buildkit_euler_builder_20260709_2057000` 创建后立即报错。Docker daemon 返回 `Could not find the file / in container`，表示无法在该容器内访问根文件系统 `/`，导致 BuildKit 无法完成初始化，后续的 Dockerfile 构建流程从未被触发。
+- 失败位置: BuildKit 容器引导阶段（`[internal] booting buildkit`），构建尚未进入 Dockerfile 执行步骤
+- 失败原因: Docker daemon 在创建 `buildx_buildkit_euler_builder_20260709_2057000` 容器后，尝试从容器内查找路径 `/` 时失败。这是 BuildKit builder 容器初始化时 Docker daemon 与容器运行时通信的底层错误，属于 CI 基础设施问题。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增一个 glibc 2.42 在 openEuler 24.03-LTS-SP4 上的标准 Dockerfile（以及配套的 README、image-info.yml、meta.yml 更新）。CI 日志显示：
-- 镜像规范预检已通过（`The image specification check for releasing on appstore has passed.`）
-- 失败发生在 BuildKit 守护进程容器的内部启动阶段，在目标 Dockerfile 被解析和构建之前
-
-该错误是 CI Runner 节点的 Docker daemon / BuildKit 基础设施问题，PR 代码变更无法触发或修复此问题。
+**与 PR 变更无关。** 本次 PR 仅新增了一个 glibc 2.42 的 Dockerfile（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`），以及更新了 README.md、image-info.yml、meta.yml 等元数据文件。CI 构建流程在 BuildKit 引导阶段即崩溃——此时尚未开始解析或执行任何 Dockerfile 步骤。该错误属于 Docker 引擎/容器运行时的瞬时故障，与代码无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**CI Runner 环境问题，Code Fixer 无需处理。** 建议操作：
-- 重新触发 CI 构建（retry），此类 BuildKit 容器启动失败通常为 Runner 节点上的瞬时故障（Docker daemon 状态异常、存储驱动问题、资源耗尽等）
-- 若持续失败，需排查 Runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon 健康状态和磁盘空间
+**无需修改代码，触发 CI 重跑。** 该失败是 Docker BuildKit 容器启动时的瞬时基础设施故障（Docker daemon 无法在构建容器中定位文件路径 `/`）。常见原因包括：
+- CI 节点上 Docker daemon 短暂异常或资源争用
+- buildx builder 实例创建时 Docker 存储驱动瞬时故障
+- Runner 节点磁盘 I/O 或文件系统短暂不可用
+
+直接重触发 CI pipeline 即可验证。
 
 ## 需要进一步确认的点
-- 该 Runner 节点（`ecs-build-docker-x86-hk`）在同时间段是否有其他构建任务也因 BuildKit boot 失败，以判断是否为节点级问题
-- Docker daemon 的存储驱动类型及状态（`docker info`）
-- Runner 节点磁盘空间和 inode 使用情况
+- 如果多次重试后仍然出现相同错误，需检查 CI 节点的 Docker 版本、BuildKit 版本及存储驱动健康状态。
+- 确认 CI 节点上是否存在 `moby/buildkit:buildx-stable-1` 镜像的损坏缓存，尝试 `docker builder prune` 清理。
+
+## 修复验证要求
+不适用（本次为 infra-error，无需修改代码）。
