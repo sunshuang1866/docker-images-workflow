@@ -3,45 +3,46 @@
 ## 基本信息
 - PR: #2893 — chore(bind9): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 测试框架缺失
-- 新模式症状关键词: shunit2, file not found, common_funs.sh, eulerpublisher, Check test failed
+- 新模式标题: 测试框架依赖缺失
+- 新模式症状关键词: shunit2, file not found, common_funs.sh, Check test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-10 09:24:00,652 - INFO - [Check] checking openeulertest/bind9:9.21.23-oe2403sp4-aarch64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: .: shunit2: file not found
-2026-07-10 09:24:00,662-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 2026-07-10 09:24:00,662 - CRITICAL - [Check] test failed
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/tests/container/common/common_funs.sh:13`
-- 失败原因: CI Runner 的 `[Check]` 测试阶段中，测试脚本 `common_funs.sh` 尝试通过 `. shunit2` 引入 `shunit2` bash 测试框架，但该框架未安装在 CI Runner 环境中（`file not found`），导致容器镜像的功能验证测试无法执行。
+- 失败位置: CI 环境 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13（Check 阶段，非代码仓库内文件）
+- 失败原因: CI 的 `[Check]` 阶段中，测试脚本 `common_funs.sh` 尝试 `source`（`.` 命令）`shunit2` shell 测试框架时，该文件在 CI runner 环境中不存在。注意 `[Check]` 从启动到失败仅 10 毫秒（`09:24:00,652` → `09:24:00,662`），说明失败发生在测试脚本的初始化阶段，而非实际功能测试。
+
+### Docker 构建阶段全部通过（作为对照证据）
+- meson setup/compile/install 三个阶段均正常完成，全部 422 个编译目标链接成功
+- 最终二进制 `named` 成功链接（`[422/422] Linking target named`）
+- 镜像导出 & 推送成功：`#13 DONE 36.0s`
+- INFO 日志确认：`[Build] finished` 和 `[Push] finished` 均无异常
+- 日志中标注镜像架构为 `aarch64`（`openeulertest/bind9:9.21.23-oe2403sp4-aarch64`）
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 本次 PR 添加的 Dockerfile 在 `[Build]` 和 `[Push]` 阶段均完全成功：
-- meson 构建全部 422 个编译单元均通过
-- 所有库文件和二进制文件成功链接并安装
-- 镜像成功构建并推送至 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`
-
-失败发生在独立于构建流程的 `[Check]` 测试阶段，直接原因是 CI Runner 缺少 `shunit2` 测试框架二进制，与 Dockerfile 内容、构建过程、新增配置文件均无关联。
+与 PR 变更**无关**。本次 PR 仅新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Docker 镜像（Dockerfile + named.conf + 元数据更新），Docker 构建本身在所有阶段均通过。失败发生在 CI 平台的 `[Check]` 测试阶段，属于 CI 基础设施层面的问题（测试框架 shunit2 未安装或路径配置错误）。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-在 CI Runner（aarch64 节点）上安装 `shunit2` 测试框架。对于 openEuler 系统，可通过以下方式之一：
-- `dnf install shunit2`（如果 openEuler 仓库包含该包）
-- 从 GitHub（`kward/shunit2`）下载 shunit2 脚本并放置到 `/usr/local/bin/` 或测试脚本可发现的路径中
+### 方向 1（置信度: 中）
+CI 基础设施团队需确认 `shunit2` 在 aarch64 runner 节点上是否已安装。若未安装，安装 `shunit2` 到 CI runner 的标准测试路径下，使 `common_funs.sh` 能正确 source 该框架后，重新触发 CI 验证。
 
 ### 方向 2（置信度: 低）
-如果 `shunit2` 在本次 PR 涉及的 `eulerpublisher` 版本中是新增依赖，需确认该依赖是否已在所有 CI Runner 节点的初始化流程中被安装。
+若 `shunit2` 已安装但路径不同，需检查 CI runner 上的 `PATH` 环境变量或测试脚本中的 `shunit2` 路径引用，确保与安装位置一致。
 
 ## 需要进一步确认的点
-- 确认 CI Runner aarch64 节点上是否具备 `shunit2` 安装步骤（检查 CI Runner 初始化脚本/Ansible 配置）
-- 确认同一 PR 的 x86_64 架构构建是否也遇到了相同的 `shunit2` 缺失问题（本次日志仅覆盖 aarch64 架构）
-- 如果其他同期 PR 的 `[Check]` 阶段也出现相同错误，可进一步确认此为 CI Runner 环境全局性缺陷，与该 PR 完全无关
+1. 本次 PR 的 x86_64 (amd64) 架构构建 job 是否也因同样原因失败，还是仅 aarch64 架构失败。日志仅提供了 aarch64 架构的构建 & 检查日志，需要获取 x86_64 对应 job 的日志进行交叉验证
+2. 同一 CI runner 上其他镜像的 `[Check]` 阶段是否也出现 `shunit2: file not found` 错误，以判断该问题是本次新增还是长期存在的 infra 缺陷
+3. CI runner 上 `shunit2` 的实际安装路径及 `common_funs.sh` 中引用 `shunit2` 的 source 机制（绝对路径 vs 相对路径 vs PATH 搜寻）
+
+## 修复验证要求
+（不适用——本失败为 CI 基础设施问题，无需对代码仓库中的 PR 文件做任何修改。）
