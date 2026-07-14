@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: CI测试框架缺失shunit2
-- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, [Check] test failed
+- 新模式标题: CI 缺少 shunit2
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
@@ -18,22 +18,22 @@
 ```
 
 ### 根因定位
-- 失败位置: CI [Check] 测试阶段（`common_funs.sh:13`）
-- 失败原因: CI 测试框架 `eulerpublisher` 在执行容器镜像验证测试时，试图加载或执行 `shunit2`（Shell 单元测试框架），但该工具在 CI runner 环境中未安装或不在 PATH 中，导致 [Check] 阶段失败。
+- 失败位置: CI Runner 上的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI 测试基础设施（eulerpublisher 的 Check 阶段）依赖 `shunit2` shell 单元测试框架，但当前 aarch64 CI runner 上未安装该工具，导致 `common_funs.sh` 第 13 行 source `shunit2` 时失败，进而 Check 阶段报错退出
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** Docker 镜像构建（步骤 #7–#11）全部成功完成，镜像已成功推送到 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64`。失败发生在构建之后的 CI [Check] 测试阶段，原因是 CI runner 上缺少 `shunit2` 测试框架。PR 新增的 Dockerfile、README.md、image-info.yml、meta.yml 修改均不涉及 CI 基础设施配置，不会导致 `shunit2` 缺失。
+与 PR 变更**无关**。Dockerfile 构建和镜像推送均成功完成（日志中 `[Build] finished` 和 `[Push] finished` 均正常输出，镜像已成功推送到 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64`）。失败发生在构建完成后的 CI 自身 Check/测试阶段，是 CI 基础设施层面缺少 `shunit2` 依赖所致。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-在 CI runner 环境中安装 `shunit2`（Shell 单元测试框架）。在 openEuler 上可通过包管理器安装（如 `dnf install shunit2`），或在 CI 初始化脚本中将 `shunit2` 二进制/脚本部署到 `/usr/local/bin/` 或 CI 测试脚本可搜索到的路径中。
+### 方向 1（置信度: 高）
+在 aarch64 CI runner 上安装 `shunit2`。shunit2 是一个 Shell 单元测试框架，通常可通过以下方式之一安装：
+- 系统包管理器（如 `yum install shunit2` 或 `dnf install shunit2`）
+- 或将 `shunit2` 脚本放置到 `/usr/local/etc/eulerpublisher/tests/container/common/` 目录下使其可被 source
 
-### 方向 2（置信度: 低）
-如果 `shunit2` 在 SP4 的 yum 仓库中不可用（包名不同或未收录），则需要在 CI 测试环境的初始化阶段从 GitHub（`https://github.com/kward/shunit2`）手动下载 `shunit2` 脚本并放入 PATH，作为 CI 基础设施的前置依赖安装步骤。
+此为 CI 基础设施维护操作，与代码仓库无关，Code Fixer 无需处理。
 
 ## 需要进一步确认的点
-1. `shunit2` 在 `openeuler:24.03-lts-sp4` 基础镜像或 CI runner 系统上是否可通过 `dnf install shunit2` 安装。
-2. 同一 CI runner 上其他 OS 版本（如 SP3）的 [Check] 测试是否正常通过——以确认 `shunit2` 缺失是 SP4 专属问题还是全局 CI 环境退化。
-3. CI runner 的测试环境初始化脚本（`common_funs.sh` 的上层调用方）是否遗漏了对 `shunit2` 依赖的安装/检查步骤。
-4. 是否有 x86_64（amd64）架构的构建日志可供对比——当前仅提供了 aarch64 日志，无法判断另一架构是否也受同一问题影响。
+1. 确认 `shunit2` 在 x86_64 CI runner 上是否已安装（若已安装则说明仅是 aarch64 runner 缺少该依赖）
+2. 确认 `shunit2` 应安装到哪个路径（`common_funs.sh` 第 13 行的 source 路径）
+3. 确认该 aarch64 runner 上是否其他 PR 的 Check 阶段也因同样原因失败（判断是本次配置还是长期缺失）
