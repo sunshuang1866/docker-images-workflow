@@ -4,41 +4,44 @@
 - PR: #3103 — chore(kyuubi): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式33、模式09（叠加）
+- 知识库匹配: 模式33
+- 新模式标题: (无)
+- 新模式症状关键词: (无)
 
 ## 根因分析
 
 ### 直接错误
 ```
-#8 [builder 3/5] RUN wget https://downloads.apache.org/kyuubi/kyuubi-1.11.1/apache-kyuubi-1.11.1-bin.tgz && ...
-#8 0.220 Connecting to downloads.apache.org (downloads.apache.org)|95.216.224.44|:443... failed: Connection timed out.
-#8 135.2 Connecting to downloads.apache.org (downloads.apache.org)|88.99.208.237|:443... failed: Connection timed out.
-#8 270.4 Connecting to downloads.apache.org (downloads.apache.org)|2a01:4f8:10a:39da::2|:443... failed: Network is unreachable.
-#8 270.4 Connecting to downloads.apache.org (downloads.apache.org)|2a01:4f9:2b:1cc2::2|:443... failed: Network is unreachable.
-#8 ERROR: process "/bin/sh -c wget https://downloads.apache.org/kyuubi/kyuubi-${KYUUBI_VERSION}/apache-kyuubi-${KYUUBI_VERSION}-bin.tgz && ..." did not complete successfully: exit code: 4
+#9 0.108 --2026-07-14 08:01:10--  https://archive.apache.org/dist/spark/spark-3.4.2/spark-3.4.2-bin-hadoop3.tgz
+#9 0.534 Connecting to archive.apache.org (archive.apache.org)|65.108.204.189|:443... failed: Connection timed out.
+#9 134.9 Connecting to archive.apache.org (archive.apache.org)|2a01:4f9:1a:a084::2|:443... failed: Network is unreachable.
+#9 ERROR: process "/bin/sh -c wget https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz &&     tar -xzf spark-${SPARK_VERSION}-bin-hadoop3.tgz &&     mv spark-${SPARK_VERSION}-bin-hadoop3 /opt/spark &&     rm -f spark-${SPARK_VERSION}-bin-hadoop3.tgz" did not complete successfully: exit code: 4
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile:17`（Kyuubi 下载步骤）
-- 失败原因: CI aarch64 构建环境（`ecs-build-docker-aarch64-01-sp`）无法与 `downloads.apache.org` 建立 TCP 连接，所有 IPv4 地址均 Connection timed out，IPv6 地址 Network is unreachable，wget 退出码 4
+- 失败位置: `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile:23`（wget 下载 Spark 步骤）
+- 失败原因: CI 构建环境无法与 `archive.apache.org` 建立 TCP 连接（IPv4 地址 `65.108.204.189` 连接超时，IPv6 地址 `2a01:4f9:1a:a084::2` 网络不可达），导致 wget 下载 Spark 3.4.2 压缩包失败（exit code: 4）。
 
 ### 与 PR 变更的关联
-PR 新增的 Dockerfile 使用 `https://downloads.apache.org/kyuubi/...` 作为 Kyuubi 下载源，该域名在 CI aarch64 runner 构建环境中网络不可达。**该问题与 PR 代码逻辑无关**，系 CI 基础设施网络限制所致，但可通过换用其他下载源在 Dockerfile 层面绕过。
 
-此外，Dockerfile 第 29-35 行的 JDK 下载步骤中使用了 `BUILDARCH` 变量（BuildKit 预定义全局 ARG），在 `RUN` 中对其重新赋值不会生效（**模式09**）。当前构建在 Kyuubi 下载阶段即失败，未触发该问题，但修复网络问题后 JDK 下载步骤将因 `BUILDARCH` 变量冲突而导致架构字符串错误、产生 404——这个问题在 PR #2105 中已为 SP3 版本修复过。
+PR 新增了 Kyuubi 1.11.1 on openEuler 24.03-LTS-SP4 的 Dockerfile。其中第 23 行通过 `wget https://archive.apache.org/dist/spark/...` 下载 Spark 二进制包，该 URL 使用的是 Apache 归档站 `archive.apache.org`。与该 PR 代码逻辑无关，属于 CI 构建环境到 `archive.apache.org` 的网络不可达问题。注意：同 Dockerfile 中从 `downloads.apache.org` 下载 Kyuubi 的步骤（第 15 行，step #8）成功，说明网络问题仅限于 `archive.apache.org` 这一特定主机。
+
+**附加发现**：Docker 构建输出中有 1 个 warning：`FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 3)`，即 `FROM ${BASE} as builder` 中 `as` 应为大写 `AS`。此 warning 不影响构建结果，但建议顺手修正以保持风格一致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 Kyuubi 下载源从 `downloads.apache.org` 切换为 `dlcdn.apache.org`（或其他 CI 环境可访问的镜像源，如 `archive.apache.org/dist/kyuubi/`），参考模式33历史案例（PR #3101 Knox、PR #3108 Mesos）。
+将 Spark 下载源从 `archive.apache.org` 替换为 CI 环境可达的镜像站。历史案例中相同模式（模式33）已验证的方案：
+- `dlcdn.apache.org`：优先尝试（PR #3101 对 Knox 2.1.0 使用此方案成功），但需确认 Spark 3.4.2 在 CDN 上是否可用（CDN 通常仅保留最新 1-2 个版本）。
+- `repo.huaweicloud.com`：若 CDN 无此版本，则使用华为云镜像站（PR #3077 对 Accumulo 3.0.0 使用此方案成功）。
 
 ### 方向 2（置信度: 高）
-将 JDK 下载步骤中的 `BUILDARCH` 变量重命名为自定义名称（如 `JAVA_ARCH`），避免与 BuildKit 预定义变量冲突，参考模式09历史案例（PR #2105 曾为 Kyuubi SP3 修复同类问题）。
+若 Spark 3.4.2 在 `dlcdn.apache.org` 和 `repo.huaweicloud.com` 均不可用，可考虑从 Spark 官方 GitHub Release 页面（`https://github.com/apache/spark/releases`）下载，需确认该 URL 在 CI 环境中可达。
 
 ## 需要进一步确认的点
-1. 确认 `dlcdn.apache.org` 或 `archive.apache.org` 在 CI aarch64 runner 上可以正常访问（通过查看同类仓库其他成功构建的镜像所使用的 Apache 下载域名确认）
-2. 确认 `https://dlcdn.apache.org/kyuubi/kyuubi-1.11.1/apache-kyuubi-1.11.1-bin.tgz` 路径下的制品确实存在（非 404）
+- 确认 `dlcdn.apache.org/dist/spark/spark-3.4.2/spark-3.4.2-bin-hadoop3.tgz` 是否存在（CDN 可能仅保留最新版本）。
+- 确认 `repo.huaweicloud.com/apache/spark/spark-3.4.2/spark-3.4.2-bin-hadoop3.tgz` 在 CI 环境中是否可达、是否可用。
+- 验证 Spark 3.4.2 制品的 SHA 校验值，确保镜像站下载的文件完整性。
 
 ## 修复验证要求
-- code-fixer 必须确认所选替代下载源（如 `dlcdn.apache.org`）上确有 Kyuubi 1.11.1 对应制品，再行提交
-- code-fixer 必须确认 `BUILDARCH` 重命名后，JDK 下载 URL 中的架构字符串（`x64` / `aarch64`）构造正确，且在 aarch64 runner 上 JDK 下载 URL 返回 200 而非 404
+若采用 `dlcdn.apache.org` 方案，需确认 Spark 3.4.2 确实存在于 CDN 路径中；若仅存在 `archive.apache.org`，需改用华为云等镜像站。code-fixer 在提交前必须验证所选镜像站的 Spark 3.4.2 下载 URL 确实可访问且返回正确的压缩包。
