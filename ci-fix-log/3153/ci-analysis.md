@@ -2,17 +2,21 @@
 
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
-- 失败类型: infra-error
+- 失败类型: lint-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 文档PR误触发应用商店校验
-- 新模式症状关键词: [Path Error], The expected path should be, README.md, appstore, FAILURE
+- 新模式标题: 根README路径校验
+- 新模式症状关键词: Path Error, expected path, README.md, appstore specification, eulerpublisher, update.py
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:28:17,839-.../update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:27:51,489-/home/jenkins/agent-working-dir/workspace/multiarch/****/x86-64/****-docker-images/eulerpublisher/update/container/app/update.py[line:356]-INFO: Difference: [
+    "README.md"
+]
+...
+2026-07-14 11:28:17,839-/home/jenkins/agent-working-dir/workspace/multiarch/****/x86-64/****-docker-images/eulerpublisher/update/container/app/update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
@@ -21,24 +25,30 @@
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: CI 的 appstore 发布规范校验工具（`eulerpublisher`）检测到 PR diff 中仅有根目录的 `README.md` 变更，对其执行了应用商店镜像路径校验。由于 `README.md` 是项目根级文档文件，不符合应用镜像的层级路径规范（如 `{category}/{app}/{version}/{os}/Dockerfile`），校验工具无法将其归类为有效的应用商店发布内容，报告路径错误。
+- 失败位置: `README.md`（仓库根目录），检测由 `eulerpublisher/update/container/app/update.py:273` 触发
+- 失败原因: CI 的 appstore 发布规范检查工具对 git diff 中检测到的变更文件 `README.md` 应用了镜像路径格式校验，根级 README.md 不符合镜像子目录的路径规范（如 `{category}/{image}/{version}/{os-version}/README.md`），被判定为路径错误
 
 ### 与 PR 变更的关联
-**PR 直接触发了此失败**，但并非 PR 内容有误。本 PR 仅修改了根目录的 `README.md` 和 `README.en.md`（更新基础镜像可用 Tags 列表，将 `24.03-lts-sp2` 替换为 `24.03-lts-sp4` 并新增 `24.03-lts-sp3`、`25.09` 条目），属于纯文档更新。CI 的 appstore 发布校验 pipeline 对纯文档 PR 进行了不应有的路径校验，导致误报 FAILURE。PR 的文档变更本身没有语法错误、链接错误或内容问题。
+**直接关联**。PR #3153 修改了仓库根的 `README.md`（更新基础镜像可用 tags 列表：将 latest 标签从 `24.03-lts-sp2` 更新为 `24.03-lts-sp4`，新增 `24.03-lts-sp3`、`25.09`、`24.03-lts-sp2` 条目）。CI 的 diff 检测发现该文件变更后，将其纳入 appstore 发布规范路径检查流程。根级 README.md 作为仓库整体文档，本身不属于任何镜像目录，因此无法通过针对镜像子目录设计的路径校验。
+
+PR 同时修改了 `README.en.md`，但 CI 的 diff 检测结果 `Difference: ["README.md"]` 中未包含该文件（可能被 CI diff 过滤或单独处理），故未触发同类校验失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 的 appstore 校验流程应在执行路径校验前先判断 PR 变更文件类型：若 diff 仅包含项目根级文档文件（`README.md`、`README.en.md`、`CONTRIBUTING.md` 等），跳过应用商店路径规范校验，允许直接通过。这需要修改 CI 编排逻辑（`eulerpublisher/update/container/app/update.py` 或触发层 job 配置）。
+CI 检查工具（`update.py:273`）应在路径校验前增加文件过滤逻辑，排除仓库根级文件（如 `/README.md`、`/README.en.md`、`.gitignore` 等非镜像子目录文件），仅对 `{category}/` 下的镜像子目录文件执行 appstore 发布规范路径检查。
 
 ### 方向 2（置信度: 低）
-若 CI 工具不支持按文件类型跳过校验，可通过 CI 触发条件过滤：当 PR 仅修改根级文档文件时不触发 appstore 校验 job，改用其他轻量级文档校验（如 markdown lint）。此方法需要修改 CI pipeline 的 trigger 条件。
+CI 工具可能存在路径字符串格式化问题——git diff 产出的路径为 `README.md`（无前导 `/`），而工具内部预期格式为 `/README.md`（带 `/` 前缀），两者字符串不等导致校验失败。需查阅 `update.py` 中路径比较逻辑确认。
 
 ## 需要进一步确认的点
-1. 确认 appstore 校验 pipeline 的触发条件：是否所有 PR 都会触发该校验，还是仅包含特定目录变更的 PR？
-2. 确认 `eulerpublisher/update/container/app/update.py:273` 处的路径校验逻辑：是否已有文件过滤机制但未覆盖根级 README？
-3. CI 日志中显示 `PR 3184 [sunshuang1866:fix/3153 -> master]`，但上下文报告 PR 编号为 #3153。需确认此 CI 运行是否来自正确的 PR，以及 #3153 和 #3184 之间的关系（#3184 的分支名为 `fix/3153`，可能是为修复 #3153 问题而创建的 PR，CI 日志中的 `Difference: ["README.md"]` 与此 PR 的 diff 内容一致）。
+- `eulerpublisher/update/container/app/update.py` 中第 273 行附近路径校验函数的具体实现——校验的是 filepath 格式还是目录层级深度
+- 根级 `README.md` 的历史 PR 中是否也曾触发同类校验失败，还是近期 CI 工具升级后新增的检查规则
+- CI diff 检测为何仅报告 `README.md` 而未报告 `README.en.md`（是否为文件扩展名过滤逻辑）
+- `Finished: FAILURE` 与 PR 状态一致，日志证据充分，无需额外确认
 
 ## 修复验证要求
-无需验证。此失败属于 CI 基础设施（appstore 校验 pipeline 误报），PR 的文档变更本身无需修改。若后续选择修改 CI 工具校验逻辑以允许纯文档 PR 通过，需在 CI 环境中验证修改后的 `update.py` 确实能跳过根级文档文件的路径校验。
+无需从上游仓库获取文件进行正则匹配验证。但 code-fixer 在修改 CI 过滤逻辑时，需确认以下回归场景：
+- 排除根级文件后，正常镜像子目录（如 `AI/xxx/1.0/24.03-lts-sp4/README.md`）的路径校验仍正常通过
+- `README.en.md` 等其他根级非代码文件是否也需要加入排除列表
+- 排除逻辑是否应与现有 `Difference` 检测（`update.py:356`）的过滤规则保持一致
