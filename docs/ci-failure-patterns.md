@@ -655,3 +655,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2997: `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile` — CESM 2.2.2 构建过程中 `checkout_externals` 步骤因 SVN 服务器证书主机名不匹配（`E
+
+---
+
+## 模式35：x86专属编译标志
+
+**症状关键词**: unrecognized command-line option, -mno-red-zone, -mno-vzeroupper, aarch64, SeisSol
+
+**根因**: - 失败位置: SeisSol 构建阶段，文件 `CMakeFiles/SeisSol-lib.dir/src/generated_code/subroutine.cpp.o`
+- 失败原因: SeisSol 上游源码的 CMake 构建系统向编译命令中注入了 `-mno-red-zone` 标志，该标志是 x86_64 架构专属的 GCC 选项。CI 在 aarch64（ARM64） runner 上构建时，GCC 12 无法识别该选项，导致编译失败。日志中 PARMETIS 构建路径（`Linux-aarch64`）进一步确认编译发生在 aarch64 架构上。
+
+**修复方法**: 修复 SeisSol 在 aarch64 架构上构建失败的问题（x86_64 专属编译标志 `-mno-red-zone` 不被 GCC 识别），并修复 `$LD_LIBRARY_PATH` 未定义变量 lint 警告。
+
+**历史案例**:
+- PR #3033: `HPC/seissol/202103.Sumatra/24.03-lts-sp4/Dockerfile` — 修复 SeisSol 在 aarch64 架构上构建失败的问题（x86_64 专属编译标志 `-mno-red-zone
