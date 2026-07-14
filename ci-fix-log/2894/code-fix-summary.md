@@ -1,18 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施错误（infra-error）：CI 运行器上的 `eulerpublisher` 工具缺少 `eulerpublisher.container.distroless` Python 子模块，导致 shutdown 阶段崩溃。
+无需代码修改。CI 失败为基础设施问题（infra-error）：`eulerpublisher` 工具在 Docker 构建/推送完成后执行 shutdown 阶段时，因缺失 `eulerpublisher.container.distroless` 模块导致 Python 导入失败。Docker 镜像构建与推送均已成功完成。
 
 ## 修改的文件
-无（PR 代码变更本身没有问题）
+无。此错误与 PR 变更无关，PR 的 Dockerfile 及元数据文件均正确。
 
 ## 修复逻辑
-CI 分析报告确认：
-- Docker 镜像构建、Java 版本验证、镜像导出和推送均**成功完成**
-- 失败发生在 CI 后处理工具 `eulerpublisher` 的 shutdown 阶段，因 `ModuleNotFoundError: No module named 'eulerpublisher.container.distroless'` 崩溃
-- PR 变更（新增 `Others/bisheng-jdk/21.0.5/24.03-lts-sp4/Dockerfile`、更新 README.md、image-info.yml、meta.yml）**不是失败原因**
-
-修复应由 CI 基础设施团队在运行器上更新 `eulerpublisher` Python 包（`pip install --upgrade eulerpublisher`）以确保包含 `distroless` 子模块。
+CI 分析报告明确指出：`eulerpublisher` Python 包缺少 `container/distroless` 子模块，属于 CI runner 环境问题，需由 CI 运维团队更新/修复 `eulerpublisher` 包的安装。该错误发生在 Docker 构建和推送均已完成（`[Build] finished` + `[Push] finished`）之后，不影响镜像的实际产出。PR 新增的 `Others/bisheng-jdk/21.0.5/24.03-lts-sp4/Dockerfile` 构建已通过，冒烟测试（javac）也通过。
 
 ## 潜在风险
-无
+无。本次未对任何源码文件做修改。
