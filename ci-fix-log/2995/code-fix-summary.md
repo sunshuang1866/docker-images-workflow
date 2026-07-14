@@ -1,19 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 **infra-error**：`eulerpublisher` 测试框架包中的 `bwa_test.sh` 文件包含 CRLF 行尾，导致 `/bin/sh^M: bad interpreter` 错误。该问题属于 CI 测试基础设施缺陷，与 PR 中 `openeuler-docker-images` 仓库的代码变更无关。
+CI 基础设施问题（infra-error），无需对 PR 代码进行修改。
 
 ## 修改的文件
-无。PR 变更的文件（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，Docker 构建、镜像推送全程成功。
+无。
 
 ## 修复逻辑
-分析报告明确指出：
-- PR 变更本身没有问题（置信度：高）
-- Docker 构建阶段全程成功
-- 失败发生在 CI 流水线的 [Check] 后置检查阶段，由 `eulerpublisher` 包的 `bwa_test.sh` 脚本 CRLF 行尾引起
-- 根因在 `eulerpublisher` 仓库，不在 `openeuler-docker-images` 仓库
-
-根据分析报告建议：**在 `openeuler-docker-images` 仓库中不做任何修改**，需由 `eulerpublisher` 维护者将 `bwa_test.sh` 的行尾从 CRLF 转换为 LF，或在 CI 流水线中增加 dos2unix 处理步骤。
+CI 分析报告明确指出：
+- 失败类型为 `infra-error`，与 PR #2995 的代码变更**无关**。
+- PR 新增的 Dockerfile（`HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile`）构建成功，镜像已正确构建并推送。
+- 失败发生在 CI 流水线后续的 `[Check]` 阶段，根因是 eulerpublisher CI 框架内置的测试脚本 `bwa_test.sh` 使用了 Windows 风格行尾（CRLF），导致 shebang 行 `/bin/sh\r` 被内核误解释为解释器 `/bin/sh^M`，触发 "bad interpreter: No such file or directory" 错误。
+- 该问题需要在 eulerpublisher 上游仓库中修复 `bwa_test.sh` 的行尾格式（CRLF → LF），而非在当前 PR 中修改任何代码。
 
 ## 潜在风险
-无。此 PR 的代码无需改动，不引入任何风险。
+无。PR 代码本身没有问题，无需任何修改。
