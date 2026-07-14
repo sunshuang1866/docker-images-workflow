@@ -5,33 +5,35 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit builder 异常终止
-- 新模式症状关键词: graceful_stop, rpc error, Unavailable, no builder found, euler_builder
+- 新模式标题: BuildKit Builder 意外终止
+- 新模式症状关键词: `failed to receive status`, `rpc error`, `closing transport`, `graceful_stop`, `no builder`
 
 ## 根因分析
 
 ### 直接错误
 ```
+#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all
+#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker build 步骤 `#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel` 执行期间
-- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 在执行 dnf 元数据下载过程中被服务端主动发送 `graceful_stop` goaway 帧终止，随后 RPC 连接中断（EOF），构建器实例销毁，导致后续重试时无法找到该 builder。
+- 失败位置: Dockerfile step `[2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`（dnf 下载仓库元数据阶段）
+- 失败原因: CI 的 BuildKit builder 实例（`euler_builder_20260709_224657`）在 dnf 安装依赖过程中被意外终止。gRPC 层收到了服务端的 `graceful_stop` GOAWAY 帧，随后连接断开，构建进程无法继续下发 build 指令。这属于 CI 基础设施层面的问题，与 Dockerfile 内容或 PR 改动无关。
 
 ### 与 PR 变更的关联
-PR 变更内容为新增 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及配套元数据文件，Dockerfile 语法和内容均符合现有同类镜像的规范模式，未见明显错误。失败发生在 Dockerfile 中常规的 `dnf install -y` 包安装步骤，并非由 PR 代码变更的逻辑缺陷触发。失败更可能是 CI 基础设施侧（BuildKit builder 进程）的临时性问题引起。
+PR 改动（新增 Dockerfile、更新 README / image-info.yml / meta.yml）与本次失败**无直接关联**。Dockerfile 中的 `dnf install` 命令语法正确，失败发生在 CI BuildKit builder 被意外终止的瞬间，而非 dnf 命令执行出错。该 Dockerfile 本身不存在编译错误、依赖缺失或语法问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 基础设施问题，非代码问题。建议：
-1. **重新触发 CI 构建**：该 Dockerfile 无逻辑错误，重试构建大概率可成功。
-2. **排查 BuildKit builder 终止原因**：检查 CI 节点（`ecs-build-docker-x86-hk`）是否因资源不足（内存/OOM、磁盘空间）或超时策略导致 builder 被 kill。日志中 dnf 元数据下载速度为 77 kB/s，2.8MB 元数据需约 37 秒完成；若 CI 对 builder 有生存时间限制或节点负载过高，可能导致 builder 在这段时间内被清理。
-3. **检查 dnf 仓库连通性**：确认 CI 节点到 openEuler 24.03-LTS-SP4 软件源（`OS` repo）的网络延迟和带宽是否正常，77 kB/s 的下载速度偏低。
+**触发 CI 重试重新构建**。本次失败为 BuildKit 基础设施临时故障（builder 意外终止），不是代码问题。可尝试 re-run 该 job，大概率能通过。
+
+### 方向 2（置信度: 低）
+如果重试后仍失败，检查 CI runner 的资源配额（内存 / 磁盘 / inotify 限制）。`dnf install` 下载 2.8 MB OS 元数据 + 后续安装大量编译工具可能触发 builder 容器的 OOM 或磁盘压力，导致 BuildKit daemon 被 kill。但这点在当前日志中**证据不足**，仅为推测。
 
 ## 需要进一步确认的点
-- `graceful_stop` 是 BuildKit daemon 主动发出的关闭信号，需要确认触发原因：是 CI Job 超时策略、Jenkins 节点清理机制，还是 Builder 进程自身的内存/crash 问题。
-- 检查同一时间段内其他类似 PR（同为 24.03-lts-sp4 基础镜像的构建）是否也出现相同错误，以区分是节点级问题还是该基础镜像的 dnf 仓库问题。
-- 若重试后仍失败，需获取 BuildKit builder 容器的日志（`docker logs buildx_buildkit_euler_builder_20260709_2246570`）以确定 builder 侧崩溃的精确原因。
+1. 重新触发 CI 后，是否在同一位置（dnf install 步骤）再次失败？若反复失败，需获取 BuildKit daemon 端日志（`docker logs euler_builder_*`）以确认终止原因。
+2. CI runner 节点（`ecs-build-docker-x86-hk`）在该时间段是否有资源异常或调度器主动驱逐 builder 容器的记录。
+3. 是否需要为 `dnf install` 步骤增加 retry 机制（如 `dnf install -y --setopt=retries=5 ...`）以应对偶发的网络/基础设施抖动。
