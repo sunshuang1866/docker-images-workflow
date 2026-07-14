@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error）：`eulerpublisher` 工具在 Docker 构建/推送完成后执行 shutdown 阶段时，因缺失 `eulerpublisher.container.distroless` 模块导致 Python 导入失败。Docker 镜像构建与推送均已成功完成。
+无需代码修改。CI 失败为 infra-error，根因是 CI Runner 环境中的 `eulerpublisher` Python 包缺少 `eulerpublisher.container.distroless` 子模块，Docker 镜像构建与推送本身已成功完成。
 
 ## 修改的文件
-无。此错误与 PR 变更无关，PR 的 Dockerfile 及元数据文件均正确。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：`eulerpublisher` Python 包缺少 `container/distroless` 子模块，属于 CI runner 环境问题，需由 CI 运维团队更新/修复 `eulerpublisher` 包的安装。该错误发生在 Docker 构建和推送均已完成（`[Build] finished` + `[Push] finished`）之后，不影响镜像的实际产出。PR 新增的 `Others/bisheng-jdk/21.0.5/24.03-lts-sp4/Dockerfile` 构建已通过，冒烟测试（javac）也通过。
+CI 日志显示构建、验证、推送三个阶段均已完成：
+- `#8 DONE` — JDK 提取成功
+- `#9 DONE` — Smoke test 通过（`javac 21.0.5`, `openjdk 21.0.5 BiSheng`）
+- `#10 DONE` — 镜像推送成功
+- 日志明确记录 `[Build] finished` 和 `[Push] finished`
+
+失败发生在构建完成后的 CI 流水线 shutdown 阶段，`eulerpublisher` CLI 工具因 `ModuleNotFoundError: No module named 'eulerpublisher.container.distroless'` 崩溃。该模块缺失与 PR 代码变更无关，需由 CI 运维团队在 Runner 环境中重新安装或升级 `eulerpublisher` 包解决。
 
 ## 潜在风险
-无。本次未对任何源码文件做修改。
+无
