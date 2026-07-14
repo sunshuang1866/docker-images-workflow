@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2测试框架缺失
-- 新模式症状关键词: `shunit2: file not found`, `[Check] test failed`, `common_funs.sh`
+- 新模式标题: shunit2 测试框架缺失
+- 新模式症状关键词: shunit2: file not found, common_funs.sh, [Check] test failed
 
 ## 根因分析
 
@@ -20,27 +20,19 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Check 阶段 — `eulerpublisher` 测试框架脚本 `common_funs.sh` 第 13 行
-- 失败原因: CI 测试运行环境（aarch64 runner）中 `shunit2`（Shell 单元测试框架）未安装或不在 `PATH` 中，导致 `common_funs.sh` 执行 `source shunit2` 时报 "file not found"
+- 失败位置: CI `[Check]` 阶段，`eulerpublisher` 测试工具链中的 `common_funs.sh` 脚本第 13 行
+- 失败原因: CI 测试环境中缺少 `shunit2` shell 单元测试框架文件，导致 `common_funs.sh` 无法 `.`（source）该框架，[Check] 阶段直接失败
 
 ### 与 PR 变更的关联
-
-**本次失败与 PR 变更无关。** 理由：
-
-1. **构建阶段完全成功**：`meson setup`、`meson compile`（全部 422 个编译单元通过）、`meson install` 均无报错，所有二进制和库文件正确安装到 `/usr/bin`、`/usr/sbin`、`/usr/lib64` 等路径。
-2. **推送阶段成功**：镜像 `openeulertest/bind9:9.21.23-oe2403sp4-aarch64` 已成功推送到 `docker.io`。
-3. **失败发生在 CI 自身的 Check 测试框架中**：错误路径 `/usr/local/etc/eulerpublisher/tests/container/...` 表明这是 `eulerpublisher` 测试框架的内部依赖问题（`shunit2` 未安装），而非 Dockerfile 或镜下内容问题。
-4. **PR 仅新增文件、无代码逻辑错误**：新增的 Dockerfile、named.conf 均为标准配置文件，meta.yml 和 image-info.yml 格式正确，构建阶段已验证无语法或编译错误。
+**与 PR 变更无关**。PR 仅新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile（含 named.conf 及 meta.yml/README/image-info 元数据更新），Docker 镜像构建（`meson compile` 422 个编译目标全部通过、`meson install` 成功、`groupadd`/`useradd` 成功）和推送（Push 成功）均已完成，无任何构建错误。失败完全发生在 eulerpublisher 框架的 [Check] 容器测试阶段，因 CI 环境缺少 shunit2 导致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI aarch64 runner 的测试环境中安装 `shunit2` Shell 测试框架，确保 `common_funs.sh` 中 `source shunit2` 能找到该文件。这是 CI 基础设施层面（`eulerpublisher` 测试环境）的依赖缺失问题，Code Fixer 无需处理此 PR 的文件。
+在 CI runner 的测试环境中安装 `shunit2` 包。openEuler 中 shunit2 的包名为 `shunit2`，可通过 `yum install -y shunit2` 安装。此为 CI 基础设施维护工作，**Code Fixer 无需对 PR 代码做任何修改**。
 
 ## 需要进一步确认的点
-1. 确认 CI x86_64 runner 上的 Check 阶段是否同样失败，还是仅 aarch64 runner 存在此问题（当前日志仅展示 aarch64 构建）。
-2. 确认 `shunit2` 在 CI runner 环境中的预期安装路径（是系统包管理器安装、还是项目自带），以确定正确的修复方式（安装系统包 vs 调整测试框架的 source 路径）。
-3. 确认该 check 阶段对同类已有镜像（如 `9.21.23-oe2403sp3`）是否正常运行——若已有镜像的 check 也失败，则说明这是一个普遍性的测试环境问题。
+（无需进一步确认，根因明确）
 
 ## 修复验证要求
-无需验证。此失败属于 CI 基础设施问题，PR 自身的 Dockerfile 和配置文件无需修改。若 re-run CI 后 Check 仍失败，需联系 CI 运维团队在 runner 上安装 `shunit2`。
+（不适用，非 PR 代码问题）
