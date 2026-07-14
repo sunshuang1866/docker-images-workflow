@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error：appstore 发布规范校验工具对仅包含文档变更的 PR 错误触发了路径校验。
+无需代码修改。CI 失败为 infra-error，由 appstore 发版校验管线对所有 PR 统一执行路径检查导致，该检查不适用于纯文档类 PR。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-该 PR (#3153) 仅修改了 `README.md` 和 `README.en.md` 两个根目录级项目文档文件，更新了可用基础镜像标签列表。CI 管道的 appstore 发布规范校验工具 (`eulerpublisher/update/container/app/update.py`) 将这两个 README 文件视为 appstore 镜像提交进行路径合规检查，因其不在 `AI/`、`Bigdata/`、`Cloud/` 等应用镜像场景目录下而报路径错误。
-
-这是 CI 基础设施（校验工具）的误报，与 PR 变更无因果关系。校验工具应在检测到变更文件仅包含非 appstore 路径的文件时自动跳过该校验，或通过 PR 标签/commit message 触发跳过。修复应在 CI 流水线侧进行，而非修改源文件。
+本次 PR 仅修改了根目录的两个 README 文件（`README.md`、`README.en.md`），更新基础镜像 Tag 列表，不涉及任何应用镜像 Dockerfile、meta.yml 或 image-list.yml。CI 失败的根本原因是 `eulerpublisher/update/container/app/update.py` 中的 appstore 路径校验工具对所有 PR 变更文件执行应用镜像目录结构检查，将根级文档文件 `README.en.md` 标记为"期望路径应为 /README.md"，`README.md` 虽位置正确也报错（疑为校验工具固定模板行为）。此问题属于 CI 基础设施缺陷，需在 CI 编排层（trigger job）或 `update.py` 中添加分流逻辑：当 PR 仅修改根级文档文件时跳过 appstore 路径校验。
 
 ## 潜在风险
 无
