@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误 — pip 从 `mirrors.aliyun.com` 下载 `nvidia_cudnn_cu13`（366 MB）时发生读取超时，非代码逻辑错误，无需代码修改。
+CI 构建失败为基础设施网络问题（infra-error），无需代码修改。
 
 ## 修改的文件
-无
+无修改。
 
 ## 修复逻辑
-分析报告将该失败定性为 `infra-error`（CI 基础设施问题），根因是 CI 构建节点与阿里云镜像站之间的网络连接在大文件下载过程中超时。此问题并非 PR 引入的代码缺陷，且同类型的其他 Dockerfile（`22.03-lts-sp4`、`24.03-lts-sp1`）也使用相同的 pip 镜像源且无重试配置，说明这是网络层面的偶发问题，可通过重试 CI 构建解决。
-
-根据修复规范：对于 `infra-error` 类型失败，不应通过修改代码来绕过 CI 基础设施问题。
+CI 分析报告判定失败类型为 `infra-error`（置信度：高）。失败原因是 `pip install` 从 `mirrors.aliyun.com` 下载大型依赖包 `nvidia-cudnn-cu13`（366 MB）时发生网络读超时（已下载约 96.5% 后连接中断），与 PR 代码变更无关。该 PR 仅新增了标准的 openEuler 24.03-LTS-SP4 Dockerfile，其中 `pip install -r backend/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/` 是合法的依赖安装命令。npm 构建阶段已成功完成，排除了代码错误。重新触发 CI 构建大概率可以成功（临时性网络波动）。
 
 ## 潜在风险
-无
+无。若后续多次复现此问题，可考虑以下优化方案（属于 CI 配置/镜像源层面，非代码层面）：
+- 为 `pip install` 增加 `--default-timeout=300` 参数
+- 替换为更稳定的镜像源
+- 在 RUN 中加入重试逻辑
