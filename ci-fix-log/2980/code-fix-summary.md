@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败由 openEuler 24.03-LTS-SP4 官方 RPM 软件源（`repo.****.org`）的 HTTP/2 传输层临时故障所致，属于 CI 基础设施问题（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施问题（infra-error）：openEuler 24.03-LTS-SP4 仓库镜像在构建期间存在 HTTP/2 连接层间歇性故障，导致 `gcc-c++` 等大文件下载流被异常中断。
 
 ## 修改的文件
-无。此问题无需修改任何源代码文件。
+无。原始 PR 中所有文件（Dockerfile、README.md、image-info.yml、meta.yml）均代码正确，无需修改。
 
 ## 修复逻辑
-CI 分析报告已明确判断：
-- 失败类型为 `infra-error`
-- Dockerfile 本身无语法错误、包名拼写错误或依赖缺失
-- 失败根因是 `repo.****.org` 在构建期间出现 HTTP/2 流异常中断（Curl error 92），导致 `gcc-c++` 等 RPM 包下载失败
-- 修复方向为等待 CI 基础设施恢复后重新触发构建
-
-按照修复规范"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"，本次不做任何代码变更。
+CI 分析报告明确指出失败与 PR 变更无关，属于构建时段仓库镜像的 HTTP/2 网络问题（Curl error 92: Stream error in the HTTP/2 framing layer, INTERNAL_ERROR）。`dnf install` 中列出的包名均正确且是构建 GrADS 2.2.3 所需的合理依赖。重新触发 CI 构建即可通过。
 
 ## 潜在风险
-无。未修改任何代码。
+无
