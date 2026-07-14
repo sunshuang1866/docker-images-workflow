@@ -1,16 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-meson 配置阶段因 wayland-protocols 子项目 wrap 下载 hash 校验失败导致构建中断。
+meson 构建时 wayland-protocols 子项目从 GitLab 下载的 tarball 哈希值与源码 wrap 文件中的预期值不一致，导致构建失败。
 
 ## 修改的文件
-- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 在 `dnf install` 命令中添加 `wayland-protocols-devel` 包
+- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 在 `meson setup` 前添加 `sed` 命令，将 `subprojects/wayland-protocols.wrap` 中的 `source_url` 和 `source_hash` 替换为稳定的 freedesktop.org 官方发布地址及其对应 SHA256。
 
 ## 修复逻辑
-CI 失败的直接原因是 mesa 25.3.4 的 `subprojects/wayland-protocols.wrap` 记录的 SHA256 与 GitLab 实际提供的 tarball 不匹配。由于 Dockerfile 中未安装 `wayland-protocols-devel`，meson 无法通过 pkg-config 找到系统级 wayland-protocols，只能回退到 wrap 下载方式从而触发 hash 校验失败。
-
-添加 `wayland-protocols-devel` 后，meson 在配置阶段通过 pkg-config 发现已安装的系统包，会优先使用系统包而跳过 wrap 子项目下载，完全规避 hash 不匹配问题。此方案遵循分析报告中的方向 1（高置信度）。
+根因是 GitLab 动态生成 release tarball 的 SHA256 哈希值不稳定（同一 URL 在不同时间/请求下可能返回不同内容），导致 meson 的哈希校验失败。将源码下载源从 GitLab（`https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz`）改为 freedesktop.org 官方发布页（`https://wayland.freedesktop.org/releases/wayland-protocols-1.41.tar.xz`，SHA256: `cea75b0a503a77e1c60a39c02d8849c285aed5d983b1e96c6e7c90b735982d32`）。freedesktop.org 的 release tarball 是由维护者签名发布的稳定文件，哈希值永久不变。已从该地址两次下载文件确认哈希一致，正则匹配方式为宽松模式（`s|source_url = .*|...`），兼容 wrap 文件的格式变化。
 
 ## 潜在风险
-- 若 openEuler 24.03-LTS-SP4 仓库中的 `wayland-protocols-devel` 版本低于 mesa 25.3.4 要求的最低版本（1.41），meson 可能仍然拒绝使用系统包。但从同一 Dockerfile 已安装 `wayland-devel` 且其他 mesa 版本在同系列 Dockerfile 中同样依赖系统 wayland-protocols 来看，该风险较低。
-- 无其他风险。
+- 替换后的 source_url 依赖 freedesktop.org 的持续可用性，但该域名为 wayland 项目官方发布渠道，稳定性高。
+- 若未来 mesa 版本升级且 wayland-protocols 需求版本变化，wrap 文件路径（`subprojects/wayland-protocols.wrap`）仍应有效。
+- 不影响 SP3 构建或其他版本，仅修改 SP4 Dockerfile 的构建步骤。
