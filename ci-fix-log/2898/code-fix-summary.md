@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是基础设施问题（infra-error）：CI Runner 上 `shunit2` 测试框架未安装，导致 `[Check]` 阶段 `common_funs.sh` 无法 source 该库。
+无需代码修改。CI 失败为基础设施问题（infra-error），与 PR 变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认 Docker 镜像的构建和推送阶段均成功完成，失败仅发生在推送完成后的 `[Check]` 测试执行阶段。根因是 CI Runner（`ecs-build-docker-aarch64-01-sp`）环境缺少 `shunit2` shell 测试框架，与本次 PR 提交的 Dockerfile、README 等文件变更完全无关。此问题需要在 CI 基础设施层面解决（如在 Runner 上安装 `shunit2`），而非通过修改源码修复。
+CI 失败发生在 eulerpublisher 的 [Check] 阶段，根因是 CI Runner 主机上缺少 `shunit2` Bash 测试框架，导致 `common_funs.sh` 执行 `source shunit2` 时报 "No such file or directory"。
+
+Docker 镜像的构建和推送均已成功完成，PR 变更仅新增 Dockerfile 和元数据文件（Dockerfile、README.md、image-info.yml、meta.yml），无法导致 CI 主机上 `shunit2` 缺失。
+
+此问题需要在 CI Runner 上安装 `shunit2`（如 `dnf install shunit2 -y`），或在 eulerpublisher 的依赖声明中补充该依赖。不应通过修改源代码来修复。
 
 ## 潜在风险
 无
