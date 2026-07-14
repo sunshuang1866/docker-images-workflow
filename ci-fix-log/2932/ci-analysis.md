@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 引导失败
-- 新模式症状关键词: Error response from daemon, Could not find the file, buildx_buildkit, booting buildkit
+- 新模式标题: BuildKit容器启动失败
+- 新模式症状关键词: Could not find the file, in container, buildx_buildkit, booting buildkit
 
 ## 根因分析
 
@@ -25,22 +25,22 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: CI 基础设施层 — Docker daemon / BuildKit 运行时（不涉及任何 Dockerfile 或源码文件）
-- 失败原因: CI 的 Docker daemon 在创建 `moby/buildkit:buildx-stable-1` 容器后，无法访问该容器的根文件系统（"Could not find the file /"），导致 BuildKit builder（`euler_builder_20260709_205700`）引导失败。构建过程在 Dockerfile 被处理之前就已终止。
+- 失败位置: BuildKit 引导阶段（`[internal] booting buildkit`），发生在 Dockerfile 解析之前
+- 失败原因: Docker buildx 的 BuildKit 构建容器（`buildx_buildkit_euler_builder_20260709_2057000`）在创建后启动失败，Docker daemon 报告"在容器中找不到文件 /"，导致整个构建流程被标记为 FAILURE
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了一个标准的 glibc 源码编译 Dockerfile 和三个元数据文件的条目更新（README.md、doc/image-info.yml、meta.yml），不涉及任何能触发 Docker daemon 或 BuildKit 内部错误的操作。CI 流水线在完成代码检出、差异分析和规范校验后，在启动 BuildKit builder 容器时遇到了 Docker daemon 内部故障——此时尚未进入实际镜像构建阶段。日志中 `+-------------+-------------+--------------+` 的空白 Check Result 表也佐证了无任何构建步骤被执行。
+**与 PR 变更无关**。失败发生在 BuildKit 引导阶段，此时尚未开始解析或执行 Dockerfile。PR 只新增了一个常规的 glibc Dockerfile（含 dnf 安装依赖、wget 下载源码、configure + make 编译）及三处元数据文件更新（README.md、image-info.yml、meta.yml），无任何语法或配置异常可导致 BuildKit 容器启动失败。所有 CI 前置步骤（仓库克隆、差异计算、镜像规范检查）均已通过。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**重新触发 CI 运行。** 该错误属于 CI runner 节点的 Docker daemon / BuildKit 瞬时故障，通常在重新调度构建后即可恢复。常见原因包括：
-- Docker daemon 存储驱动（overlay2）短暂异常，导致新创建容器的 rootfs 不可用
-- BuildKit 容器配置文件（`/var/lib/docker/containers/<id>/config.v2.json`）写入后被 daemon 读取时出现竞态
-- 节点磁盘 I/O 压力或 inode 耗尽导致 daemon 无法正确挂载容器层
+### 方向 1（置信度: 低）
+CI 基础设施中的 buildx builder 实例状态异常（可能为残留的脏 builder、磁盘空间不足、或 Docker daemon 临时故障）。建议在 CI runner 上执行 `docker buildx prune -f` 清理残留 builder 实例后重试构建。此方向不涉及任何代码修改。
 
-Code Fixer 无需对 PR 代码做任何修改。建议直接重试 CI。
+### 方向 2（置信度: 低）
+BuildKit 镜像 `moby/buildkit:buildx-stable-1` 拉取的版本存在兼容性问题，或 runner 的 Docker 版本与 BuildKit 版本不匹配，导致容器 rootfs 初始化异常。建议检查 runner 的 Docker 版本，并尝试指定固定的 BuildKit 镜像版本重试。
 
 ## 需要进一步确认的点
-- 如果重试后仍然失败，需检查 CI runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon 健康状态（`systemctl status docker`、`docker info`、磁盘/inode 使用率）
-- 确认 `moby/buildkit:buildx-stable-1` 镜像在该节点上的本地缓存是否损坏（可尝试 `docker rmi moby/buildkit:buildx-stable-1` 后重试）
+- 确认 CI runner（`ecs-build-docker-x86-hk`）的 Docker daemon 版本及当前状态
+- 确认 runner 磁盘空间是否充足（BuildKit 容器创建失败可能与磁盘空间不足有关）
+- 确认同一时间是否有其他 buildx builder 实例在 runner 上运行导致冲突
+- 确认 `moby/buildkit:buildx-stable-1` 镜像在 CI 网络环境中是否可正常拉取且完整
