@@ -6,7 +6,7 @@
 - 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, repo.openeuler.org, dnf install, aarch64
 
 ## 根因分析
 
@@ -23,22 +23,26 @@
 ```
 
 ### 根因定位
-- 失败位置: `Dockerfile:6` — `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`
-- 失败原因: openEuler 24.03-LTS-SP4 的 aarch64 仓库镜像（`repo.openeuler.org`）在 HTTP/2 传输中多次出现流错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），导致多个 RPM 包（`git-core`、`gcc-c++`、`guile`）下载失败。其中 `git-core` 经重试后成功，`gcc-c++` 重试仍失败（2次），`guile` 耗尽所有镜像后最终失败，触发 `dnf install` 退出码 1。`guile` 是 `git` 的传递依赖，并非 PR 直接指定的包。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: 在 aarch64 runner 上执行 `dnf install` 从 `repo.openeuler.org` 下载 openEuler 24.03-LTS-SP4 的 RPM 包时，多个包（git-core、gcc-c++、guile）遭遇 HTTP/2 流错误（Curl error 92），其中 git-core 和 gcc-c++ 经重试后成功，guile 耗尽所有镜像重试后失败，导致整个 dnf install 事务回滚，构建中断。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。PR 仅新增了一个标准格式的 Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`）及配套元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake` 命令格式完全正确，与同项目其他 vvenc 版本的 Dockerfile（如 24.03-lts-sp3）一致。失败纯粹由 openEuler 24.03-LTS-SP4 aarch64 仓库镜像的HTTP/2 传输不稳定导致，属于 CI 基础设施问题。
+**与 PR 代码变更无关。** 该 PR 新增的 Dockerfile 在语法和构建逻辑上完全正确（`dnf install -y git gcc gcc-c++ make cmake` 是标准操作，与其他同类 Dockerfile 一致）。失败是 openEuler 24.03-LTS-SP4 官方仓库 `repo.openeuler.org` 的 HTTP/2 服务端在 aarch64 架构上对特定大文件（如 guile-6.3MB）传输不稳定所致，属于基础设施层面的网络/服务端问题。
 
-**关键证据**：同一个包（`gcc-c++`）在镜像重试后仍然失败（`stream 39` → `stream 51`），说明问题出在服务端 HTTP/2 连接层面，而非特定文件损坏或缺失。
+需要特别指出：CI 构建运行在 `ecs-build-docker-aarch64-04-sp`（aarch64 节点）上，此次失败仅发生在该架构。若 x86_64 构建也失败且报相同错误，则说明是仓库端的普遍问题；若 x86_64 成功，则问题局限于 aarch64 仓库或网络链路。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修改代码**。这是 openEuler 24.03-LTS-SP4 aarch64 仓库镜像的临时性基础设施故障（HTTP/2 流错误）。重新触发 CI 重试即可——若镜像服务恢复正常，构建应能通过。Dockerfile 本身无需任何修改。
+### 方向 1: 重试 CI 构建（置信度: 高）
+此类 HTTP/2 流错误通常为仓库服务端的瞬态问题，直接重新触发 CI 构建有很大概率通过。若重试 2-3 次后仍失败，则说明问题非瞬态，需考虑方向 2。
 
-### 方向 2（置信度: 低）
-若重试后仍然失败（说明 `guile` 包在上游仓库确实有下载问题），可在 `dnf install` 命令中添加 `--setopt=timeout=300` 或 `--setopt=minrate=0` 参数增加下载容错性。但这属于治标手段，不推荐优先采用。
+### 方向 2: 强制 dnf/libcurl 使用 HTTP/1.1（置信度: 中）
+若问题持续复现，可在 Dockerfile 的 `dnf install` 前添加环境变量或 dnf 配置，强制 libcurl 降级到 HTTP/1.1 协议，绕过 HTTP/2 流层面的不稳定性。此方案需要确认 openEuler 24.03-LTS-SP4 基础镜像中的 libcurl/dnf 版本是否支持该配置。
+
+### 方向 3: 增加 dnf 重试参数（置信度: 低）
+配置 dnf 的 `retries` 和 `timeout` 参数（如 `--setopt=retries=10`），增加对单包的下载重试次数，给予镜像重试更多机会。但此方向无法根除 HTTP/2 协议层的不稳定性，仅能提高容错。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP4 aarch64 仓库镜像（`repo.openeuler.org`）在构建时刻的 HTTP/2 服务端状态是否异常（需运维侧确认）
-- 确认同仓库的其他 aarch64 构建 job（如其他 SP4 镜像）在同一时间段是否也出现相同错误，以排除单包问题
+1. 该 PR 的 **x86_64 架构 CI job** 是否也失败？若 x86_64 成功，可确认问题仅影响 aarch64 仓库/网络链路。
+2. 同期其他使用 openEuler 24.03-LTS-SP4 基础镜像且包含 `dnf install` 的 PR（如 PR #2997、#3101 等）是否报相同错误？若有多例，说明是仓库端系统性问题，需联系 openEuler 基础设施团队排查 repo.openeuler.org 的 HTTP/2 服务端配置。
+3. `guile-5:2.2.7-6.oe2403sp4.aarch64.rpm` 文件大小为 6.3MB，而部分成功下载的包（如 gcc 30MB > guile 6.3MB）反而成功，说明问题不一定与文件大小直接关联，可能与特定 CDN 节点或连接复用有关。
