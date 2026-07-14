@@ -731,3 +731,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2894: `Others/bisheng-jdk/README.md` — CI 失败为 infra-error（`eulerpublisher` 包缺少 `distroless` 模块），与 P
+
+---
+
+## 模式40：Meson wrap文件hash不匹配
+
+**症状关键词**: Incorrect hash for source, subproject, meson.build, wayland-protocols, expected, actual
+
+**根因**: - 失败位置: Dockerfile:26-54（`RUN mkdir build && meson setup build ...` 步骤）
+- 失败原因: Mesa 25.3.4 源码包内 `subprojects/wayland-protocols.wrap` 文件记录的 wayland-protocols 1.41 SHA256 hash（`2786b6b..`）与从 GitLab 实际下载到的文件 hash（`a802b63..`）不匹配，meson 配置阶段拒绝继续运行。
+
+**修复方法**: Mesa 25.3.4 构建时 meson 子项目 wayland-protocols 下载 hash 不匹配，meson 配置阶段失败。
+
+**历史案例**:
+- PR #2962: `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile` — Mesa 25.3.4 构建时 meson 子项目 wayland-protocols 下载 hash 不匹配，meso
