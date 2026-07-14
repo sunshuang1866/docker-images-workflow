@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。该 CI 失败属于 infra-error（基础设施错误），根因在 `eulerpublisher/update/container/app/update.py` 的路径比对逻辑缺陷，与 PR #3153 的 README.md 文档变更无关。
+无需代码修改。CI 失败为基础设施层面的误报（infra-error），PR #3153 仅修改了仓库根目录的 README.md（文档更新），不涉及任何应用镜像变更。CI 的 appstore 预检工具错误地将根目录 README.md 纳入了应用镜像 README 路径校验范围，导致误报 FAILURE。
 
 ## 修改的文件
-无（未对源码仓库做任何代码修改）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 失败原因是 `eulerpublisher` 预检工具内部路径格式（`README.md` 无前导 `/`）与 appstore 规范要求的路径格式（`/README.md` 带前导 `/`）不一致，导致字符串比较失败。
-- PR #3153 为纯文档变更（仅更新 `README.md` 中基础镜像 Tags 列表），不涉及任何应用镜像构建文件，appstore 发布规范检查不应在此类 PR 上触发。
-- 该问题属于 CI 平台侧（`update.py`）的路径比对逻辑缺陷，应由 CI 平台侧修正，无需在本 PR 提交代码修复。
-- `eulerpublisher/update/container/app/update.py` 不在 `pr.changed_files` 列表内，且分析报告明确指出"无需在本 PR 提交代码修复"。
+根据 CI 分析报告，失败类型为 `infra-error`，根因是 CI appstore 预检工具（`eulerpublisher/update/container/app/update.py`）的检查逻辑缺陷——未排除仓库根目录级别的 README.md/README.en.md 文件，导致文档 PR 被错误拦截。PR 的文档修改内容本身正确，无需任何代码改动。
+
+应由 CI 维护者调整 appstore 预检逻辑，排除仓库根目录文档文件（路径为 `/README.md` 和 `/README.en.md`），不将其纳入 appstore 镜像 README 路径校验范围。
 
 ## 潜在风险
 无
