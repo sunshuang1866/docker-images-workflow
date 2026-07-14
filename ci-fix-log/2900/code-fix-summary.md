@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 基础设施问题（infra-error）。
+CI Runner 测试环境中缺少 `shunit2` Shell 单元测试框架，导致 [Check] 阶段测试失败。此问题与 PR 代码变更无关，属于 CI 基础设施问题（infra-error），无需修改任何源代码。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告明确指出：该失败与 PR 代码变更无关。Docker 镜像的 Build/Push 阶段均已完成并成功，失败仅发生在构建完成后的 `[Check]` 测试阶段。根因是 CI Runner 上缺少 `shunit2`（Shell 单元测试框架），导致 `eulerpublisher` 测试框架脚本 `common_funs.sh` 第 13 行无法 source 该文件。
+CI 分析报告明确指出：
+- Docker 镜像构建和推送均已成功完成
+- 失败发生在 CI 流水线的后置 [Check] 阶段，`common_funs.sh:13` 执行 `source shunit2` 时找不到该文件
+- 根因为 CI Runner 测试执行节点上缺少 `shunit2` 依赖，非 Dockerfile 或任何 PR 代码缺陷引起
 
-该问题需要在 CI Runner 环境层面修复（安装 `shunit2` 或修复 `eulerpublisher` 测试框架的依赖路径配置），不涉及任何源代码修改。
+此问题应由 CI/基础设施团队在 Runner 测试节点上安装 `shunit2` 解决，无需修改 PR 中任何文件。
 
 ## 潜在风险
 无
