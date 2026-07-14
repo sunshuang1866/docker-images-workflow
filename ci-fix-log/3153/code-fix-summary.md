@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需修改 PR 代码。`eulerpublisher` appstore 预检工具错误地对根级文档文件 `README.md` 触发了仅适用于应用镜像目录的路径规范检查。
+无需代码修改。CI 失败是由 appstore 发布规范预检工具（eulerpublisher）误报导致，该工具对根目录级纯文档变更（`README.md`）执行了镜像发布路径校验，属于 CI 基础设施误报（infra-error）。
 
 ## 修改的文件
-无代码修改。README.md 内容正确，无需变更。
+无。PR 仅修改了 `README.md`（根目录文档），内容为更新基础镜像可用 tags 列表，属于纯文档变更，不涉及任何镜像构建或发布，不应受 appstore 路径校验约束。
 
 ## 修复逻辑
-CI 失败由 `eulerpublisher` 预检工具的路径校验逻辑缺陷引起，该工具将根级 `README.md` 误判为需要遵循 `{image-version}/{os-version}/` 层级结构校验的应用镜像文件。PR #3153 仅更新了基础镜像 Tags 列表文档（将 latest 从 `24.03-lts-sp2` 更新为 `24.03-lts-sp4`，补充 `24.03-lts-sp3`、`25.09` 等条目），变更内容正确且不涉及任何 Dockerfile 或镜像构建逻辑。真正的修复需要在 `eulerpublisher/update/container/app/update.py` 中排除根级纯文档文件（`README.md`、`README.en.md` 等），该文件不在本次 PR 的可修改范围内。
+根据 CI 失败分析报告，失败根因位于 `eulerpublisher/update/container/app/update.py:273`，eulerpublisher 的路径校验逻辑未正确处理根目录级文档文件变更的场景。本 PR 变更内容（`README.md` / `README.en.md` 中的 tags 列表更新）完全正确，CI 检查工具不应将根目录文档纳入 appstore 镜像发布路径校验范围。此问题需由 CI 流水线维护方修复 eulerpublisher 工具或调整触发条件，PR 代码本身无需任何修改。
 
 ## 潜在风险
-无。README.md 内容变更正确、格式合法，与应用镜像构建逻辑完全隔离。建议 CI 流水线后续加入 `paths-ignore` 或类似机制，对仅修改根级文档文件的 PR 跳过 appstore 预检。
+无。`README.md` 内容变更仅限于更新文档中的镜像 tags 列表，不影响任何构建或发布逻辑。
