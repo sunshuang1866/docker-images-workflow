@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 BuildKit 基础设施故障（`graceful_stop`），与 PR 代码变更无关。
+无需代码修改——CI 失败属于基础设施问题（BuildKit 构建器被服务端主动关闭）。
 
 ## 修改的文件
-无（infra-error，不需要代码修改）
+无
 
 ## 修复逻辑
-CI 构建在执行 `dnf install` 下载系统包时（耗时约 39 秒），BuildKit daemon 发出 `graceful_stop`（GOAWAY），主动终止了构建会话，导致 `no builder found` 和 `EOF` 错误。这是 CI runner 节点上 BuildKit daemon 被外部信号终止导致的偶发性基础设施问题，与 PR 新增的 Dockerfile 及其内容无关。Dockerfile 经检查无语法或逻辑错误。
-
-建议重新触发 CI 构建（retry），大概率可通过。如重试后仍失败，需排查 CI runner 节点上 BuildKit daemon 的运行状态。
+CI 分析报告明确指出该失败为 **infra-error**：BuildKit 构建器 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据期间被 CI 节点服务端以 `graceful_stop` 方式主动关闭（HTTP/2 GOAWAY），导致 `no builder found` 错误。PR 新增的 Dockerfile 语法正确，依赖包均为 openEuler 仓库标准包名，失败与代码变更无关。应重新触发 CI 或排查 CI 节点资源状态。
 
 ## 潜在风险
 无
