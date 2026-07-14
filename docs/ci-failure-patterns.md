@@ -701,3 +701,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2941: `Others/npm/11.13.0/24.03-lts-sp4/Dockerfile` — `install.sh` 脚本无法移除 dnf 安装的 RPM 包管理型 npm，导致 Docker 构建在 "remo
+
+---
+
+## 模式38：ActiveMQ 下载源 404
+
+**症状关键词**: dlcdn.apache.org, 404 Not Found, activemq, wget, exit code: 8
+
+**根因**: - 失败位置: `Others/activemq/6.1.7/24.03-lts-sp4/Dockerfile:28`
+- 失败原因: Dockerfile 中 ActiveMQ 6.1.7 的下载源 `dlcdn.apache.org/activemq/6.1.7/apache-activemq-6.1.7-bin.tar.gz` 返回 HTTP 404。`dlcdn.apache.org` 是 Apache 的 CDN 分发节点，通常只保留最新版本，不保证历史版本的可用性（与模式01中 Maven 的问题同根）。此外，URL 中存在双斜杠拼写错误（`//activemq`），虽非 404 
+
+**修复方法**: ActiveMQ 6.1.7 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 下载 URL 返回 HTTP 404，构建失败。
+
+**历史案例**:
+- PR #2944: `Others/activemq/6.1.7/24.03-lts-sp4/Dockerfile:28` — ActiveMQ 6.1.7 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 下载 UR
