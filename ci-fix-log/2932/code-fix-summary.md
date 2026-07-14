@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败属于基础设施问题（infra-error）。
+无需代码修改 — CI 失败为 Docker BuildKit 基础设施瞬时故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-CI 失败发生在 BuildKit 引导阶段（`[internal] booting buildkit`），Docker daemon 报告 `Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`，此时尚未开始解析或执行 Dockerfile。PR 新增的 Dockerfile 及元数据文件（README.md、image-info.yml、meta.yml）与此失败无关。
+CI 分析报告中明确指出该失败属于 `infra-error`，置信度高。失败发生在 Docker BuildKit builder 实例初始化阶段（`moby/buildkit:buildx-stable-1`），Docker daemon 报错 "Could not find the file / in container"，表明 runner 节点 `ecs-build-docker-x86-hk` 上的 Docker 存储驱动或磁盘文件系统出现瞬时异常，导致 buildkit 容器根文件系统不可访问。Docker 镜像的 `docker buildx build` 实际构建根本没有启动，PR 的 Dockerfile、README、YAML 文件内容变更均不可能导致此问题。
 
-根据分析报告建议，应通过以下 CI 基础设施操作解决：
-1. 在 CI runner 上执行 `docker buildx prune -f` 清理残留 builder 实例后重试
-2. 检查 runner 磁盘空间是否充足
-3. 确认 `moby/buildkit:buildx-stable-1` 镜像可正常拉取
+根据报告建议，应直接触发 CI 重试（re-run / retrigger），无需对 PR 代码做任何修改。多次重试仍然失败时，需检查 runner 节点的 Docker 存储驱动状态和磁盘健康度。
 
 ## 潜在风险
-无
+无风险 — 本次未修改任何代码。
