@@ -1,21 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。此 CI 失败为 `infra-error`，根因是 CI 基础设施中 `eulerpublisher` 包内置的 `bwa_test.sh` 脚本使用了 Windows 风格的 CRLF 行尾，导致 `#!/bin/sh\r` 解释器无法被识别。
+无需代码修改。CI 失败为基础设施问题（infra-error），非本次 PR 代码引入。
 
 ## 修改的文件
-无（infra-error，不在 PR 代码范围内）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- Docker 镜像构建（build + push）已完全成功
-- 失败仅发生在 CI 的 `[Check]` 测试阶段，触发位置为 `/usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh`
-- 失败原因为该测试脚本携带 CRLF 行尾（`^M`），导致 shebang 行解析异常
-- **与 PR 变更无关**：PR 仅新增了 Dockerfile、README.md 条目、image-info.yml 和 meta.yml，未修改任何 CI 测试脚本
+CI 失败分析报告明确判定为 **infra-error**（置信度：高）。失败发生在 eulerpublisher CI 框架的 `[Check]` 阶段，根因是 eulerpublisher 软件包中的 `bwa_test.sh` 测试脚本包含 Windows 风格 CRLF（`\r\n`）换行符，导致 shebang 行 `#!/bin/sh` 被内核解析为 `#!/bin/sh\r`，无法找到合法的解释器。
 
-此问题需要通过以下方式之一解决（需 CI 运维人员或 eulerpublisher 包维护者介入）：
-1. 在 CI runner 环境上对 `bwa_test.sh` 执行 `dos2unix` 或 `sed -i 's/\r$//'` 修复行尾
-2. 联系 eulerpublisher 包的维护者，在发布时确保所有测试脚本使用 Unix LF 行尾
+本次 PR 的 Dockerfile 构建完全成功（编译、安装、导出、推送均正常），失败与 PR 代码变更无关。修复需要联系 CI 基础设施团队在 eulerpublisher 源码仓库中将 `tests/container/app/bwa_test.sh` 的行尾从 CRLF 转换为 LF（使用 `dos2unix` 或 Git `core.autocrlf` 配置预防），并在 CI 节点上更新 eulerpublisher 包或重新部署。
+
+根据工作流程规范，对于 infra-error 类型的失败，不应强行修改源码代码。
 
 ## 潜在风险
 无
