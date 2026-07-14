@@ -684,3 +684,20 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #3139: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile` — 将 Dockerfile 中第28-35行的单体 RUN 指令（串联 npm 构建 + pip 安装 5 个子步骤）拆分
+
+---
+
+## 模式37：系统包管理器冲突
+
+**症状关键词**: removing existing npm, failed!, install.sh, dnf-installed npm
+
+**根因**: - 失败位置: `Others/npm/11.13.0/24.03-lts-sp4/Dockerfile:11`
+- 失败原因: `npmjs.com/install.sh` 脚本尝试移除系统中已有的 npm（由 `dnf install nodejs` 安装的 RPM 版本 10.8.2），但该 npm 是由系统包管理器（RPM/dnf）管理的文件，install.sh 无权或无法正确移除这些文件，导致 "removing existing npm" 步骤失败。
+
+构建流程为：
+1. `dnf install nodejs -y` 从 openEuler 仓库安装了 nodejs 20.18
+
+**修复方法**: `install.sh` 脚本无法移除 dnf 安装的 RPM 包管理型 npm，导致 Docker 构建在 "removing existing npm" 步骤失败。
+
+**历史案例**:
+- PR #2941: `Others/npm/11.13.0/24.03-lts-sp4/Dockerfile` — `install.sh` 脚本无法移除 dnf 安装的 RPM 包管理型 npm，导致 Docker 构建在 "remo
