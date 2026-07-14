@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修改。CI 失败为基础设施问题（infra-error）：BuildKit builder 启动时 Docker daemon 无法访问容器内 `/` 路径，导致构建步骤从未开始执行。与 PR 代码变更无关。
+无需代码修复。CI 失败为 Docker buildx 基础设施临时故障，与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认此次失败类型为 `infra-error`，根因是 Docker daemon / BuildKit `docker-container` 驱动在创建容器 `buildx_buildkit_euler_builder_20260709_2057000` 时出现瞬时故障（`Could not find the file /`）。PR 新增的 glibc 2.42 openEuler 24.03-LTS-SP4 Dockerfile 及元数据文件均无代码问题。按分析报告建议，重试 CI 构建即可。
+CI 分析报告判断失败类型为 `infra-error`，置信度高。失败发生在 Docker buildx buildkit 容器创建阶段（`Could not find the file / in container`），此时尚未执行任何 Dockerfile 构建指令，属于 Docker daemon / containerd 运行时层面的基础设施问题。PR 变更仅涉及 glibc Dockerfile 及元数据文件，与此错误无因果关联。按照任务指令，`infra-error` 类型失败无需代码修改，应由 CI 运维团队排查 runner 节点或触发重试。
 
 ## 潜在风险
 无
