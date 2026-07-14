@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, dnf install, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: 软件源HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,20 +22,16 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` RUN 指令）
-- 失败原因: CI 构建环境从 openEuler 24.03-LTS-SP4 仓库 (`repo.****.org`) 下载 RPM 包时，多个包（`cmake-data`、`git-core`、`gcc-c++`）的 HTTP/2 传输流被异常关闭（`Curl error (92): Stream error in the HTTP/2 framing layer, INTERNAL_ERROR`），`gcc-c++` 重试后所有镜像均耗尽，最终无法完成下载。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件源镜像在 HTTP/2 传输层出现多次流中断错误（Curl error 92），导致 `gcc-c++`（13 MB）等 RPM 包下载失败并耗尽所有镜像重试。`cmake-data` 和 `git-core` 虽也遇到同类错误但重试后成功，`gcc-c++` 因文件较大重试两次后所有镜像均不可用。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增了一个 Dockerfile（`Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`）及相关元数据文件，`dnf install` 中列出的包名均正确且是构建 GrADS 2.2.3 所需的合理依赖。失败的直接原因是 openEuler 24.03-LTS-SP4 仓库镜像在构建时的 HTTP/2 连接层存在间歇性故障，导致大文件（`gcc-c++` 13MB、`git-core` 11MB、`cmake-data` 2.1MB）下载过程中流被异常中断。小文件（如 `acl` 51kB、`automake` 462kB 等）下载均成功。
+**与 PR 代码变更无关。** PR 仅新增了 grads 的 Dockerfile 及配套元数据文件（Dockerfile、README.md、image-info.yml、meta.yml），Dockerfile 中的 `dnf install` 命令语法和包名均正确。失败原因为 CI 构建时 openEuler 24.03-LTS-SP4 软件源镜像出现临时的 HTTP/2 传输层故障，属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试即可。** 这是 CI 基础设施/仓库网络的暂时性问题，Dockerfile 本身无需修改。等待仓库镜像 HTTP/2 问题恢复后重新触发 CI 构建即可通过。
-
-### 方向 2（置信度: 低）
-如果此类 HTTP/2 错误频繁复现，可在 Dockerfile 的 `dnf install` 命令前添加配置禁用 HTTP/2 回退到 HTTP/1.1（如 `echo "http2=false" >> /etc/dnf/dnf.conf`），或为 dnf 添加 `--setopt=retries=10` 增加重试次数。但这属于绕过基础设施问题，不推荐作为首选方案。
+**无需代码修复。** 这是 openEuler 软件源镜像的临时网络故障（HTTP/2 stream INTERNAL_ERROR），建议触发 CI 重试（retrigger）即可。`gcc-c++` 包在两次重试后镜像耗尽，但该类 HTTP/2 流错误通常为瞬态问题，下一次构建时大概率恢复正常。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像 (`repo.****.org`) 在构建时段是否存在已知的 HTTP/2 服务问题
-- 确认该错误是否为偶发（可重试通过）还是高概率复现（需调整连接策略）
+无。日志证据充分，根因明确为软件源 HTTP/2 传输层错误，与 PR 代码无关。
