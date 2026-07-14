@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 镜像源HTTP/2传输错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, [MIRROR], [FAILED], No more mirrors to try, dnf install
+- 新模式标题: RPM 源 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,20 +22,17 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 软件源镜像服务器发生 HTTP/2 协议层流错误（Curl error 92: `INTERNAL_ERROR`），导致 `cmake-data`、`git-core`、`gcc-c++` 等多个 RPM 包的下载流异常中断。其中 `cmake-data` 和 `git-core` 经重试后下载成功，但 `gcc-c++-12.3.1-110` 在所有镜像重试后仍然失败（`No more mirrors to try`），最终 `dnf install` 因无法获取该包而以 exit code 1 失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 软件源（`repo.****.org`）在 Docker 构建期间出现 HTTP/2 传输层错误（Curl error 92），多个 RPM 包（cmake-data、git-core、gcc-c++）下载时 HTTP/2 流异常中断。其中 `gcc-c++` 包经多次重试仍失败，DNF 耗尽所有镜像源后报错退出。
 
 ### 与 PR 变更的关联
-**与 PR 改动无关。** 此次 PR 仅新增了一个 Dockerfile（`Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`），其 `dnf install` 命令格式和包列表与同类 openEuler 24.03-lts-sp4 的 Dockerfile 完全一致，语法正确。失败发生在 `dnf` 从远程仓库下载 RPM 包的网络传输层，属于 openEuler 软件源镜像服务器端的临时性 HTTP/2 基础设施故障，PR 代码本身没有引入任何问题。
+**无关。** 该 PR 仅新增了一个标准的 GrADS Dockerfile，其 `dnf install` 命令中列出的全部是 openEuler 24.03-LTS-SP4 官方仓库中的常规软件包，Dockerfile 本身不存在语法错误、包名拼写错误或依赖缺失。失败完全由 CI 构建时 RPM 软件源发生 HTTP/2 传输故障所致，属于 CI 基础设施临时性问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 低 — 仅缓解手段）
-**重试构建**。此失败属于瞬时的 CI 基础设施/镜像源网络波动问题，并非代码错误。在实际操作中，重新触发 CI 构建大概率可以通过（待镜像源 HTTP/2 服务恢复后 `dnf` 可正常下载）。Code Fixer 无需处理此问题。
-
-### 方向 2（置信度: 低）
-若该问题反复出现，可从 CI 侧考虑：在 `dnf install` 前针对 `gcc-c++` 等大包单独增加重试次数（如 `dnf install -y --setopt=retries=10 ...`），或在 Dockerfile 中预先配置备用镜像源，降低单次 HTTP/2 流错误导致失败的概率。但这类优化属于 CI 基础设施层面的改进，不应在本次 PR 中处理。
+### 方向 1（置信度: 高）
+等待 CI 基础设施恢复后重新触发构建。该失败是 openEuler 官方 RPM 软件源（`repo.****.org`）的 HTTP/2 传输层临时故障，与 PR 代码变更无关。通常此类问题在数小时至一天内由镜像站运维方自行恢复。直接 retrigger CI 即可验证。
 
 ## 需要进一步确认的点
-- 确认 `repo.****.org` 软件源的 HTTP/2 服务是否已恢复正常（可通过 `curl -I` 测试同一 URL 可达性）。
-- 若多次重建后仍然失败，需排查 repo 源端是否存在持续性的 HTTP/2 协议问题，或该特定 RPM 包（`gcc-c++-12.3.1-110.oe2403sp4`）是否在源上已损坏/缺失。
+- 确认 `repo.****.org` 的 openEuler 24.03-LTS-SP4 软件源当前是否已恢复正常（可在构建节点上手动 `curl` 测试目标 RPM 包可达性）。
+- 如果多次 retrigger 均在同一软件源上失败，可考虑在 Dockerfile 中切换到备用镜像源或调整 DNF 的 HTTP/2 相关配置（如禁用 HTTP/2）。
