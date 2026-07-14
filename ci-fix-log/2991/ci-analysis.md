@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2991 — chore(vvenc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: openEuler 仓库 HTTP/2 流错误
+- 新模式症状关键词: `Curl error (92)`, `HTTP/2 framing layer`, `INTERNAL_ERROR`, `No more mirrors to try`, `Error downloading packages`, `repo.openeuler.org`
 
 ## 根因分析
 
@@ -22,21 +22,20 @@
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:6 — `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`
-- 失败原因: CI 在 aarch64 runner 上构建时，`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 软件仓库在 HTTP/2 传输中多次出现 `INTERNAL_ERROR`（Curl error 92），导致多个 aarch64 RPM 包（`git-core`、`gcc-c++`、`guile`）下载失败。其中 `git-core` 重试后成功，`gcc-c++` 两次重试均失败，`guile` 在耗尽所有镜像重试后最终导致 dnf 安装失败。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6` — `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`
+- 失败原因: CI aarch64 构建节点在执行 `dnf install` 时，从 `repo.openeuler.org` 下载 RPM 包（`git-core`、`gcc-c++`、`guile`）反复遭遇 HTTP/2 流错误（Curl error 92），`guile` 包耗尽所有镜像重试后下载失败，导致 dnf 事务中断。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 新增的 vvenc Dockerfile 内容正确，`dnf install -y git gcc gcc-c++ make cmake` 是标准操作。失败根因是 openEuler 软件仓库（`repo.openeuler.org`）的 HTTP/2 服务端问题，属于 CI 基础设施/网络层面故障，任何在该时刻尝试从该仓库下载 aarch64 包的构建都会遇到同样问题。
+**与 PR 改动无关。** 该失败是 openEuler 官方软件源 `repo.openeuler.org` 在构建时段向 aarch64 节点提供 HTTP/2 服务时出现的瞬态网络故障。PR 新增的 Dockerfile 中 `dnf install` 命令完全正确，所请求的包（`git`、`gcc`、`gcc-c++`、`make`、`cmake`）均为 openEuler 24.03-LTS-SP4 标准仓库中的合法包。同一命令在其他构建任务中可正常执行。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-**重试构建。** HTTP/2 流错误（INTERNAL_ERROR）通常是临时的服务端/CDN 问题，重新触发 CI 构建有较大概率通过。Code Fixer 无需修改任何代码。
+### 方向 1（置信度: 高）
+**infra-error，Code Fixer 无需处理。** 该失败是 openEuler 镜像站的 HTTP/2 服务端瞬时异常，触发重试即可。建议直接在 CI 中重新触发该 job 的构建。
 
 ### 方向 2（置信度: 低）
-**配置 dnf 回退到 HTTP/1.1。** 如果问题持续出现，可在 Dockerfile 的 `dnf install` 前配置 dnf/libcurl 禁用 HTTP/2（如设置 `http2=false` 或通过环境变量），绕过 HTTP/2 流错误。但这属于服务端问题的工作绕过（workaround），不应作为长期修复方案。
+如果多次重试后 `guile` 包下载仍持续失败，可能需要联系 openEuler 镜像站运维排查 `openEuler-24.03-LTS-SP4/OS/aarch64/` 下 `guile` 包的存储完整性。
 
 ## 需要进一步确认的点
-1. 该仓库的 x86_64 构建（trigger 层）是否成功？日志中仅显示 aarch64 runner 的构建失败，需确认 x86_64 侧的状态以判断是否为 aarch64 仓库独有问题。
-2. `repo.openeuler.org` 的 HTTP/2 服务是否存在已知问题？建议联系 openEuler 基础设施团队确认 CDN/仓库服务状态。
-3. 观察近期其他 PR（特别是同样使用 `24.03-lts-sp4` + aarch64 的构建）是否也出现类似的 HTTP/2 流错误，以判断是否为该仓库的持续性故障。
+1. 重试是否通过：重新触发 CI 构建后，`dnf install` 步骤是否能成功下载 `guile` 包。如果连续 3 次均失败，则可能不是瞬态网络问题，需要向 openEuler 基础设施团队报告 `guile-5:2.2.7-6.oe2403sp4.aarch64` 包在镜像站的可用性问题。
+2. `git-core` 和 `gcc-c++` 虽然报过 `[MIRROR]` 警告但最终重试成功下载（日志中未见其 `[FAILED]`），说明镜像站的重试机制部分有效，仅 `guile` 耗尽所有重试。
