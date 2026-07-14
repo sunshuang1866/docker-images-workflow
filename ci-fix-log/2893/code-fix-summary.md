@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于基础设施问题（infra-error）：CI aarch64 runner 的 `eulerpublisher` 测试环境中缺少 `shunit2` Shell 测试框架，导致 `common_funs.sh` 中 `source shunit2` 报 "file not found"。
+CI 基础设施错误：测试环境中缺少 `shunit2` shell 单元测试框架，导致 eulerpublisher 的 `[Check]` 阶段失败。此问题与 PR #2893 的代码变更无关，无需对源码做任何修改。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-本次 PR 仅新增 bind9 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配置文件，构建阶段（`meson setup`、`meson compile`、`meson install`）和镜像推送阶段均已成功。失败发生在 CI 自身 Check 阶段的 `eulerpublisher` 测试框架内部，与 PR 变更完全无关。属于 CI runner 环境依赖缺失问题，需联系 CI 运维团队在 aarch64 runner 上安装 `shunit2`。
+CI 分析报告明确指出失败类型为 `infra-error`，根因是 CI runner 环境中未安装 `shunit2` 包（`common_funs.sh` 第 13 行 `. shunit2` 找不到该文件）。PR 的 Docker 镜像构建和推送阶段均已完成且无错误，失败仅发生在 eulerpublisher 测试框架的 `[Check]` 阶段。修复方向为 CI 基础设施维护工作（`yum install -y shunit2`），不涉及 PR 代码变更。
 
 ## 潜在风险
 无
