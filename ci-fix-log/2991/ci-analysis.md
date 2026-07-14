@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: 仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, repo.openeuler.org, dnf install, No more mirrors to try
 
 ## 根因分析
 
@@ -24,21 +24,19 @@
 
 ### 根因定位
 - 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
-- 失败原因: 构建在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上执行 `dnf install` 时，`repo.openeuler.org` 的 24.03-LTS-SP4 aarch64 仓库发生 HTTP/2 协议层流错误（Curl error 92: `INTERNAL_ERROR`）。多个 RPM 包（git-core、gcc-c++、guile）均遭遇此错误；git-core 和 gcc-c++ 在重试后下载成功，`guile` 包因所有镜像均已尝试过而最终失败，导致 `dnf install` 以 exit code 1 退出。
+- 失败原因: aarch64 构建节点在执行 `dnf install -y git gcc gcc-c++ make cmake` 时，从 `repo.openeuler.org` 下载 RPM 包（`git-core`、`gcc-c++`、`guile`）反复遭遇 HTTP/2 流错误（Curl error 92: Stream error in the HTTP/2 framing layer），最终 `guile` 包耗尽所有镜像重试后下载失败，导致整个 dnf 命令退出码为 1。该错误与 PR 新增的 Dockerfile 代码无关，属于 openEuler 24.03-LTS-SP4 aarch64 仓库的服务器端 HTTP/2 协议层瞬时故障。
 
 ### 与 PR 变更的关联
-**与 PR 代码无关。** 该 PR 新增的 Dockerfile 内容完全正确——基于 `openeuler:24.03-lts-sp4` 基础镜像，通过 `dnf install` 安装标准编译工具链（git、gcc、gcc-c++、make、cmake）。失败根因是 openEuler 官方 RPM 仓库 `repo.openeuler.org` 的 HTTP/2 服务在该时间窗口内不稳定，属于 CI 基础设施层面的网络问题。PR 的其他变更（README.md、image-info.yml、meta.yml）仅为文档和元数据补充，不涉及任何构建逻辑。
+PR 新增了一个标准的 vvenc Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`），其 `dnf install` 命令本身语法正确、包名无误。失败发生在下游仓库包下载阶段，属于 openEuler 官方镜像仓库 `repo.openeuler.org` 的 HTTP/2 服务端瞬时异常，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，直接触发重试即可。** 这是 `repo.openeuler.org` RPM 仓库的瞬时 HTTP/2 协议层故障，属于不可控的基础设施问题。在 CI 系统中对失败的 aarch64 build job 进行 re-run，大概率可成功通过。多个包（git-core、gcc-c++）在重试后均下载成功，说明该仓库并非完全不可用，只是 HTTP/2 流偶发中断。
+触发 CI 重试（retrigger / re-run）。该失败为仓库服务器端 HTTP/2 流瞬时中断导致，属于基础设施问题，不是代码缺陷。重试大概率可以通过（日志显示部分受影响的包如 `git-core` 已在后续重试中下载成功，`guile` 只是恰好在一轮重试中耗尽尝试次数）。
 
-### 方向 2（置信度: 中）
-如果方向 1 多次重试仍失败，可检查 `repo.openeuler.org` 的 aarch64 仓库服务状态是否已恢复。若仓库持续不可用，需联系 openEuler 基础设施团队排查 HTTP/2 后端服务问题。
+### 方向 2（置信度: 低）
+若重试持续失败，可在 Dockerfile 的 `dnf install` 前设置环境变量 `RUST_CURL_HTTP2=0` 或调整 dnf 的 HTTP/2 行为（如 `echo "http2=false" >> /etc/dnf/dnf.conf`）强制使用 HTTP/1.1 绕过 HTTP/2 流层错误。但目前无证据表明这是持续性问题，不建议提前应用此修改。
 
 ## 需要进一步确认的点
-（无——日志直接指向网络层错误，根因明确。）
-
-## 修复验证要求
-无。本次故障与 PR 代码变更无关，不需要修改任何源文件或正则表达式。
+- 确认 openEuler 24.03-LTS-SP4 aarch64 仓库 `repo.openeuler.org` 的 HTTP/2 服务是否已恢复稳定（可通过手动 `curl -I --http2 https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/` 验证）。
+- 如果重试仍然失败且怀疑是 SP4 仓库的持久性问题，需联系 openEuler 基础设施团队排查 CDN/负载均衡器的 HTTP/2 配置。
