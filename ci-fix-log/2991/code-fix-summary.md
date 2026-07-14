@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。本次 CI 失败为 infra-error（基础设施问题），由 `repo.openeuler.org` 仓库服务器的 HTTP/2 流协议瞬时故障导致，与 PR #2991 的代码变更无关。
+无需修改代码。CI 失败为 **infra-error**：openEuler 24.03-LTS-SP4 aarch64 仓库镜像（`repo.openeuler.org`）在 HTTP/2 传输中多次出现流错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），导致 `guile` 等 RPM 包下载失败。这是 CI 基础设施临时性故障，与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-CI 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 仓库服务器多次出现 HTTP/2 流错误（`INTERNAL_ERROR (err 2)`），导致 `git-core`、`gcc-c++`、`guile` 三个 RPM 包下载失败。其中 `guile` 包在耗尽所有镜像重试后仍未成功，`dnf` 最终以 exit code 1 失败。PR 仅新增了标准格式的 Dockerfile，语法和逻辑正确，失败完全由仓库服务器端瞬时故障引起。
-
-**建议操作**：对该 PR 的 CI 构建执行 rerun / rebuild，通常重试即可成功。若多次重试仍失败，需联系 openEuler 基础设施团队排查 `repo.openeuler.org` 的 HTTP/2 服务端问题。
+分析报告已确认：
+- 失败位置在 `Dockerfile:6` 的 `dnf install -y git gcc gcc-c++ make cmake`，该命令格式完全正确，与同项目其他 vvenc 版本 Dockerfile（如 24.03-lts-sp3）一致。
+- 失败根因是 openEuler 上游镜像站的 HTTP/2 流不稳定（同一个包 `gcc-c++` 在不同 stream 上重试后仍然失败），属于开源基础设施的临时性问题。
+- 建议重新触发 CI 重试，等待镜像服务恢复正常即可。
 
 ## 潜在风险
 无
