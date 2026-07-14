@@ -1,19 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败属于基础设施问题（infra-error），非代码缺陷，无需进行代码修改。
+无需代码修复。CI 失败由 openEuler 24.03-LTS-SP4 仓库镜像的 HTTP/2 流传输临时故障导致（Curl error 92），属于基础设施问题，与 PR 代码变更无关。
 
 ## 修改的文件
-无。该失败是 openEuler 24.03-LTS-SP4 仓库镜像 HTTP/2 协议异常导致的临时性下载失败，与 PR 代码变更无关。
+无。该失败类型为 infra-error，不需要对任何源文件进行修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出：
-- 失败类型为 `infra-error`
-- 根因是 `dnf install` 从 openEuler 24.03-LTS-SP4 软件仓库下载 RPM 包时，镜像站返回 HTTP/2 流层错误（Curl error 92: INTERNAL_ERROR），属于临时性基础设施问题
-- 报告确认"失败与 PR 的代码变更**无关**"
-- 报告推荐方向为"Retry CI 构建"，在基础设施恢复后重试即可通过
+CI 分析报告明确指出：
+- 失败类型为 **infra-error**（基础设施错误），置信度高
+- 根因：openEuler 24.03-LTS-SP4 仓库镜像在 CI 构建期间出现 HTTP/2 协议层问题，多个 RPM 包（gcc-gfortran、glibc-devel、guile、gcc）下载时遭遇 `Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`，重试耗尽所有镜像后 dnf 安装失败
+- PR 新增的 Dockerfile 语法正确、结构合理，与失败无关
 
-PR 仅新增了一个 Dockerfile 及相关元数据文件，Dockerfile 内容与同项目 SP3 版本一致，不存在代码层面的问题。
+建议操作：重新触发 CI 构建（retry），等待仓库镜像恢复后构建即可通过。
 
 ## 潜在风险
-无。本次无需修改任何代码，仅需等待镜像站服务恢复后重试 CI 构建。
+无
