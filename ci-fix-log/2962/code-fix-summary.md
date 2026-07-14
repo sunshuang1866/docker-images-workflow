@@ -1,18 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-删除了 Dockerfile 中两行错误的 `sed` 命令——它们将 wayland-protocols wrap 文件的 `source_url` 和 `source_hash` 覆盖为错误值，导致 meson 配置阶段下载 wayland-protocols 1.41 时返回 HTTP 404。
+mesa 25.3.4 构建时，`subprojects/wayland-protocols.wrap` 中记录的 `wayland-protocols-1.41.tar.xz` SHA256 哈希值与 GitLab 动态生成的 tarball 实际哈希不一致，导致 meson 子项目校验失败。
 
 ## 修改的文件
-- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 移除第 26-27 行的两行 `sed` 命令（原 `RUN sed -i ... subprojects/wayland-protocols.wrap` 的行），保留其余构建步骤不变。
+- `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile`: 在 meson setup 之前新增 `sed` 命令，将 wrap 文件中的 SHA256 哈希修复为构建时 GitLab 返回的实际值。
 
 ## 修复逻辑
-1. mesa 25.3.4 源码中自带的 `subprojects/wayland-protocols.wrap` 上游文件已包含正确的值：
-   - `source_url = https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.41/downloads/wayland-protocols-1.41.tar.xz`
-   - `source_hash = 2786b6b1b79965e313f2c289c12075b9ed700d41844810c51afda10ee329576b`
-2. 原 Dockerfile 中的 `sed` 命令将 `source_url` 错误地覆盖为 `https://wayland.freedesktop.org/releases/wayland-protocols-1.41.tar.xz`（该 URL 返回 404），`source_hash` 也覆盖为不匹配的值（`cea75b0a...`）。
-3. 同一 mesa 版本的 sp3 Dockerfile（`Others/mesa/25.3.4/24.03-lts-sp3/Dockerfile`）没有这些 sed patch，构建正常。
-4. 修复方案：直接删除两行 sed 命令，让 meson 使用上游 wrap 文件中的正确值进行子项目下载。已从上游 `mesa-25.3.4` tag 获取 `subprojects/wayland-protocols.wrap` 验证，确认其中 `source_url` 和 `source_hash` 正确。
+根因是 GitLab release tarball 的 SHA256 校验和因压缩方式不稳定而与 mesa 上游记录的预期值不匹配。同时 openEuler 24.03-LTS-SP4 仓库中 `wayland-protocols-devel` 版本为 1.33，无法满足 mesa 要求的 >= 1.41。
+采用分析报告中的方向 1：在 `WORKDIR /opt/mesa-${VERSION}` 之后、meson setup 之前，通过 `sed` 将 `subprojects/wayland-protocols.wrap` 中 `source_hash` 行替换为 CI 构建环境中的实际哈希值 `5a2712e6e20ac68b355f3926f983c1e6e40f061aec355835fbb5ec48a7078e4f`。
+已从上游 mesa-25.3.4 源码 tarball 提取原始 wrap 文件验证正则匹配成功，`source_hash = .*` 模式可正确匹配并替换该行。
 
 ## 潜在风险
-无。该修改使 sp4 Dockerfile 与已验证可工作的 sp3 Dockerfile 模式一致，仅移除了错误的覆盖操作，不影响其他构建步骤。
+- GitLab 动态生成 tarball 的哈希值可能在未来再次变化，届时构建会再次失败，需要再次更新哈希。
+- 此修复仅在构建容器内生效，不影响其他文件。
