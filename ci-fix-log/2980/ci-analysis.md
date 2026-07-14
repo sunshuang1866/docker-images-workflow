@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: 镜像站HTTP/2传输错误
+- 新模式症状关键词: Curl error (92), Stream error, HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
 
 ## 根因分析
 
@@ -19,25 +19,21 @@
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
 #7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
+#7 ERROR: process "/bin/sh -c dnf install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`:6 (`RUN dnf install -y ...`)
-- 失败原因: openEuler 24.03-LTS-SP4 软件包仓库镜像服务器在 HTTP/2 协议层发生流错误（Curl error 92），dns 在重试多个镜像后仍无法下载 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 包，导致构建失败。其他两个包（cmake-data、git-core）同样遭遇 HTTP/2 流错误但重试成功，仅 gcc-c++ 重试耗尽所有镜像后失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: CI 构建环境中 `dnf install` 从 openEuler 24.03-LTS-SP4 镜像站下载 RPM 包时，多次出现 HTTP/2 流帧错误（Curl error 92: `HTTP/2 stream was not closed cleanly: INTERNAL_ERROR`）。其中 `cmake-data` 和 `git-core` 在重试后下载成功，但 `gcc-c++`（13 MB，相对较大的包）两次重试均失败，最终 dnf 耗尽所有镜像源（`No more mirrors to try`），构建中止。该错误与 PR 代码变更无关，属于 CI 基础设施/镜像站网络传输稳定性问题。
 
 ### 与 PR 变更的关联
-PR 变更与本次失败**无关**。PR 仅新增了一个标准 Dockerfile，其 `dnf install` 命令语法正确，所列软件包均为 openEuler 24.03-LTS-SP4 仓库中实际存在的包（从日志可见依赖解析成功，列出 258 个包）。失败根因是 openEuler 24.03-LTS-SP4 软件包仓库镜像服务器的 HTTP/2 协议层问题，属于 CI 基础设施故障，非代码缺陷。
+PR 新增了 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`，Dockerfile 内容本身无语法或逻辑错误——`dnf install` 的包列表正确，仓库元数据正常下载（`OS`、`everything`、`EPOL` 等 repo 均成功同步）。失败完全由网络传输层面（镜像站 HTTP/2 连接不稳定）引起，与 PR 代码变更无因果关系。该镜像站不稳定问题会同等影响所有需要从该仓库下载较大 RPM 包的构建任务。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-这是一个由 openEuler 24.03-LTS-SP4 软件包仓库镜像稳定性引起的临时性基础设施故障。无需修改 PR 代码：
-1. **等待重试**：仓库镜像的 HTTP/2 问题可能是暂时的，等待镜像服务恢复后重新触发 CI 构建即可。
-2. **若持续复现**：在 CI 层面对 `dnf` 配置添加重试参数（如 `--retries 10`、降级到 HTTP/1.1 协议），或在 Dockerfile 的 `dnf install` 前配置 yum/dnf 禁用 HTTP/2（`http2=0`）。
+CI 基础设施问题，无需修改代码。触发 **重新运行 CI job**（retry/re-run），在镜像站网络状态恢复正常后重新构建即可通过。该 gcc-c++ 包在 openEuler 24.03-LTS-SP4 仓库中是确认存在的有效包（dnf 已成功解析依赖并开始下载），仅为传输层面的瞬态故障。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）的 HTTP/2 服务是否为已知问题，或是否需要更换镜像源。
-- 如果该问题在多次重试后仍持续出现，需确认是否需要降级到 HTTP/1.1 或切换到其他镜像站。
-
-## 修复验证要求
-无需修复验证（infra-error，非代码问题）。若后续重试仍然失败，Code Fixer 可考虑在 Dockerfile 中添加 `dnf` 配置以禁用 HTTP/2 或增加重试次数，验证方式为重新触发 CI 构建并确认 `dnf install` 成功完成。
+- 确认 openEuler 24.03-LTS-SP4 镜像站（`repo.****.org`）在失败时段是否存在已知的 HTTP/2 或 CDN 故障。
+- 如果多次重试均失败，需排查 CI runner 到镜像站之间的网络链路是否存在 HTTP/2 协议兼容性问题（如中间代理/TLS 终结层与 HTTP/2 长连接的交互异常）。
