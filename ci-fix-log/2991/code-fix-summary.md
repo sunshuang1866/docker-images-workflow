@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施故障（infra-error）：openEuler 24.03-LTS-SP4 aarch64 RPM 仓库存在 HTTP/2 服务器端协议问题，导致 `dnf install` 下载 RPM 包时出现 Curl error (92) INTERNAL_ERROR 流错误。
+无代码修复。CI 失败为基础设施错误（infra-error）：openEuler 官方 RPM 仓库 `repo.openeuler.org` 在 aarch64 构建期间发生 HTTP/2 流中断（Curl error 92），导致多个 RPM 包下载失败，与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告已明确判定此失败为 infra-error，根因是 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库存在间歇性 HTTP/2 服务端问题，与本次 PR 的代码变更（新增 vvenc SP4 Dockerfile 及元数据文件）无关。按 code-fixer 规范，infra-error 不提交代码修改。建议等待仓库服务器稳定后重新触发 CI 构建。
+CI 失败分析报告明确判定为 `infra-error`，根因是 `repo.openeuler.org` 的 HTTP/2 服务端在下载时段出现瞬时连接错误（`HTTP/2 stream was not closed cleanly: INTERNAL_ERROR`），导致 `dnf install` 命令退出码为 1。PR 仅新增了标准的 vvenc Dockerfile 及配套元数据文件，Dockerfile 中 `dnf install` 命令格式正确、无语法错误。按照任务规范，`infra-error` 无需代码修改，重新触发 CI 构建即可。
 
 ## 潜在风险
 无
