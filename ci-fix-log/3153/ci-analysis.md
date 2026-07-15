@@ -2,8 +2,8 @@
 
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
-- 失败类型: lint-error
-- 置信度: 中
+- 失败类型: infra-error
+- 置信度: 高
 - 知识库匹配: 模式11
 - 新模式标题: (不适用)
 - 新模式症状关键词: (不适用)
@@ -27,21 +27,25 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: CI 的 appstore 发布规范预检工具 `update.py` 从 git diff 中解析出变更文件路径为 `README.md`（无前导斜杠），而工具内部期望的路径格式为 `/README.md`（带前导斜杠），路径格式不匹配导致校验失败。该 PR 仅修改了仓库根目录下的两个 README 文档（`README.md` 和 `README.en.md`），内容变更本身（更新基础镜像支持的 Tags 列表）无格式问题。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`（CI appstore 发布规范预检工具）
+- 失败原因: CI 预检工具比对变更文件路径时，`git diff` 产出的路径为 `README.md`（无前导 `/`），而 appstore 规范校验逻辑期望的路径格式为 `/README.md`（带前导 `/`），两者字符串不相等导致校验失败。
 
 ### 与 PR 变更的关联
-PR 的改动（更新 README 中 base image tags 表格）本身是正确的文档维护工作：将过时的 tag `24.03-lts-sp2`（却指向 SP1 的 URL）修正为实际的 `24.03-lts-sp4`（指向正确的 SP4 URL），并补充了新 tag 条目。失败并非由 PR 内容错误导致，而是 CI appstore 校验工具在处理根目录文件路径时存在前导 `/` 格式不匹配的严格检查。
+PR 仅修改了 `README.md` 和 `README.en.md` 这两个仓库根目录的文档文件，内容为更新可用基础镜像 Tag 列表。变更本身**不涉及任何代码、Dockerfile、元数据文件或构建配置**，不应当触发 build/test/lint 失败。
+
+失败由 CI appstore 发布规范预检工具路径比较逻辑引起——该工具检测到 PR 中包含 `README.md` 的变更后，按照 appstore 上架规范对该文件进行路径校验，但其字符串比较方式未能正确处理 git 相对路径与绝对路径格式的差异，导致误报。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-不需要修改 PR 内容。PR 的文档变更（README.md / README.en.md）本身正确，无需调整。该失败是 CI 工具 `update.py` 对路径格式的解析不一致所致——工具期望 `/<path>` 格式但实际接收 `/<path>` 缺失前导 `/` 的格式。需由 CI 维护方修复 `update.py` 中路径格式的统一处理逻辑，或为纯文档 PR（无 Dockerfile / meta.yml / image-info.yml 变更）跳过 appstore 发布规范预检。
+### 方向 1（置信度: 中）
+CI 工具 `eulerpublisher/update/container/app/update.py` 中的路径比较逻辑需要做路径格式归一化处理：在比较变更文件路径与期望路径之前，统一对两端进行规范化（如去除或添加前导 `/`，或使用 `os.path.normpath` 等标准库方法），确保 `README.md` 与 `/README.md` 被视为同一路径。
+
+此修复应提交给 CI 工具（eulerpublisher）仓库，而非当前 Docker 镜像仓库。
 
 ### 方向 2（置信度: 低）
-如果 CI 工具要求变更文件路径必须以 `/` 开头是硬性约束（而非 bug），则可能是 PR 分支的 git diff 输出格式问题，或工具在对 git diff 输出做路径提取时未对根目录路径做 `/` 前缀补全。需确认 `update.py` 中路径提取逻辑（`line:222` 附近 clone 后 diff 的路径解析）是否遗漏了对根目录一级文件的前导 `/` 处理。
+不排除 CI 流水线中 git clone 后的工作目录设定导致路径解析异常的可能。若确实如此，需调整下游构建 job 的工作目录或路径拼接逻辑。
 
 ## 需要进一步确认的点
-1. 日志中显示 `PR 3184 [sunshuang1866:fix/3153 -> master]`，但上下文指定 PR 编号为 3153。需要确认本次 CI 日志是否确实对应 PR #3153，或是上游 trigger job 混合了多个 PR 的构建。
-2. 需要获取 `eulerpublisher/update/container/app/update.py` 源码（尤其是第 222 行附近 clone 及 diff 解析逻辑，以及第 273 行路径校验逻辑），确认路径前导 `/` 的期望来源是什么——是从 git diff 中提取路径时本应带 `/` 但被错误剥离，还是工具内部硬编码了 `/` 前缀而输入未包含。
-3. CI 日志中仅有一条 `README.md` 的 diff 记录，未看到 `README.en.md` 的路径出现在 diff 列表中（日志 INFO 只输出 `["README.md"]`）。需确认 `update.py` 的 diff 扫描是否遗漏了 `README.en.md`，以及这是否影响了检查结果。
+1. `eulerpublisher` 仓库中 `update/container/app/update.py` 第 273 行附近路径校验逻辑的具体实现，确认字符串比较是否缺少路径归一化步骤。
+2. 该 appstore 规范预检步骤是否为新增功能，或近期是否对路径格式要求有过变更——若是新引入的检查，可能存在未覆盖 root-level 文件路径格式的边界情况。
+3. 确认 CI 检查仅报告了 `README.md` 而忽略了同 PR 中同样被修改的 `README.en.md`，这是否为预期行为（即 appstore 规范仅关注 `README.md`）。
