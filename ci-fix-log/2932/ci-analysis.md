@@ -5,13 +5,15 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 容器初始化失败
-- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, Error response from daemon
+- 新模式标题: BuildKit启动失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, docker-container driver
 
 ## 根因分析
 
 ### 直接错误
 ```
+#0 building with "euler_builder_20260709_205700" instance using docker-container driver
+
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -25,23 +27,27 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 引导阶段（`[internal] booting buildkit`），发生在任何 Dockerfile 指令执行之前
-- 失败原因: Docker daemon 在创建 BuildKit 构建容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法访问该容器的根文件系统（`Could not find the file /`），导致构建器启动失败。这是 Docker daemon / containerd 层面的基础设施问题，通常与宿主机的 containerd 状态、overlayfs 快照损坏或临时资源冲突有关。
+- 失败位置: BuildKit daemon 初始化阶段（`[internal] booting buildkit`），发生在任何 Dockerfile 指令执行之前
+- 失败原因: Docker daemon 在创建 buildx 的 `buildx_buildkit_euler_builder_20260709_2057000` 容器后无法找到容器内的 `/` 路径，导致 BuildKit 容器启动失败。这是 Docker daemon 或 buildx 运行时环境问题，与 PR 提交的 Dockerfile 内容无关。
 
 ### 与 PR 变更的关联
-**无关**。本次 PR 仅新增了一个 glibc 2.42 的 Dockerfile（31 行）及对应的 README.md、image-info.yml、meta.yml 元数据更新。错误发生在 BuildKit 引导阶段（`[internal] booting buildkit`），尚未进入任何 Dockerfile 指令的执行。日志中清晰显示构建在 BuildKit 拉取镜像并创建容器时即失败，没有进入 `[2/N]` 及后续构建步骤。此失败与 PR 代码变更无任何关联。
+**无关。** 本次 PR 变更仅包含：
+1. 新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`（glibc 2.42 构建文件）
+2. 更新 `Others/glibc/README.md`（补充新版本条目）
+3. 更新 `Others/glibc/doc/image-info.yml`（补充新版本条目）
+4. 更新 `Others/glibc/meta.yml`（注册新镜像路径）
+
+PR 的 CI 预检阶段（`check_package_license`、镜像规范校验）均已通过。失败发生在 buildx 创建 BuildKit 容器阶段（`#0` → `#1 booting buildkit`），此时尚未开始解析或执行 Dockerfile 的任何指令。错误信息 `Could not find the file / in container` 指向 Docker daemon 的容器文件系统访问异常，属于 CI runner 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试 CI 构建**。`Could not find the file / in container` 是 Docker daemon / containerd 层的瞬时故障，通常由以下原因之一引起：
-- containerd 的 overlayfs 快照在容器创建时未完全就绪
-- 宿主机上的临时 I/O 拥塞或磁盘空间不足
-- BuildKit builder 实例（`euler_builder_20260709_205700`）残留状态异常
-
-Code Fixer 无需处理，建议运维重试该 CI Job。日志中可见 builder 已被自动清理（`euler_builder_20260709_205700 removed`），重试时 BuildKit 会创建新的构建器实例，大概率正常完成。
+这是 CI 基础设施的瞬时故障（Docker daemon / BuildKit 容器启动异常），无法通过修改 PR 代码解决。建议重新触发 CI 构建。如果多次重试仍然失败，则需要检查构建节点 `ecs-build-docker-x86-hk` 上的 Docker daemon 状态和 buildx builder 实例状态。
 
 ## 需要进一步确认的点
-- 宿主机 `ecs-build-docker-x86-hk` 在故障时间点（2026-07-09 20:57 UTC+8）的磁盘空间和 containerd 服务状态
-- 该时段是否有其他并发构建任务争抢 overlayfs 资源
-- 重试 CI 后是否复现；若复现则需排查宿主机 containerd / Docker daemon 配置
+- 构建节点 `ecs-build-docker-x86-hk` 的 Docker daemon 日志中是否有更详细的错误信息（如文件系统挂载、overlay2 存储驱动相关错误）
+- 该 buildx builder 实例（`euler_builder_20260709_205700`）是否残留了异常状态，可尝试 `docker buildx rm` 清理后重建
+- 同一时间段其他 PR 的构建是否也出现相同错误（判断是否为节点级故障）
+
+## 修复验证要求
+无需 code-fixer 处理。若重试后 CI 仍然失败，需由 CI 运维人员排查构建节点的 Docker 环境。
