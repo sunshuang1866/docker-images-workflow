@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需代码修改。
+无需代码修改 — CI 失败为基础设施问题（infra-error）。
 
 ## 修改的文件
-无。
+无
 
 ## 修复逻辑
-CI 失败分析报告确认此失败属于 **infra-error**，根因是 CI 管线中 `eulerpublisher/update/container/app/update.py` 的 appstore 发布规范校验工具对根目录 `README.md` 存在路径判断逻辑缺陷：校验工具期望路径为 `/README.md`（带前导斜杠），但实际从 git diff 获取的路径为 `README.md`（无前导斜杠），导致误报 `Path Error`。
+CI 分析报告判定本失败为 `infra-error`（置信度：高）。失败原因为 CI 流水线中的 appstore 发布规范预检（`eulerpublisher/update/container/app/update.py`）对仓库根目录的 `README.md` 执行了路径格式校验，要求路径格式为 `/README.md`（带前导 `/`），但变更检测返回的路径为 `README.md`（无前导 `/`），导致字符串比较不匹配。
 
-PR #3153 仅修改了根目录 `README.md` 中的可用镜像 Tags 列表（纯文档更新），与构建/测试/代码逻辑无关。此 CI 失败与 PR 改动内容无实质关联，属于 CI 工具侧需修复的兼容性问题。
+该预检本应仅针对应用镜像目录（`{category}/{app}/`）下的文件执行，不应作用于仓库根级别的纯文档文件。PR #3153 仅修改了 `README.md` 的文档内容（更新可用镜像 Tag 列表），不涉及任何 Dockerfile、meta.yml 或应用镜像元数据文件的变更，属于纯文档维护性提交。
 
-根据分析报告的指导，PR 作者无需修改任何文件内容。修复应由 CI 维护方排查 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑，统一处理带/不带前导斜杠的路径表示，并考虑对根目录级别的纯文档文件跳过 appstore 路径检查。
+修复应在 CI 工具代码（`eulerpublisher`）中进行，需在变更文件过滤逻辑中增加对仓库根目录文件的豁免规则，或修复路径比较中的前导 `/` 规范化问题。本仓库源代码无任何需要修改的内容。
 
 ## 潜在风险
-无。未对任何源文件做出修改。
+无 — 本仓库源代码未作任何修改。
