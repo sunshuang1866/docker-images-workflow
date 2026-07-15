@@ -1,13 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败为基础设施问题（infra-error），CI runner 环境中缺少 `shunit2` 测试框架，与本次 PR 代码变更无关，无需代码修改。
+无需代码修改 — 此为 CI 基础设施故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。PR 所涉及的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）均无需修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出：失败发生在 CI [Check] 测试阶段，根因是 CI runner 中缺少 `shunit2`（shUnit2 shell 单元测试框架），导致 `common_funs.sh` 脚本无法加载依赖。PR #2898 仅新增 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及元数据文件，Docker 镜像的 Build 和 Push 阶段均已成功。此失败属于 CI 基础设施环境问题，不属于代码层面问题，应由 CI 运维团队在 runner 环境中安装 `shunit2`（如 `dnf install shunit2`），无需在源码仓库中修改任何代码。
+CI 分析报告明确指出失败类型为 `infra-error`，根因是 CI Runner 在 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 处缺少 `shunit2` Shell 单元测试框架，导致 eulerpublisher 的 [Check] 阶段崩溃。
+
+该问题与 PR #2898 的代码变更无关：
+- Docker 镜像构建（#7-#11 步骤）已成功完成
+- Docker 镜像推送（[Push] finished）已成功完成
+- 失败仅发生在 eulerpublisher 工具的 [Check] 测试阶段，属于 CI Runner 环境缺少 `shunit2` 依赖所致
+
+此问题需由 CI 运维团队在 Runner 环境中安装 `shunit2`（例如通过 `dnf install shunit2`），非代码层面可修复。
 
 ## 潜在风险
 无
