@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 异常退出
-- 新模式症状关键词: graceful_stop, rpc error: code = Unavailable, closing transport, no builder found
+- 新模式标题: BuildKit构建器断连
+- 新模式症状关键词: failed to receive status, rpc error, closing transport, graceful_stop, no builder found, euler_builder
 
 ## 根因分析
 
@@ -16,21 +16,22 @@
 #7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile 第 2/4 层 — `dnf install` 元数据下载阶段
-- 失败原因: BuildKit builder 守护进程（`euler_builder_20260709_224657`）在构建过程中被异常关闭（`graceful_stop`），导致 DOCKER_BUILDKIT 客户端连接中断、builder 实例消失，构建被强制终止。
+- 失败位置: Docker 构建阶段 `#7 [2/4]`（`dnf install` 步骤），运行在 `ecs-build-docker-x86-hk` 节点
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被平台侧主动终止（`graceful_stop` with `NO_ERROR`），gRPC 传输连接随之中断，`dnf install` 下载 OS 仓库元数据至中途（2.8 MB，耗时 38+ 秒）时被强制终止
 
-## 与 PR 变更的关联
-
-**与 PR 变更无关。** PR 新增了一个完全标准的 Dockerfile，仅包含基础的 `dnf install` 构建依赖 + 编译安装 Python 3.9 + `pip install scann`，与同仓库现有其他 SP 版本的 Dockerfile 结构一致。构建尚未执行到 PR 特有逻辑——失败发生在最基础的 `dnf install` 步骤（拉取 OS 仓库元数据阶段），当时构建速度极慢（77 kB/s）且 BuildKit 服务端主动发送了 `graceful_stop` 信号后关闭，属于 CI 基础设施层面的异常。
+### 与 PR 变更的关联
+与 PR 变更**无关**。本次 PR 仅新增了一个 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）以及配套的 README.md、image-info.yml、meta.yml 更新，均为常规新增镜像的标准操作。Docker 构建在步骤 `#7 [2/4]`（`dnf install` 阶段）即因 BuildKit 构建器基础设施故障而中断，此时尚未执行到任何 PR 特有的构建逻辑（Python 编译、pip 安装 scann 等）。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修复代码**。此为 CI 基础设施故障（BuildKit builder 被异常关闭），Code Fixer 无需处理任何文件。建议触发重新构建验证——基础设施恢复后，该 PR 的 Dockerfile 预期可正常通过构建。
+**重试 CI 流水线。** 该失败为 BuildKit 构建器基础设施故障（构建器被平台主动终止），与 PR 代码完全无关。重新触发 CI 构建即可，无需修改任何文件。
 
 ## 需要进一步确认的点
-- BuildKit builder 节点被 `graceful_stop` 的具体原因（资源不足被调度器驱逐、节点维护、超时等），需由 CI 基础设施运维排查。
-- `dnf install` 阶段 77 kB/s 的低速是否触发了某种超时保护机制，可确认 CI runner 的出网带宽状况。
+- 构建器 `euler_builder_20260709_224657` 被 `graceful_stop` 的确切原因：是 CI 平台对构建器实例有超时限制（实例存活时间上限）、还是运行节点资源紧张导致调度器主动回收、或是平台侧运维操作触发的重启。
+- 若反复重试仍因同样原因失败，需联系 CI 平台运维确认 `ecs-build-docker-x86-hk` 节点上 BuildKit 构建器的稳定性。
