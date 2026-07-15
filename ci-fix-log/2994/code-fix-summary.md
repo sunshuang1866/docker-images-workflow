@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败属于基础设施故障（infra-error），BuildKit 构建器 `euler_builder_20260709_224657` 在 Docker 构建 `dnf install` 阶段被平台侧主动终止（`graceful_stop`），与 PR 代码完全无关。无需修改任何代码文件。
+CI 构建失败为 infra-error，非代码问题，无需修改源码。
 
 ## 修改的文件
-无。
+无。本次 CI 失败由 BuildKit 构建器在 dnf 下载仓库元数据阶段被优雅终止导致（`graceful_stop`），与 PR 代码变更无关。
 
 ## 修复逻辑
-CI 分析报告指出：失败发生在 Docker 构建步骤 `#7 [2/4]`（`dnf install` 下载 OS 仓库元数据阶段），根因是 BuildKit 构建器实例被 CI 平台主动终止（`graceful_stop` with `NO_ERROR`），gRPC 连接随之中断。本次 PR 仅新增了一个标准 Dockerfile 及配套文档（README.md、image-info.yml、meta.yml），Docker 构建在尚未执行到 PR 特有的构建逻辑（Python 编译、pip 安装 scann）时即因基础设施故障中断。推荐的修复方向为**重试 CI 流水线**，无需修改代码。
+CI 失败分析报告明确指出：
+- 失败类型为 `infra-error`
+- 构建在第 #7 步（`dnf install` 下载阶段）即被中断，尚未执行到步骤 #8（编译 Python）和步骤 #9（pip install scann），因此无法评估 Dockerfile 内容是否正确
+- `graceful_stop` debug 信息表明这是构建器的主动/被动资源回收行为（如超时、节点下线、资源配额耗尽），与 PR 代码内容无关
+- 建议重新触发 CI 构建
+
+按照指令要求，`infra-error` 不进行代码修改。
 
 ## 潜在风险
-无。未对任何文件做修改。
+无
