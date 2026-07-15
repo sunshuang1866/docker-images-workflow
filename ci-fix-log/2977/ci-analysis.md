@@ -3,15 +3,18 @@
 ## 基本信息
 - PR: #2977 — chore(brpc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 镜像站HTTP/2协议错误
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, yum install, Error downloading packages
+- 新模式标题: openEuler 仓库下载网络故障
+- 新模式症状关键词: Curl error (92), Curl error (56), HTTP/2 framing layer, SSL_ERROR_SYSCALL, No more mirrors to try, vim-common, repo.openeuler.org
 
 ## 根因分析
 
 ### 直接错误
 ```
+#7 556.2  [MIRROR] gcc-12.3.1-110.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/gcc-12.3.1-110.oe2403sp4.aarch64.rpm [HTTP/2 stream 41 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#7 836.2  [MIRROR] kernel-headers-6.6.0-159.4.3.154.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/kernel-headers-6.6.0-159.4.3.154.oe2403sp4.aarch64.rpm [HTTP/2 stream 59 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#7 1029.3 [MIRROR] perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm: Curl error (56): Failure when receiving data from the peer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm [OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0]
 #7 1310.2 [MIRROR] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm [HTTP/2 stream 125 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1310.2 [FAILED] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1310.3 Error: Error downloading packages:
@@ -20,26 +23,20 @@
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:4-11（`yum install` 步骤）
-- 失败原因: CI 构建节点在 aarch64 架构上下载 `vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm` 时，`repo.openeuler.org` 镜像站返回 HTTP/2 协议层错误（`INTERNAL_ERROR (err 2)`），多次重试后仍失败，导致 yum 事务中断。
-
-### 补充观察
-同一构建过程中，多个其他 RPM 包也曾遇到 HTTP/2 错误但重试成功（如 `gcc-12.3.1-110` 在第 556 秒、`kernel-headers-6.6.0` 在第 836 秒、`perl-MIME-Base64` 在第 1029 秒遇到 curl error 56），说明 `repo.openeuler.org` 在该时间段存在网络不稳定问题。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install -y ...` 步骤）
+- 失败原因: CI 在 aarch64 节点（`ecs-build-docker-aarch64-04-sp`）上构建 Docker 镜像时，`yum install` 从 `repo.openeuler.org` 下载 RPM 包过程中遇到多次 HTTP/2 stream error（curl error 92）和 SSL 传输错误（curl error 56）。其中 `gcc`、`kernel-headers`、`perl-MIME-Base64` 等包在重试后成功下载，但 `vim-common` 包因网络错误耗尽了所有镜像源重试次数，最终导致 yum 事务失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile` 以及配套的 README、image-info.yml、meta.yml 元数据文件。失败发生在新 Dockerfile 的 `yum install` 阶段，该阶段仅从 openEuler 官方软件源下载系统包，Dockerfile 写法与同类镜像一致，无语法错误。失败根因为 `repo.openeuler.org` 镜像站在该时间段出现 HTTP/2 传输错误，属于 CI 基础设施问题。
+**与 PR 无关**。PR 变更仅新增了一个标准的 brpc Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 中的 `yum install` 命令语法正确、包名有效。失败完全由 CI 构建节点与 openEuler 官方镜像站之间的网络不稳定导致（HTTP/2 流异常关闭、SSL 连接中断），属于基础设施层面的瞬时故障。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修改代码。** 这是 `repo.openeuler.org` 镜像站的瞬时网络故障。建议重新触发 CI 运行（retry），待镜像站恢复后构建应能通过。
+### 方向 1（置信度: 中）
+**触发 CI 重试**。该失败属于 `repo.openeuler.org` 镜像站的瞬时网络/HTTP/2 故障，与 PR 代码无关。在 openEuler 镜像站恢复稳定后，重新触发 CI 流水线即可（可尝试手动触发或推送空 commit 触发 rerun）。
 
-### 方向 2（置信度: 中）
-如果重试多次仍持续失败，可考虑在 `yum install` 前添加 `yum-config-manager` 调低 yum 的 curl 超时或禁用 HTTP/2 回退至 HTTP/1.1（如设置 `http2=0` 或调整 yum 重试参数 `retries=10`），但这是 workaround 而非根因修复，且当前 Dockerfile 无需此类修改。
+### 方向 2（置信度: 低）
+若重试后仍然频繁出现同类错误，可考虑在 Dockerfile 的 yum 命令中添加 `--retries` 参数或使用 `curl` 重试机制预处理关键大包，但这是基础设施层面的 workaround，非根本解决方案。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/` 目录下 `vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm` 文件是否真实存在且文件大小完整。
-- 确认 CI 构建节点的出网网络到 `repo.openeuler.org` 的 HTTP/2 连接是否持续不稳定。
-
-## 修复验证要求
-不涉及代码修复，无需验证步骤。若需验证是否为瞬时故障，重新触发 CI 构建即可。
+- openEuler 官方镜像站 `repo.openeuler.org` 在当时是否存在服务端 HTTP/2 或 SSL 层问题（可通过在 CI 构建日志时间点独立 curl 测试确认）
+- 该 aarch64 构建节点 `ecs-build-docker-aarch64-04-sp` 的网络环境是否存在间歇性丢包或 HTTP/2 代理兼容性问题
