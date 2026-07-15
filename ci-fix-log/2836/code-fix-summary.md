@@ -1,16 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-将 Cassandra 5.0.6 下载源从 CI 不可达的 `archive.apache.org` 更换为与同版本其他变体一致的 `dlcdn.apache.org`。
+Cassandra 5.0.6 在 `dlcdn.apache.org` 上已下架，下载返回 196 字节的 HTML 页面，tar 解压失败。
 
 ## 修改的文件
-- `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile`: 第 13 行 curl 下载 URL 从 `https://archive.apache.org/dist/cassandra/` 改为 `https://dlcdn.apache.org/cassandra/`
+- `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile`: 将 Cassandra 二进制包下载源从 `dlcdn.apache.org` 替换为 `archive.apache.org`（Apache 官方归档站）
 
 ## 修复逻辑
-1. CI 日志显示 `archive.apache.org` 在构建环境中 TCP 连接超时（exit code: 28），与历史案例（模式33：accumulo、kyuubi、mesos）中的 Apache 镜像站网络不通问题一致。
-2. 同仓库中其他 4 个 Cassandra Dockerfile（包括同版本 `5.0.6/24.03-lts-sp3`）均使用 `dlcdn.apache.org/cassandra/` 路径下载，且这些变体在 CI 中构建正常。
-3. 当前 sp4 变体的 Dockerfile 使用了不一致的 `archive.apache.org/dist/cassandra/` URL，属于与其他变体不一致的代码问题。
-4. 修复方案：将下载 URL 对齐为 `dlcdn.apache.org/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz`，与 `5.0.6/24.03-lts-sp3` 完全一致。
+根据 CI 分析报告，`dlcdn.apache.org` 仅保留各项目的最新版本，历史版本（Cassandra 5.0.6）已被下架，与知识库模式01（Apache CDN 404）根因一致。将下载 URL 从 `https://dlcdn.apache.org/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz` 改为 `https://archive.apache.org/dist/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz`，使用 Apache 官方归档站（永久保留历史版本）。已通过 `curl -sI` 验证新 URL 返回 HTTP 200，Content-Type 为 `application/x-gzip`，Content-Length 为 72645918 字节，确认为有效 gzip 包。
 
 ## 潜在风险
-无。`dlcdn.apache.org` 已被同仓库的 `5.0.6/24.03-lts-sp3` 变体验证可用，且 CDN 同时托管 5.0.6 版本的制品。
+无。`archive.apache.org` 是 Apache 官方的版本归档站，稳定可靠。
