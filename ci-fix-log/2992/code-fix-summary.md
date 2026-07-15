@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 openEuler 24.03-LTS-SP4 包仓库 HTTP/2 服务端临时性流错误（infra-error），与 PR #2992 的代码变更无关。
+CI 失败为临时性基础设施故障（infra-error），非代码问题，无需修改代码。
 
 ## 修改的文件
-无。未对任何源文件进行修改。
+无
 
 ## 修复逻辑
-分析报告明确指出：
-- 失败类型为 **infra-error**（置信度：高）
-- 根因为 openEuler 24.03-LTS-SP4 仓库服务器在构建时段多次出现 Curl error (92)：HTTP/2 流帧 INTERNAL_ERROR，导致多个 RPM 包下载失败
-- **与 PR 代码变更无关**：Dockerfile 语法正确，`dnf install` 命令格式无误
-- 建议直接重试 CI
-
-按分析报告建议，此类临时性基础设施问题无需代码层面修复，重新触发 CI 构建即可。
+CI 失败分析报告判定为 **infra-error**，置信度**高**。根因是 openEuler 24.03-LTS-SP4 官方软件仓库在构建过程中出现 HTTP/2 帧层传输错误（Curl error 92: INTERNAL_ERROR），导致 `gcc` 等 RPM 包下载失败。Dockerfile 结构正确，使用的 `dnf install` 软件包均为标准包名，与 PR 变更无关。此为临时性网络/仓库端故障，建议触发 CI 重跑（retry），待仓库恢复正常后构建应能通过。
 
 ## 潜在风险
-无。未改动任何代码。
+无
