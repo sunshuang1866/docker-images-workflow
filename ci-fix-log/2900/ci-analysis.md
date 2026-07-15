@@ -3,15 +3,16 @@
 ## 基本信息
 - PR: #2900 — chore(httpd): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: CI测试框架shunit2缺失
-- 新模式症状关键词: shunit2, file not found, common_funs.sh, Check test failed
+- 新模式标题: CI测试框架依赖缺失
+- 新模式症状关键词: shunit2, file not found, common_funs.sh, eulerpublisher
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-10 09:18:18,896 - INFO - [Check] checking ****test/httpd:2.4.66-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: .: shunit2: file not found
 2026-07-10 09:18:18,902 - CRITICAL - [Check] test failed
 +-------------+-------------+--------------+
@@ -19,38 +20,25 @@
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
 Build step 'Execute shell' marked build as failure
-Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 构建完成后的 `[Check]` 测试阶段需要加载 `shunit2`（Shell 单元测试框架），但该框架库在 CI runner 上不存在或不在 `PATH` 中，导致 `common_funs.sh` 第 13 行 `. shunit2` 执行失败，整个检查阶段中断，检查结果表为空。
+- 失败位置: CI Runner 上的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: Docker 镜像构建和推送均成功完成（`[Build] finished`、`[Push] finished`），失败发生在 CI 的 `[Check]` 阶段——`eulerpublisher` 测试框架的 `common_funs.sh` 脚本尝试 source `shunit2`（shell 单元测试框架），但 `shunit2` 未安装在 CI Runner 上。由于测试框架本身加载失败，Check Items 表格为空（无任何测试实际执行）。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 新增的 Dockerfile（httpd 2.4.66 on openEuler 24.03-LTS-SP4）构建和推送阶段均已成功完成：
-- `#10 DONE 41.6s` — `./configure && make && make install` 成功
-- `#11 DONE 0.1s` — `groupadd`/`useradd`/`sed` 配置成功
-- `#12 DONE 0.0s` — `COPY httpd-foreground` 成功
-- `#13 DONE 0.1s` — `chmod +x` 成功
-- `#14 DONE 31.3s` — 镜像导出和推送成功
-- `[Build] finished` / `[Push] finished` 确认构建和推送完成
-
-失败发生在 `[Check]` 后处理阶段，是 CI 基础设施缺少 `shunit2` 库所致，与本次 PR 的 Dockerfile、httpd-foreground、README、meta.yml 和 image-info.yml 变更均无关联。
+PR #2900 新增了 `Others/httpd/2.4.66/24.03-lts-sp4/Dockerfile`、`httpd-foreground` 启动脚本、README.md 和 `image-info.yml` 中对应条目，以及 `meta.yml`，属于标准的镜像新增流程。Docker 构建 7 个步骤全部成功（日志中 `#10 DONE 41.6s`、`#11 DONE 0.1s`、`#12 DONE 0.0s`、`#13 DONE 0.1s`，镜像成功推送到 registry），失败点与 PR 代码变更无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-在 CI runner 上安装 `shunit2` 包。openEuler 系统中可通过以下方式安装：
-- `dnf install shunit2 -y`
-- 或确保 `shunit2` 脚本在 `PATH` 可访问的目录中（如 `/usr/bin/shunit2` 或/usr/local/bin/shunit2`）
+### 方向 1（置信度: 低）
+确认 CI Runner 的测试环境是否安装了 `shunit2`。若 `shunit2` 缺失，在 CI Runner 上安装 `shunit2`（如 `dnf install shunit2` 或从源码部署）后重新触发构建。
 
 ### 方向 2（置信度: 低）
-如果 CI runner 上确实已安装 `shunit2` 但路径配置有问题，检查 `common_funs.sh` 脚本中的 `PATH` 设置是否遗漏了 `shunit2` 的安装路径。
+检查 `eulerpublisher` 的 `common_funs.sh` 是否正确配置了 `shunit2` 的查找路径（如 `PATH` 或特定目录），可能需要在 CI 环境变量中指定 `SHUNIT2_HOME`。
 
 ## 需要进一步确认的点
-- 确认 `shunit2` 在 openEuler 24.03-LTS-SP4 的包仓库中是否存在（包名可能为 `shunit2` 或 `shunit`），或确认 CI runner 构建环境中 `shunit2` 的实际安装状态与路径
-- 确认本次使用的 CI runner 是否为该 PR 的 `meta.yml` 中未指定 `arch` 约束而意外调度到的 runner 上缺少 `shunit2`（参考类似镜像的 meta.yml 是否需要补充 `arch` 字段）
-
-## 修复验证要求
-此失败为 infra-error，修复需由 CI 运维人员在 runner 环境上操作，code-fixer 无需也无法在代码层面修复。若后续重新触发 CI 构建，需确认 runner 环境已安装 `shunit2` 后方可验证。
+- `shunit2` 是否已在该 CI Runner 节点上安装（检查 `/usr/local/etc/eulerpublisher/tests/` 下是否有 `shunit2` 文件或软链）
+- 同类其他 SP2/SP3 镜像（如已有的 `2.4.66-oe2403sp2`）在同一个 CI Runner 上是否也曾触发相同的 `shunit2: file not found` 错误
+- 该 CI 节点是否为新部署的 x86_64 Runner，测试依赖尚未完整安装
