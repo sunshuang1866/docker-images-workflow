@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施错误（infra-error），由 CI 工具 `eulerpublisher` 的 appstore 校验逻辑误将根级文档文件 `README.md` 纳入镜像路径校验导致。
+无需代码修改。CI 失败属于 **infra-error**（CI 基础设施问题），与 PR 变更无关。
 
 ## 修改的文件
-无（infra-error，无需修改源码）
+无
 
 ## 修复逻辑
-CI 失败分析报告明确指出失败类型为 `infra-error`，根因是 `eulerpublisher/update/container/app/update.py` 工具在校验 appstore 镜像路径时，错误地对仓库根目录的纯文档文件 `README.md` 执行了校验并报告 FAILURE。PR #3153 仅修改了 `README.md` 和 `README.en.md` 中的镜像 tag 列表，不涉及任何 Dockerfile 或镜像构建逻辑，不属于需要 appstore 路径校验的范围。
+CI 分析报告确认失败类型为 `infra-error`。PR #3153 仅修改了仓库根目录的 `README.md`，更新基础镜像可用 Tags 列表，属于纯文档变更。CI 的 appstore 发布规范校验工具（`eulerpublisher/update/container/app/update.py`）错误地将根目录 `README.md` 纳入 appstore 路径校验范围（期望路径格式为 `{category}/{app}/{version}/{os-version}/README.md`），而该文件并非应用镜像入口文件，不应受此校验约束。
 
-根据修复原则，对于 `infra-error` 类型的失败，不应强行修改源码代码来绕过 CI 问题。此问题需要在 CI 工具 `eulerpublisher` 侧修复——在校验流程中增加文件路径过滤，将仓库根目录的 `README.md` / `README.en.md` 等纯文档文件排除在 appstore 路径校验范围之外。
+此为 CI 工具/平台的配置问题，应在 CI 基础设施层面修复（限定校验范围为 `image-list.yml` 中注册的应用镜像目录，排除仓库根目录文档），无需对 PR 的 `README.md` 做任何代码修改。
 
 ## 潜在风险
-无（未修改任何代码）
+无。PR 的 `README.md` 变更内容（更新镜像标签列表）本身是正确的文档维护操作，不涉及功能代码或构建逻辑。
