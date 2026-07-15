@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler镜像站HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, dnf install
+- 新模式标题: 仓库 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, dnf install
 
 ## 根因分析
 
@@ -22,22 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
-- 失败原因: CI 的 aarch64 构建节点（`ecs-build-docker-aarch64-04-sp`）在通过 dnf 从 `repo.openeuler.org` 下载 RPM 包时，遇到 CDN 服务器 HTTP/2 流错误（Curl error 92），连续重试后 `guile` 包下载失败，导致整个 `dnf install` 命令返回 exit code 1。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
+- 失败原因: `repo.openeuler.org` 的 HTTP/2 服务在 aarch64 构建节点上下载 RPM 包时反复出现 Stream error (Curl error 92)。`git-core` 和 `gcc-c++` 经重试后成功下载，但 `guile` 包耗尽所有 mirror 重试次数后永久失败，导致 `dnf install` 整体退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关**。PR 新增的 Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`）语法正确，`dnf install` 命令中列出的包名（`git gcc gcc-c++ make cmake`）均为 openEuler 24.03-LTS-SP4 仓库中的有效包名，依赖解析阶段已经通过（Dependencies resolved，列出 156 个包待下载）。失败发生在后续的 RPM 包下载阶段，根因是 `repo.openeuler.org` CDN 服务器的 HTTP/2 实现存在间歇性问题，导致部分下载流被异常关闭。
+**与 PR 代码变更无关。** PR 仅新增了一个标准的 Dockerfile，内容为 `dnf install -y git gcc gcc-c++ make cmake`，Dockerfile 语法正确、包名有效。失败原因是 `repo.openeuler.org` 仓库服务器端 HTTP/2 协议层面的间歇性故障，属于 CI 基础设施/上游仓库网络问题，非代码缺陷。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-**此问题无需 Code Fixer 处理**。该失败属于 CI 基础设施/上游镜像站的暂时性问题，不是 PR 代码缺陷。建议：
-- 重新触发 CI 作业（retry），HTTP/2 流错误通常是间歇性的
-- 如果持续复现，可以考虑在 Dockerfile 的 `dnf install` 前配置 dnf 禁用 HTTP/2（设置 `http2=False` 在 `/etc/dnf/dnf.conf` 中），强制使用 HTTP/1.1 下载 RPM 包
+### 方向 1（置信度: 高）
+**等待上游仓库恢复后重试 CI。** `repo.openeuler.org` 的 HTTP/2 服务存在间歇性 Stream error（Curl error 92: INTERNAL_ERROR），该问题通常由 CDN/反向代理层或源服务器的 HTTP/2 实现缺陷引起，属于临时性基础设施故障。建议隔段时间后重新触发 CI 构建，若仓库服务恢复正常，构建即可通过。Code Fixer 无需修改任何代码。
+
+### 方向 2（置信度: 低）
+**若该问题持续复发，可尝试在 Dockerfile 中为 dnf 禁用 HTTP/2 或添加重试。** 例如通过 `dnf` 配置将 `max_parallel_downloads` 降低或通过 `echo 'http2=false' >> /etc/dnf/dnf.conf` 降级到 HTTP/1.1 规避 HTTP/2 流错误。但此方向属于绕过而非修复根因，且可能影响下载速度，仅在基础设施侧长期无法修复时作为临时方案。
 
 ## 需要进一步确认的点
-- 检查同一时间段内其他 PR 在 aarch64 节点上的构建是否也出现同样的 `Curl error (92)` HTTP/2 流错误，以确认是 `repo.openeuler.org` CDN 大面积故障还是单一节点网络问题
-- 确认 `repo.openeuler.org` 的 HTTP/2 服务在 CI 运行时段（2026-07-09 14:08 UTC 左右）的状态是否正常
-
-## 修复验证要求
-无。此失败为 infra-error，不需要 code-fixer 进行代码修改。
+- 确认 `repo.openeuler.org` 的 HTTP/2 服务当前健康状态（是否能稳定下载 `guile-2.2.7-6.oe2403sp4.aarch64.rpm`）。
+- 确认该 HTTP/2 Stream error 是否仅影响 aarch64 构建节点，还是所有架构均受影响。
+- 若其他 PR 同时期也触发 CI 且均失败，则进一步佐证为仓库端基础设施问题。
