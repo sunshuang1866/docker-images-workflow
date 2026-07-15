@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施问题（infra-error）。
+无需代码修改。CI 失败属于基础设施错误（infra-error），由 CI 工具 `eulerpublisher` 的 appstore 校验逻辑误将根级文档文件 `README.md` 纳入镜像路径校验导致。
 
 ## 修改的文件
-无
+无（infra-error，无需修改源码）
 
 ## 修复逻辑
-CI 分析报告判定本失败为 `infra-error`（置信度：高）。失败原因为 CI 流水线中的 appstore 发布规范预检（`eulerpublisher/update/container/app/update.py`）对仓库根目录的 `README.md` 执行了路径格式校验，要求路径格式为 `/README.md`（带前导 `/`），但变更检测返回的路径为 `README.md`（无前导 `/`），导致字符串比较不匹配。
+CI 失败分析报告明确指出失败类型为 `infra-error`，根因是 `eulerpublisher/update/container/app/update.py` 工具在校验 appstore 镜像路径时，错误地对仓库根目录的纯文档文件 `README.md` 执行了校验并报告 FAILURE。PR #3153 仅修改了 `README.md` 和 `README.en.md` 中的镜像 tag 列表，不涉及任何 Dockerfile 或镜像构建逻辑，不属于需要 appstore 路径校验的范围。
 
-该预检本应仅针对应用镜像目录（`{category}/{app}/`）下的文件执行，不应作用于仓库根级别的纯文档文件。PR #3153 仅修改了 `README.md` 的文档内容（更新可用镜像 Tag 列表），不涉及任何 Dockerfile、meta.yml 或应用镜像元数据文件的变更，属于纯文档维护性提交。
-
-修复应在 CI 工具代码（`eulerpublisher`）中进行，需在变更文件过滤逻辑中增加对仓库根目录文件的豁免规则，或修复路径比较中的前导 `/` 规范化问题。本仓库源代码无任何需要修改的内容。
+根据修复原则，对于 `infra-error` 类型的失败，不应强行修改源码代码来绕过 CI 问题。此问题需要在 CI 工具 `eulerpublisher` 侧修复——在校验流程中增加文件路径过滤，将仓库根目录的 `README.md` / `README.en.md` 等纯文档文件排除在 appstore 路径校验范围之外。
 
 ## 潜在风险
-无 — 本仓库源代码未作任何修改。
+无（未修改任何代码）
