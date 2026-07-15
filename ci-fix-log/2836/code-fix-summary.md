@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-将 Cassandra 5.0.6 二进制包的下载源从 CDN (`dlcdn.apache.org`) 切换为 Apache 官方归档站 (`archive.apache.org`)，解决 CDN 返回无效内容（196 字节 HTML 错误页）导致 tar 解压失败的问题。
+无需代码修改。CI 失败为基础设施网络问题（`archive.apache.org` 从 aarch64 runner 不可达），与 PR #2836 代码变更无关。
 
 ## 修改的文件
-- `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile`: 第 13 行 curl 下载 URL 从 `dlcdn.apache.org/cassandra/` 改为 `archive.apache.org/dist/cassandra/`
+无。
 
 ## 修复逻辑
-CI 构建日志显示 curl 从 `dlcdn.apache.org` 仅获取到 196 字节的非 gzip 内容（HTML 错误页），tar 解压失败。已从上游 `https://archive.apache.org/dist/cassandra/5.0.6/` 验证 `apache-cassandra-5.0.6-bin.tar.gz` (69MB) 确实存在且可正常访问。`archive.apache.org` 是 Apache 官方归档站，永久保留所有历史版本的 release 制品，不会出现 CDN 缓存未命中的问题。同一仓库中其他 77 处 Apache 制品下载均使用 `archive.apache.org`，本次修复保持与项目规范一致。
+CI 失败分析报告判定失败类型为 `infra-error`，置信度高。Docker 构建时前两个步骤（`yum install java`、`groupadd/useradd`）均成功完成，直到 `Dockerfile:13` 的 `curl` 从 `archive.apache.org` 下载 Apache Cassandra 制品时因网络不可达超时（exit code: 28）。该问题与 PR 新增的 Dockerfile 及配套元数据文件无关，属于 CI runner 节点的网络/防火墙/DNS 配置问题。按照分析报告建议，不应修改 PR 代码，需由 CI 运维团队排查 runner 网络连通性或调整 URL 重写规则。
 
 ## 潜在风险
-无。仅修改下载源域名，URL 路径结构和文件名完全一致，不会影响构建逻辑。
+无。未对源码做任何修改。
