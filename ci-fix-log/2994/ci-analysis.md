@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 掉线
-- 新模式症状关键词: failed to receive status, rpc error, Unavailable, graceful_stop, no builder found
+- 新模式标题: BuildKit构建器断连
+- 新模式症状关键词: rpc error, Unavailable, closing transport, connection error, error reading from server: EOF, graceful_stop, no builder found
 
 ## 根因分析
 
@@ -19,17 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建阶段 Step `#7 [2/4]`（`dnf install` 步骤执行期间）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在构建中途被优雅关闭（`graceful_stop`），导致与 builder 之间的 gRPC 连接断开（`connection error: EOF`），处于运行中的 `dnf install` 步骤随之失败。该错误属于 CI 基础设施层面问题，与 PR 代码无关。
+- 失败位置: Docker 构建步骤 `#7 [2/4] RUN dnf install`（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 的 dnf 安装步骤）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中异常断开连接（gRPC 报 `Unavailable` + `graceful_stop`），构建器容器可能因 runner 资源耗尽、超时或被外部终止而消失，导致构建中断
 
 ### 与 PR 变更的关联
-PR 变更仅新增了 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及相关元数据文件（README.md、image-info.yml、meta.yml），新增的 Dockerfile 语法正确、依赖声明完整。CI 构建在 `dnf install` 阶段因 BuildKit builder 进程退出而中断，**与 PR 代码变更无关**——这是一个 CI 基础设施瞬态故障，构建流程尚未到达软件安装/编译阶段。
+PR 变更仅为新增 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套元数据/文档更新，Dockerfile 本身语法正确，`dnf install` 中列出的包（gcc、gcc-c++、make、wget、openssl-devel、bzip2-devel、zlib-devel）均为 openEuler 仓库中的标准包。构建在 dnf 下载 metadata 阶段（尚未开始安装具体包）时 builder 断连，**此失败与 PR 代码变更无关**，属于 CI 基础设施问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-CI 基础设施问题，**无需修改 PR 代码**。重新触发 CI 流水线即可。若频繁复现，需由 CI 运维排查 BuildKit builder 节点（`ecs-build-docker-x86-hk`）的资源或稳定性问题。
+### 方向 1（置信度: 中）
+此为 CI 基础设施故障（BuildKit builder 断连），Code Fixer 无需对 Dockerfile 做任何修改。建议直接重新触发 CI 构建（re-run），若多次重试仍失败，则需排查 CI runner 的资源配额（内存/磁盘）或 BuildKit builder 容器的稳定性。
 
 ## 需要进一步确认的点
-- 该 BuildKit builder 掉线是否在该 CI runner 上频繁发生（检查同一 runner 上其他近期构建的历史）
-- runner 节点资源（内存/磁盘）是否充足，`graceful_stop` 是否由 OOM/磁盘满触发
+- 同一 CI runner（`ecs-build-docker-x86-hk`）在相近时间段是否有其他构建也遇到 BuildKit builder 断连问题，以排除单点基础设施故障
+- BuildKit builder 容器 `euler_builder_20260709_224657` 是否因 OOM（内存不足）被 kill，可在 runner 上检查 dmesg/syslog 中的 OOM killer 记录
+- runner 的磁盘空间是否充足，`docker system df` 是否存在大量未清理的构建缓存导致空间耗尽
