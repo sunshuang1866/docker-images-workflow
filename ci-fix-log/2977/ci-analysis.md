@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler仓库HTTP2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, repo.openeuler.org, yum install, aarch64
+- 新模式标题: openEuler仓库网络抖动
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, Curl error (56), Failure when receiving data from the peer, repo.openeuler.org, No more mirrors to try
 
 ## 根因分析
 
@@ -18,25 +18,29 @@
 #7 1310.2 [MIRROR] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm [HTTP/2 stream 125 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1310.2 [FAILED] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1310.3 Error: Error downloading packages:
-#7 ERROR: process "/bin/sh -c yum install -y ..." did not complete successfully: exit code: 1
+#7 1310.3   vim-common-2:9.0.2092-36.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
+#7 ERROR: process "/bin/sh -c yum install -y         git gcc gcc-c++ make cmake which         openssl-devel         gflags-devel         protobuf-devel protobuf-compiler         abseil-cpp-devel         leveldb-devel snappy-devel &&     yum clean all && rm -rf /var/cache/yum" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install` 步骤）
-- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上构建时，`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库多次返回 HTTP/2 流协议错误（curl error 92: `Stream error in the HTTP/2 framing layer`）和 SSL 连接断开（curl error 56）。虽然 gcc、kernel-headers 等大型包通过重试机制成功下载，但作为最后下载的 `vim-common` 包在首次下载失败后所有镜像源均已耗尽，yum 最终报错退出。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11`（yum install 步骤）
+- 失败原因: CI aarch64 runner（`ecs-build-docker-aarch64-04-sp`）在 yum 安装依赖包时，从 `repo.openeuler.org` 下载 RPM 包的过程中遭遇多次间歇性网络故障（HTTP/2 流错误 `Curl error 92` 和 SSL 连接中断 `Curl error 56`）。gcc、kernel-headers、perl-MIME-Base64 三个包先后触发 `[MIRROR]` 重试警告后恢复，但 `vim-common` 包的下载在重试后仍失败，yum 退出码为 1。基础镜像拉取和 172/173 个包下载均正常完成，说明网络并非完全不通，而是存在间歇性波动。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 仅新增了一个结构正确的 Dockerfile（`yum install` 安装依赖的方式与其他 brpc Dockerfile 完全一致）及配套的 README、image-info.yml、meta.yml 条目。失败原因为 openEuler 24.03-LTS-SP4 aarch64 仓库服务器的 HTTP/2 协议层面不稳定，属于 CI 基础设施问题。
+与 PR 变更**完全无关**。PR 仅新增了 brpc 1.16.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容本身无任何语法或逻辑错误，`yum install` 指定的包名（gcc、cmake、openssl-devel 等）均为 openEuler 仓库中的合法包名。失败原因是 openEuler 官方软件源与 CI aarch64 runner 之间的网络链路出现了临时性故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** 这是 `repo.openeuler.org` 镜像站的临时性 HTTP/2 协议问题，不是代码问题。重新触发一次构建（retry / re-run），待仓库服务器稳定后，yum 即可正常下载所有 RPM 包并完成 Docker 镜像构建。不需要对 Dockerfile 或任何代码文件做修改。
+**重试 CI 构建流水线。** 此类 `repo.openeuler.org` 的 HTTP/2 流错误和 SSL 连接中断通常是暂时性的网络波动（服务端负载波动或链路瞬断）。从日志看，前三组报错的包（gcc、kernel-headers、perl-MIME-Base64）在重试后均成功下载，最后一组 vim-common 的重试次数耗尽才导致整体失败——通过网络状况好转或扩大重试次数即可解决。建议直接重新触发 CI 构建。
 
-### 方向 2（置信度: 低）
-如果多次重试后 vim-common 包仍然无法下载，可能需要在 Dockerfile 的 `yum install` 命令中增加 `--setopt=retries=10` 或 `--setopt=timeout=120` 参数，增加下载重试次数和超时时间，以应对仓库服务器的间歇性不稳定。但鉴于日志中 gcc（30 MB）和 kernel-headers（1.7 MB）均通过重试成功下载，这更可能是临时性的服务端问题而非需要客户端侧调优。
+### 方向 2（置信度: 中）
+**在 Dockerfile 中为 yum 增加重试参数**以提高对间歇性网络故障的容忍度。若网络问题持续出现，可在 `yum install` 命令中添加 `--retries 5 --retry-delay 30` 等参数，使 yum 对下载失败的包进行更多次重试，避免因单次网络抖动导致整次构建失败。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库当前是否处于维护或不可用状态（可通过浏览器或 curl 直接访问该 URL 验证）
-- 确认该构建失败是否为偶发性（若同一 PR 在 x86-64 架构上构建成功，可进一步佐证这是 aarch64 仓库的临时问题）
-- 确认 vim-common 包本身在 SP4 aarch64 仓库中是否真实存在（非 404，只是下载被 HTTP/2 流错误中断）
+- 确认 x86_64 架构的同一分支构建是否也失败（当前日志仅包含 aarch64 runner 的构建输出）
+- 确认 `repo.openeuler.org` 在该时间段是否存在服务端故障或负载过高的情况
+- 若重试后仍失败，需排查 CI runner `ecs-build-docker-aarch64-04-sp` 到 `repo.openeuler.org` 的网络链路是否存在持续性丢包或 DNS 解析问题
+
+## 修复验证要求
+（无需验证——失败类型为 infra-error，不存在需要修改的正则或代码）
