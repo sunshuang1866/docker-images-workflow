@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像网络不稳定
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, yum install, aarch64
+- 新模式标题: 镜像站网络不稳定
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, repo.openeuler.org
 
 ## 根因分析
 
@@ -19,23 +19,21 @@
 #7 1310.2 [FAILED] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1310.3 Error: Error downloading packages:
 #7 1310.3   vim-common-2:9.0.2092-36.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
+#7 ERROR: process "/bin/sh -c yum install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Dockerfile:4-11`（`yum install` 步骤）
-- 失败原因: CI 构建节点（`ecs-build-docker-aarch64-04-sp`）到 openEuler 官方软件仓库 `repo.openeuler.org` 的网络连接不稳定，多个 aarch64 RPM 包下载过程出现 HTTP/2 流错误（`INTERNAL_ERROR`）和 SSL 读取错误（`SSL_ERROR_SYSCALL`），其中 `vim-common` 包在所有镜像源重试均失败后导致构建终止。
+- 失败位置: `Dockerfile:4`（`RUN yum install -y ...` 步骤）
+- 失败原因: `repo.openeuler.org` 镜像站在 aarch64 构建期间出现 HTTP/2 连接中断（Curl error 92）和 SSL 读失败（Curl error 56），导致多个 RPM 包下载过程中反复重试，最终 `vim-common` 包耗尽所有镜像重试次数而彻底失败。
 
 ### 与 PR 变更的关联
-**与 PR 无关**。PR 仅新增了一个 Dockerfile 及配套的元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 中的 `yum install` 命令语法和包名均正确。失败完全由 CI 运行时与上游软件仓库之间的网络不稳定导致，属于基础设施问题。
+PR 变更与本次失败**无关**。PR 仅新增了 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile` 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容为常规的 `yum install` + `cmake` + `make` 构建流程，没有任何语法错误或逻辑问题。失败纯粹由 openEuler 官方镜像站 `repo.openeuler.org` 在 aarch64 架构运行时出现网络不稳定所致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-此失败为 **infra-error**，无需修改 PR 代码。处理方式：
-- 在 CI 中重新触发构建（retry），网络问题通常为暂时性波动，重试后大概率可通过。
-- 如果持续失败，排查 CI 构建节点 `ecs-build-docker-aarch64-04-sp` 到 `repo.openeuler.org` 的网络链路质量，或考虑在该节点配置本地 RPM 缓存/代理。
+**无需修改代码，重试构建即可。** 本失败属于 `infra-error`，根因是 `repo.openeuler.org` 镜像站网络瞬时故障，与 PR 代码变更无关。在镜像站恢复稳定后，重新触发 CI 构建即可通过。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 在 CI 构建时段是否存在服务端异常或 CDN 节点故障。
-- 确认同一 PR 的 x86_64 架构构建是否也出现类似网络问题（当前日志仅覆盖 aarch64 架构）。
-- 如果重试后仍持续失败，需检查 CI 节点网络配置（DNS、代理、防火墙）是否有变更。
+- 确认 `repo.openeuler.org` 镜像站当前状态是否已恢复（可通过浏览器访问或 `curl -I` 测试）。
+- 若同一 PR 多次重试均在同一阶段（aarch64 包下载）失败，需排查是否为镜像站对特定 IP 段（CI runner 的出口 IP）存在限流或连接限制。
