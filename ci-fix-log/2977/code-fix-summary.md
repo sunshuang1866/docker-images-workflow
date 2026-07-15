@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败原因为基础设施层面：aarch64 runner 与 `repo.openeuler.org` 之间的网络波动（HTTP/2 帧错误 `Curl error 92`、SSL 读错误 `Curl error 56`），导致 RPM 包（vim-common 等）下载失败。
+无需代码修改。CI 失败为 `infra-error`：CI 在 aarch64 节点上构建时，`repo.openeuler.org` 镜像站出现 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），导致多个 RPM 包下载失败。
 
 ## 修改的文件
-- 无
+无。CI 失败由基础设施网络问题引起，与 PR 代码无关。
 
 ## 修复逻辑
-CI 失败分析报告判定失败类型为 `infra-error`，置信度"高"。失败原因是 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库在构建期间持续出现 HTTP/2 INTERNAL_ERROR，与本次 PR 新增的 Dockerfile 及配套文件内容无关。日志中多个无关包（gcc、kernel-headers、perl-MIME-Base64、vim-common）先后出现同类网络错误，进一步确认问题在于仓库服务端网络，而非包缺失或 Dockerfile 语法错误。建议重新触发 CI 运行，等待上游仓库网络恢复后构建即可通过。
+CI 分析报告明确指出失败类型为 `infra-error`，根因是 `repo.openeuler.org` 镜像站在 aarch64 节点上对外提供 RPM 包时出现间歇性 HTTP/2 流错误。PR #2977 仅新增了标准的 Dockerfile 和配套元数据文件，`yum install` 命令格式与同类文件一致，无代码缺陷。等待镜像站网络恢复后重新触发 CI 构建即可。
 
 ## 潜在风险
 无
