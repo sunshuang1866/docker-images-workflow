@@ -5,43 +5,41 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: 包仓库HTTP/2流错误
+- 新模式症状关键词: `Curl error (92)`, `Stream error in the HTTP/2 framing layer`, `INTERNAL_ERROR`, `No more mirrors to try`, `repo.****.org`
 
 ## 根因分析
 
 ### 直接错误
 ```
 #8 1243.9 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 31 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#7 1268.5 [MIRROR] glibc-devel-2.38-107.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/glibc-devel-2.38-107.oe2403sp4.x86_64.rpm [HTTP/2 stream 17 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#8 1468.3 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 37 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#7 1598.9 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 15 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#8 1767.8 [MIRROR] guile-2.2.7-6.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/guile-2.2.7-6.oe2403sp4.x86_64.rpm [HTTP/2 stream 43 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 27 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#8 1468.3 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ... [HTTP/2 stream 37 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#8 1767.8 [MIRROR] guile-2.2.7-6.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ... [HTTP/2 stream 43 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ... [HTTP/2 stream 27 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #8 1830.2 [FAILED] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #8 1830.2 Error: Error downloading packages:
 #8 1830.2   gcc-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
-#8 ERROR: process "/bin/sh -c dnf install -y       git gcc gcc-c++ gcc-gfortran make       openblas-devel lapack-devel &&     dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7`（builder 阶段 `dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库服务器在执行 HTTP/2 下载时反复出现 `Stream error in the HTTP/2 framing layer`（Curl error 92），多个 RPM 包（`gcc`、`gcc-gfortran`、`glibc-devel`、`guile`）均受影响，经过多次 mirror 重试后 `gcc` 包最终耗尽所有镜像源，dnf 下载失败导致构建中断。
+- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-9`（dnf install 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件包仓库镜像（`repo.****.org`）在处理 HTTP/2 请求时持续返回 `INTERNAL_ERROR`（Curl error 92），导致 `dnf` 下载 `gcc`、`gcc-gfortran`、`guile`、`glibc-devel` 等多个 RPM 包失败，最终因所有镜像均已尝试但均未成功而构建终止。运行时阶段（#7 stage-1）同样遭遇相同 HTTP/2 流错误，但被取消。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** PR 仅新增了一个合法的 Dockerfile（`Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile`），其 `dnf install` 命令语法正确，所需包名均有效。失败原因是 openEuler 24.03-LTS-SP4 上游 RPM 仓库的 HTTP/2 服务端存在协议层问题，同一日志中 builder 阶段（#8）和 runtime 阶段（#7）的 dnf 进程均遭遇了相同的 HTTP/2 stream 错误，且部分包在重试后成功下载（#7 的 `glibc-devel` 在第一次 mirror 错误后于 `#7 1374.9` 重试成功），说明这是 repo 服务端的间歇性问题，与 Dockerfile 内容无关。
+**与 PR 代码变更无关。** 本次 PR 仅新增了一个基于 `openeuler:24.03-lts-sp4` 基础镜像的 Dockerfile 及配套文档/元数据文件。Dockerfile 中的 `dnf install` 命令写法与同仓库其他 Dockerfile（如同目录下 sp3 版本）完全一致。失败根源是 openEuler 24.03-LTS-SP4 软件包仓库服务器端在处理 HTTP/2 请求时出现的流错误，属于 CI 环境与上游仓库之间的网络/基础设施问题。
+
+已有的 `cb37c53-oe2403sp3` 镜像使用 openEuler 24.03-LTS-SP3 软件源，并未出现此类问题，进一步说明这是 SP4 仓库侧的孤立问题，与 Dockerfile 本身无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**触发 CI 重试。** 这是上游 RPM 仓库的 HTTP/2 服务端间歇性故障，不属于代码问题。等待仓库服务恢复后重新触发构建流水线即可。如果问题持续，可联系 openEuler 基础设施团队排查 repo 服务器的 HTTP/2 配置或负载情况。
+**重新触发 CI 构建。** 此类 HTTP/2 Stream Error (INTERNAL_ERROR) 通常为仓库镜像服务器的**瞬时性网络问题**，可能与 CDN 节点的 HTTP/2 连接处理不稳定有关。等待仓库恢复后重试构建（retrigger）即可通过。
 
-### 方向 2（置信度: 中）
-**如果问题持续出现，可在 Dockerfile 的 dnf 配置中添加重试/超时参数。** 在 `dnf install` 前设置 `echo "retries=10" >> /etc/dnf/dnf.conf` 和 `echo "timeout=120" >> /etc/dnf/dnf.conf` 增加 dnf 自身的下载重试次数与超时容忍度，提高对间歇性 HTTP/2 错误的容错能力。但此方向仅为临时缓解措施，根本解决仍需上游仓库修复。
+### 方向 2（置信度: 低）
+**若问题持续存在**，可能是 openEuler 24.03-LTS-SP4 仓库的特定镜像节点存在持久性 HTTP/2 实现缺陷。此时需联系仓库运维排查服务端 HTTP/2 配置，或在 Dockerfile 构建前添加 `dnf config-manager` 配置临时切换到其他可用镜像源。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 RPM 仓库的 HTTP/2 服务端是否已恢复正常（可在 CI 环境中单独执行 `dnf download gcc-12.3.1-110.oe2403sp4 --repo=OS` 验证）
-- 确认同一时段是否有其他 PR（同样基于 24.03-lts-sp4）也遭遇相同错误，以排除本 PR 的 Dockerfile 中包名或仓库配置存在特殊问题
 
-## 修复验证要求
-无需修复验证。此报告判定为 infra-error，Code Fixer 无需处理。
+1. 重试 CI 后是否仍然出现相同的 HTTP/2 错误——若多次重试均失败，则可能是 openEuler 24.03-LTS-SP4 仓库的持久性问题而非瞬时故障。
+2. 其他使用 `openeuler:24.03-lts-sp4` 基础镜像的 Dockerfile（如 `Others/` 下其他已存在的 sp4 版本）是否也同时失败——如果是，则证实为仓库侧全局问题。
+3. CI runner 与 `repo.****.org` 之间的网络链路是否正常（是否存在代理或防火墙干扰 HTTP/2 长连接）。
