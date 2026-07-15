@@ -1,20 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），非 PR 代码缺陷。
+无需代码修改。CI 失败属于基础设施层面问题（`infra-error`），与 PR #2995 中的代码变更无关。
 
 ## 修改的文件
-无
+无。该问题是 CI 基础设施中 `eulerpublisher` 包的测试脚本 `bwa_test.sh` 包含 Windows 风格换行符（CRLF），导致 shebang 行 `/bin/sh` 末尾附带了 `\r`，Unix 内核无法识别解释器路径。
 
 ## 修复逻辑
-CI 失败根因是 CI 运行节点上 eulerpublisher 包中的 `bwa_test.sh` 测试脚本包含 Windows CRLF 行尾符（`\r`），导致 shebang 行被解析为 `/bin/sh\r`，系统找不到该解释器而报 "bad interpreter: No such file or directory"。
+CI 分析报告明确指出：
+- Docker 镜像构建和推送均成功完成
+- 失败仅发生在 [Check] 阶段，根因是 `eulerpublisher` 包中的 `bwa_test.sh` 携带 CRLF 换行符
+- PR 修改的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）均不涉及该测试脚本
+- 此问题应在 `eulerpublisher` 仓库中修复，将 `bwa_test.sh` 的换行符从 CRLF 转换为 LF
 
-该问题：
-1. 与 PR #2995 的代码变更完全无关（PR 仅新增 Dockerfile 及配套元数据文件）
-2. Docker 镜像构建和推送均成功完成
-3. 失败发生在 CI 后处理阶段（`[Check]`），由 eulerpublisher 测试工具包自身的问题引发
-
-应由 CI 基础设施维护者对该节点上的 `bwa_test.sh` 执行 `dos2unix` 或 `sed -i 's/\r$//'` 去除回车符后重新部署。
+根据任务指令：分析报告已判定为 `infra-error`，无需修改任何代码。
 
 ## 潜在风险
-无
+无。本 PR 的代码变更无需任何修改。
