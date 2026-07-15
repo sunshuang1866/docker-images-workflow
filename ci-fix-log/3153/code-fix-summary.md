@@ -1,21 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改——CI 失败原因是外部 appstore 校验工具 `eulerpublisher/update/container/app/update.py` 对根目录 `README.md` 的路径校验存在误判，PR #3153 的 README.md 变更内容本身正确无误。
+无需代码修复 — CI 失败属于基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无。PR #3153 仅修改了 `README.md`（文档更新），其内容正确，无需改动。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- "PR 代码变更本身内容正确"
-- "失败原因是 CI appstore 路径校验器对根目录 README.md 的路径判定与预期不符，属于 CI 校验层面的问题，而非 PR 变更内容有问题"
+CI 失败根因是 `eulerpublisher/update/container/app/update.py` 中的 appstore 发布规范预检工具对文件路径做了严格字符串匹配：检测到的 `README.md`（无前导 `/`）与期望的 `/README.md` 不匹配而导致检查失败。这是一个 CI 工具侧的路径格式匹配偏差（bug），并非 PR 文档内容变更引起。
 
-此问题需要在外部工具 `eulerpublisher/update/container/app/update.py`（位于 [EulerPublisher](https://gitee.com/openeuler/eulerpublisher) 仓库）中修复路径校验逻辑，例如：
-- 将仓库根目录级文档文件（如 `/README.md`、`/README.en.md`）加入 appstore 校验的豁免/白名单列表；
-- 或修正 `update.py` 中 `git diff` 输出前缀（`a/`、`b/`）的剥离逻辑。
-
-由于该工具不在当前源码仓库内，且不在允许修改的文件列表中，本仓库无需也不应进行任何代码变更。
+PR 仅修改了 `README.md` 中的可用镜像 Tags 列表，属于纯文档更新，不涉及任何镜像构建逻辑或元数据。该 CI 失败需由 eulerpublisher 工具维护方修复（统一路径 normalize 或为根目录文档添加豁免规则），PR 作者侧无需也不应修改任何代码来绕过 CI 检查。
 
 ## 潜在风险
-无。该修复不影响本仓库任何文件，PR 可被视为 CI 工具误报造成的阻塞，待 CI 工具修复后重新触发构建即可通过。
+无
