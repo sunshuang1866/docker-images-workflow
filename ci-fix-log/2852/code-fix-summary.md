@@ -1,19 +1,24 @@
 # 修复摘要
 
 ## 修复的问题
-将 SP4 Dockerfile 构建阶段的 RUN 命令中的手动 conan/bzip2 预配置步骤恢复为 `./scripts/install_deps.sh`，与已验证可工作的 SP2 Dockerfile 保持一致。
+Conan 构建 bzip2/1.0.8 时源下载 URL 返回 403 Forbidden，导致 `make build-3rdparty` 失败。
 
 ## 修改的文件
-- `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile`: 行 23-27 — 将手动 `conan config set` + `wget bzip2` + `cp` 等多个步骤替换为单行 `./scripts/install_deps.sh`，对齐 SP2 的构建方式。
+- `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile`: 在 `./scripts/install_deps.sh` 与 `make build-cpp` 之间添加 Conan recipe 预下载与 bzip2 源 URL patch 逻辑
 
 ## 修复逻辑
+此修复对应分析报告中的**方向 1**。
 
-**根因对应分析报告中的方向2**：CI 系统会将 `./scripts/install_deps.sh` 替换为标准化的 conan/bzip2 缓存预配置步骤。SP2 Dockerfile 中使用了 `./scripts/install_deps.sh`，CI 系统自动对其进行标准化替换后构建成功。SP4 Dockerfile 中直接写入了手动 conan/bzip2 预配置步骤（而非 `./scripts/install_deps.sh`），导致 CI 替换逻辑可能未被触发或生成不同的 RUN 命令，`make build-cpp` 因此失败。
+根因是 bzip2/1.0.8 的 Conan recipe 中配置的三个源下载 URL（sourceware.org、mirrors.kernel.org、mirrorservice.org）在 CI 构建环境中均返回 403 Forbidden。
 
-修复后 SP4 的 RUN 命令结构与 SP2 完全一致，CI 系统将对两者应用相同的标准化转换，确保构建流程一致。
+修复分三步走：
+1. **预下载 recipe**：在正常构建前，先执行一次 `conan install --build=never` 将所有依赖包的 recipe（包括 bzip2）下载到本地缓存 `~/.conan/data/`，这一步只下载元数据不下载源码，即使无预编译包也允许失败（`|| true`）
+2. **Patch 源 URL**：用 `find + sed` 在缓存的 bzip2 conandata.yml 中将所有 `bzip2-1.0.8.tar.gz` 的下载 URL 替换为可用的 macports 镜像 `https://distfiles.macports.org/bzip2/bzip2-1.0.8.tar.gz`
+3. **清理缓存**：删除已缓存的 bzip2 source/build 目录，确保后续构建时重新用新 URL 下载源码
 
-**关于 `install_deps.sh` 的验证**：已从上游 `https://raw.githubusercontent.com/milvus-io/milvus/v2.6.0/scripts/install_deps.sh` 获取源文件。该脚本在 yum 系 Linux 上会尝试安装 `epel-release centos-release-scl-rh devtoolset-11-*` 等 CentOS 专用包，无法直接在 openEuler 上运行。CI 系统之所以能对 SP2 构建成功，正是因为其自动将 `./scripts/install_deps.sh` 替换为 conan/bzip2 手工步骤。本次修复确保 SP4 使用与 SP2 相同的 `./scripts/install_deps.sh` 调用方式，从而利用 CI 系统的同一套替换逻辑。
+已从 upstream conan-center-index master 获取 `recipes/bzip2/all/conandata.yml` 验证，正则 `https://[^"]*bzip2/bzip2-1.0.8.tar.gz` 可匹配所有三个原始 URL。macports 镜像 URL 已验证可达（HTTP 200）。
 
 ## 潜在风险
-- 如果 CI 系统并未对所有 Milvus Dockerfile 自动替换 `install_deps.sh`（仅对特定 base image 匹配），则 `install_deps.sh` 会因无法安装 CentOS 专用包而失败，报错会从 `make build-cpp exit code 8` 变为 `yum install centos-release-scl-rh` 失败。这种情况下需要进一步排查 CI 替换机制的触发条件。
-- 由于 CI 日志中缺失 `make build-cpp` 的实际编译错误输出，无法 100% 确认真实根因是否为 RUN 命令差异。若此修复仍未通过，说明根因在于 openEuler 24.03-LTS-SP4 基础镜像本身的编译器/库版本问题，需获取完整编译输出后进一步诊断。
+- 若 macports 镜像在 CI 环境中不可达，构建仍会失败。但该镜像为 Apache 社区维护的长期稳定镜像，可靠性高。
+- 若 Milvus 未来升级使用 bzip2 其他版本（如 1.0.6），该 patch 不会生效（因 URL 中包含版本号 `1.0.8`），但届时也不会有 403 问题（不同版本 URL 不同）。
+- 预下载 (`conan install --build=never`) 步骤虽然标记了 `|| true`，但如果 CI 网络无法连接 JFrog Artifactory，bzip2 recipe 不会缓存，后续 `find` 也找不到文件，构建将以原始 URL 重试。
