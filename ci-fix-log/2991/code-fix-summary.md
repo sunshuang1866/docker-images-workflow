@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。此次 CI 失败为 `infra-error`，根因是 `repo.openeuler.org` 仓库镜像站对 aarch64 架构的 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR），属于 CI 基础设施瞬时故障，与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施问题（infra-error），根因是 `repo.openeuler.org` aarch64 仓库镜像 HTTP/2 服务端瞬时故障。
 
 ## 修改的文件
-无（无需修改任何代码）
+无
 
 ## 修复逻辑
-CI 失败分析报告明确判定为 `infra-error`，失败发生在 `dnf install` 从 `repo.openeuler.org` 下载 RPM 包时，因镜像站 HTTP/2 服务端瞬时故障导致多个包（git-core、gcc-c++、guile）下载失败。PR 仅添加了标准的 Dockerfile（`dnf install -y git gcc gcc-c++ make cmake` + 源码编译 vvenc），命令行完全正常。建议重试 CI 构建，等待镜像站恢复后重新触发流水线。
+失败类型为 `infra-error`，与 PR 代码变更无关。错误信息显示 dnf 从 `repo.openeuler.org` 下载 aarch64 架构 RPM 包（git-core、gcc-c++、guile）时反复出现 `Curl error (92): Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`，属于镜像站服务端瞬时故障。PR 新增的 Dockerfile 中 `dnf install -y git gcc gcc-c++ make cmake` 命令完全正常。
+
+**修复方向**：重试 CI 构建即可。若多次重试仍失败，需检查 `repo.openeuler.org` 的 aarch64 OS 仓库是否持续不可用，或考虑为 dnf 配置备用镜像源。
 
 ## 潜在风险
 无
