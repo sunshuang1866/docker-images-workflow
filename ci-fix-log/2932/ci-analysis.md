@@ -5,7 +5,7 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 容器引导失败
+- 新模式标题: BuildKit 构建器启动失败
 - 新模式症状关键词: Error response from daemon, Could not find the file, buildx_buildkit, booting buildkit
 
 ## 根因分析
@@ -28,32 +28,24 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 引导阶段（非 Dockerfile 构建阶段）
-- 失败原因: Docker daemon 在创建 BuildKit 构建容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法访问该容器的根文件系统（`/`），导致 BuildKit 引导失败。
+- 失败位置: Docker buildx builder 初始化阶段（CI 基础设施层），非 Dockerfile 构建阶段
+- 失败原因: Docker daemon 在创建 buildx builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法在容器内找到文件 "/"，导致 buildkit 引导（`[internal] booting buildkit`）失败。该错误发生在 docker-container driver 的 buildx 实例初始化阶段，CI 尚未进入任何 Dockerfile 的 BUILD 步骤（日志中无 `#2`, `#3` 等后续构建步骤）。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 错误发生在 Docker BuildKit 内部引导阶段——从 `moby/buildkit:buildx-stable-1` 镜像创建 builder 容器时，Docker daemon 自身报错 `Could not find the file / in container`。此时尚未进入 PR 所提交的 Dockerfile 构建步骤（未执行任何 RUN、COPY 等指令）。PR 的变更（新增 glibc 2.42 Dockerfile、更新 README、image-info.yml、meta.yml）均不涉及 CI 基础设施或 Docker daemon 配置。
-
-日志中其他步骤均正常通过：
-- 源代码克隆成功
-- `eulerpublisher` diff 检测正确识别了 4 个变更文件
-- 镜像规范检查通过（`The image specification check for releasing on appstore has passed`）
-- 仅在 `docker buildx build` 的 buildkit 容器初始化阶段崩溃
+**无关。** 该 PR 仅新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及配套元数据文件（README.md、image-info.yml、meta.yml），CI 在 buildx builder 容器初始化阶段即失败，未能进入 Dockerfile 解析或镜像构建步骤。错误发生在 Docker daemon 与 buildx buildkit 容器的交互层面，与 PR 代码变更无任何关联。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-此为 CI 基础设施故障，**无需修改 Dockerfile 或 PR 代码**。应排查 CI runner 节点 `ecs-build-docker-x86-hk` 上的 Docker daemon 状态：
-- 检查 Docker daemon 存储驱动（overlay2/devicemapper）是否正常
-- 检查 `/var/lib/docker` 磁盘空间或 inode 是否耗尽
-- 重启 Docker daemon 并清理残留的 buildkit 容器后重试 CI
+**无需 PR 代码修改。** 此为 CI 基础设施问题（Docker daemon / buildx 环境异常），应由 CI 运维团队排查 buildx builder 节点的 Docker daemon 状态。可能原因包括：
+- Runner 节点（`ecs-build-docker-x86-hk`）上的 Docker daemon 状态异常或存储驱动故障
+- `moby/buildkit:buildx-stable-1` 镜像拉取后容器启动异常
+- buildx builder 残留容器清理不彻底导致新 builder 创建冲突
 
-### 方向 2（置信度: 中）
-`moby/buildkit:buildx-stable-1` 镜像拉取后可能存在层损坏。可在 runner 上执行 `docker rmi moby/buildkit:buildx-stable-1` 强制重新拉取后重试。
+建议操作：在 CI 面板手动重试该 PR 的构建流水线（retry）。
 
 ## 需要进一步确认的点
-- CI runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon 日志（`journalctl -u docker`），确认 `Could not find the file /` 的更深层原因（存储驱动错误、文件系统损坏等）
-- 同一时间段内其他 PR 的 x86-64 构建 job 是否也遇到相同错误，以判断是单点故障还是集群级问题
-
-## 修复验证要求
-（无需填写——修复方向均为 CI 基础设施操作，不涉及正则 patch 外部源文件。）
+- Runner 节点 `ecs-build-docker-x86-hk` 在 2026-07-09 20:57 前后 Docker daemon 的健康状态
+- 该节点上是否存在残留的 buildx builder 容器（`buildx_buildkit_euler_builder_*`）未正确清理
+- 同一时间窗口内该节点上其他 CI 任务是否也出现相同的 buildx 引导失败
+- 若重试后仍然失败，需确认 `moby/buildkit:buildx-stable-1` 镜像是否可正常拉取和运行
