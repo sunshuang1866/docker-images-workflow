@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM仓库HTTP2流中断
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
+- 新模式标题: 镜像仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 stream, INTERNAL_ERROR, MIRROR, No more mirrors to try
 
 ## 根因分析
 
@@ -19,25 +19,20 @@
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
 #7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
-#7 ERROR: process "/bin/sh -c dnf install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:6（`RUN dnf install -y ...` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 软件仓库（`repo.****.org`）在本次构建期间出现 HTTP/2 协议层传输异常（`Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`），多个包（cmake-data、git-core、gcc-c++）先后遭遇相同错误。虽然 dnf 的重试机制使大部分包最终成功下载，但 `gcc-c++-12.3.1-110.oe2403sp4.x86_64` 在两次 HTTP/2 流中断重试后耗尽了所有镜像地址，下载彻底失败，导致整个 `dnf install` 命令返回 exit code 1。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 镜像仓库（`repo.****.org`）在通过 HTTP/2 协议提供 RPM 包下载时发生传输层流错误（Curl error 92），导致 `gcc-c++` 包的两次下载尝试均失败，最终 `dnf install` 因所有镜像均已尝试无果而退出。受影响的包还包括 `cmake-data`（1 次失败后重试成功）和 `git-core`（1 次失败后重试成功）。
 
 ### 与 PR 变更的关联
-**无关。** 该 PR 仅新增一个 grads 2.2.3 的 Dockerfile 及相关元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 中的 `dnf install` 命令语法正确、包名列表与同类 `24.03-lts-sp4` 镜像一致。失败根因是 openEuler 上游 RPM 仓库镜像的 HTTP/2 协议临时异常，属于 CI 基础设施问题，与 PR 代码变更无任何因果关联。
+**与 PR 变更无关。** 本次 PR 新增的 Dockerfile 语法正确、包名有效（从日志可见大部分包下载成功，安装列表中的 package list 被正确解析）。失败原因是 openEuler 24.03-LTS-SP4 官方 YUM 仓库在 CI 构建期间的 HTTP/2 传输层不稳定，属于基础设施层面的网络问题。Dockerfile 本身无需修改。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，重新触发 CI 构建即可。** 本次失败为 openEuler 软件仓库镜像的 HTTP/2 协议临时故障，属于瞬态 infra-error。该仓库在多个 PR 构建中同时提供服务，此类偶发性的 HTTP/2 流中断通常会自行恢复。建议：在 Jenkins 上重新触发一次构建（retry/re-build），大概率可通过。
-
-### 方向 2（置信度: 低）
-若多次重试仍失败，可能说明 `repo.****.org` 的特定 CDN/镜像节点存在持续性 HTTP/2 兼容性问题。此时可考虑在 Dockerfile 的 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 强制 dnf 使用 HTTP/1.1 协议下载，绕过 HTTP/2 层问题。但此方向仅作为持续失败时的备选方案，当前证据不充分，不建议主动修改代码。
+**重新触发 CI 构建。** 该错误是仓库镜像端 HTTP/2 传输层临时故障，与代码无关。等待仓库镜像恢复后重新运行 CI 流水线即可，Dockerfile 无需任何修改。
 
 ## 需要进一步确认的点
-- `repo.****.org`（被脱敏掩码的 openEuler 软件仓库域名）的实际地址及该镜像站点的当前健康状态
-- 该构建节点（`ecs-build-docker-x86-03-sp`）到该仓库的网络链路是否稳定
-- 该仓库是否近期升级了 HTTP/2 配置导致与特定 curl 版本不兼容
+- 确认 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）在 CI 构建时段是否有已知的 HTTP/2 服务端异常或维护窗口。
+- 如果重试后仍然失败，需要排查 CI runner 所在网络环境到仓库的 HTTP/2 连接是否被中间代理或防火墙干扰。
