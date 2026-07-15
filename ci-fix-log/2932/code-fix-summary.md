@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：Docker BuildKit 容器创建失败（`Could not find the file /`），非代码问题，无需代码修改。
+无需代码修复。CI 失败为基础设施问题（Docker BuildKit 在 `ecs-build-docker-x86-hk` runner 上引导失败），与 PR 代码变更无关。
 
 ## 修改的文件
-无（本次失败为 infra-error，不需要对任何源代码文件进行修改）
+无
 
 ## 修复逻辑
-CI 失败分析报告明确指出，错误发生在 BuildKit 启动阶段（`[internal] booting buildkit`），在 PR 的 Dockerfile 实际执行之前即已失败。日志中没有任何 Dockerfile 步骤编号（如 `#2`、`#3`）出现，说明 Docker 构建流程尚未进入 PR 所定义的任何构建步骤。根因是 CI runner `ecs-build-docker-x86-hk` 上 Docker daemon 或 buildx 构建器实例的临时故障，与 PR #2932 的代码变更（新增 glibc 2.42 的 Dockerfile、更新 meta.yml、README.md、image-info.yml）完全无关。属于 `infra-error` 类型，不需要对 PR 文件做任何代码修改。
+CI 失败分析报告判定失败类型为 `infra-error`，根因是 Docker 守护进程在创建 BuildKit 构建容器后无法访问其根文件系统（`Could not find the file / in container`），错误发生在 `[internal] booting buildkit` 阶段，早于任何 Dockerfile 指令执行。该 PR 仅新增了 glibc 2.42 在 openEuler 24.03-LTS-SP4 上的标准模板文件，不涉及任何可能导致此类错误的代码变更。
+
+建议操作：重新触发 CI 运行（retry），大概率可自行恢复。若持续复现，需排查 runner 节点的 Docker 存储驱动状态或磁盘空间。
 
 ## 潜在风险
 无
