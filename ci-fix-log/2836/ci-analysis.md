@@ -3,41 +3,59 @@
 ## 基本信息
 - PR: #2836 — chore(cassandra): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 模式33
-- 新模式标题: (无需填写)
-- 新模式症状关键词: (无需填写)
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
 #9 [4/5] RUN curl -o /tmp/cassandra-5.0.6.tar.gz https://archive.apache.org/dist/cassandra/5.0.6/apache-cassandra-5.0.6-bin.tar.gz && ...
+#9 0.097   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+#9 0.097                                  Dload  Upload   Total   Spent    Left  Speed
+...（约 134 秒全部为 0 字节传输）...
 #9 134.4 curl: (28) Failed to connect to archive.apache.org port 443 after 134353 ms: Couldn't connect to server
-#9 ERROR: process "/bin/sh -c curl -o /tmp/cassandra-${VERSION}.tar.gz https://archive.apache.org/dist/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz && ..." did not complete successfully: exit code: 28
+#9 ERROR: process "/bin/sh -c ..." did not complete successfully: exit code: 28
 ------
 Dockerfile:13
+--------------------
+  13 | >>> RUN curl -o /tmp/cassandra-${VERSION}.tar.gz https://archive.apache.org/dist/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz && \
+  14 | >>>     tar -zxvf /tmp/cassandra-${VERSION}.tar.gz -C /tmp && \
+  15 | >>>     cd /tmp/apache-cassandra-${VERSION}/bin && \
+  16 | >>>     rm -rf /tmp/cassandra-${VERSION}.tar.gz
 ```
 
 ### 根因定位
-- 失败位置: `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile:13`
-- 失败原因: CI 构建环境（aarch64 runner）无法通过 TCP 连接 `archive.apache.org:443`，curl 在 ~134 秒后超时（exit code: 28）。属于 CI 基础设施网络不可达问题，与 PR 代码变更无关。
-
-### 值得注意的 URL 差异
-PR diff 中 Dockerfile 第 13 行指定的下载 URL 为 `https://dlcdn.apache.org/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz`，但 CI 实际执行时却使用了 `https://archive.apache.org/dist/cassandra/5.0.6/apache-cassandra-5.0.6-bin.tar.gz`。二者在域名（`dlcdn.apache.org` vs `archive.apache.org`）和路径前缀（`cassandra/` vs `dist/cassandra/`）上均不同。说明 CI 编排层可能有 URL 重写或代理转换机制，导致实际请求走到了不可达的 `archive.apache.org`。
+- 失败位置: `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile:13`（curl 下载 Cassandra 步骤）
+- 失败原因: CI 构建环境无法与 `archive.apache.org:443` 建立 TCP 连接，curl 在约 134 秒后超时返回 exit code 28。前序步骤（yum 安装 java、groupadd/useradd）均执行成功。
 
 ### 与 PR 变更的关联
-**无关**。PR 变更仅新增了 Cassandra 5.0.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml）。Docker 构建前两个步骤（`yum install java`、`groupadd/useradd`）均已成功完成（#7 DONE, #8 DONE），直到 curl 下载 Apache 制品时因网络不可达而失败。该网络问题与 PR 代码无关，任何需要从 `archive.apache.org` 下载制品的 PR 在该 CI 环境下都会同样失败。
+PR 新增了 `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile`（新文件），这是 CI 中本次失败的唯一构建目标。值得注意的是，**PR Dockerfile 中定义的下载源是 `dlcdn.apache.org`**，而 CI 日志中实际执行的 curl 命令使用了 `archive.apache.org`——两者不一致：
+
+| 来源 | 下载 URL |
+|------|---------|
+| PR diff（Dockerfile 原文） | `https://dlcdn.apache.org/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz` |
+| CI 日志（实际执行） | `https://archive.apache.org/dist/cassandra/5.0.6/apache-cassandra-5.0.6-bin.tar.gz` |
+
+URL 差异说明 CI 构建环境可能对 Apache 下载 URL 进行了替换/代理重写，将 `dlcdn.apache.org` 请求定向到 `archive.apache.org`，而 `archive.apache.org` 从该 CI runner（aarch64）不可达。这与知识库中**模式33**完全吻合——多个历史案例均因 `archive.apache.org` 网络不可达导致 Docker 构建失败。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修改 PR 代码。** 这是 CI 基础设施网络问题（`archive.apache.org` 从当前 aarch64 runner 不可达），与 Dockerfile 内容无关。建议：
-- 重新触发 CI 构建，确认是否为临时网络波动。
-- 若 `archive.apache.org` 持续不可达，CI 运维团队需排查 runner 节点的网络/防火墙/DNS 配置，或调整 CI 的 URL 重写规则，使下载请求走可达的镜像源（如 `dlcdn.apache.org`、`repo.huaweicloud.com` 等）。
-- 参考历史模式 33（Apache 镜像站网络不通）中的类似处理方式。
+### 方向 1（置信度: 中）
+将 Cassandra 下载源从 Apache 官方 CDN/归档站替换为华为云镜像站或清华镜像站。参考历史案例 PR #3101、#3077、#3108、#3103 的修复方式，使用 `repo.huaweicloud.com/apache/cassandra/` 或 `mirrors.tuna.tsinghua.edu.cn/apache/cassandra/` 作为下载源。这些镜像站在 CI 环境中已被验证可达。
+
+注意：即使 PR 原文已使用 `dlcdn.apache.org`，CI 对该域名的隐式重写仍可能导致流量被导向 `archive.apache.org`。直接用非 Apache 域名（华为云/清华镜像站）可完全绕过 CI 的 URL 重写机制。
+
+### 方向 2（置信度: 低）
+确认 CI 系统中是否存在 URL 代理或重写规则（将 `dlcdn.apache.org` 映射到 `archive.apache.org`）。如果这是 CI 基础设施层面的配置错误，修复 CI 配置本身即可，无需修改 Dockerfile。
 
 ## 需要进一步确认的点
-1. CI 编排层是否有 URL 重写/代理转换规则，将 `dlcdn.apache.org` 请求改写为 `archive.apache.org`？若有，该规则是否存在配置错误（例如路径前缀转换不正确）？
-2. `archive.apache.org` 在 CI runner 节点上的网络可达性——是临时超时还是永久不可达？从当前 aarch64 runner 上执行 `curl -v https://archive.apache.org` 测试网络连通性。
-3. `dlcdn.apache.org` 在 CI runner 节点上是否可达？若可达，是否可以绕开 URL 重写直接使用？
+1. **URL 替换机制**：需要确认 CI 构建环境是否有机房级代理/URL 重写规则将 `dlcdn.apache.org` 的请求透明转发到 `archive.apache.org`。如果存在此类规则，可考虑在 CI 配置中将重写目标改为华为云或清华镜像站。
+2. **dlcdn.apache.org 在 CI 环境中的实际可达性**：如果直接测试 `dlcdn.apache.org` 在该 CI runner 上可达，说明问题出在 URL 重写层而非网络层，此时无需修改 Dockerfile 下载源。
+3. **其他架构 runner 的构建结果**：日志只展示了 aarch64 构建过程，需确认 x86_64 runner 是否也遇到同样的网络连接问题。
+
+## 修复验证要求
+- code-fixer 修改 Dockerfile 下载源后，需确认 CI 构建环境实际执行的 URL 不再指向 `archive.apache.org`。可通过 CI 日志中 curl 命令的实际 URL 来验证。
+- 如果修复方向选为"换华为云镜像站"，需先在浏览器或 CI runner 上手动验证 `https://repo.huaweicloud.com/apache/cassandra/5.0.6/apache-cassandra-5.0.6-bin.tar.gz` 是否返回 HTTP 200，确认华为云镜像站确实托管了 Cassandra 5.0.6 的二进制包。
