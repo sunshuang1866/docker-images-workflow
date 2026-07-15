@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败原因为基础设施问题：CI runner 环境中缺少 `shunit2` shell 测试框架库文件，导致 `eulerpublisher` 在构建和推送成功后的 [Check] 验证阶段无法执行测试脚本。此问题与 PR #2893 的代码变更完全无关。
+无代码修改。CI 失败原因为 `infra-error`：CI Runner 环境缺失 `shunit2` 测试框架依赖，与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-根据分析报告，Docker 镜像构建（bind9 9.21.23 从源码编译）和推送（docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64）均已成功完成，失败仅发生在 CI 框架的后处理/Check 阶段。报告明确将此归类为 `infra-error`（CI 基础设施问题），置信度为高，并指出 Code Fixer 无需处理 PR 代码。需要 CI 运维人员在 runner 环境中安装 `shunit2`（可通过 `dnf install shunit2` 或从源码安装）。
+CI 分析报告确认：
+- Docker 镜像构建（meson compile + install，全部 422 步）和推送均已成功完成
+- 失败仅发生在 CI Pipeline 的容器验证阶段（`[Check]`），原因是 CI Runner 的 `eulerpublisher` 测试环境缺少 `shunit2` Shell 测试框架
+- PR #2893 仅新增 bind9 24.03-lts-sp4 的 Dockerfile 及元数据文件，与 shunit2 缺失无关
+
+该问题需由 CI 运维团队在 Runner 镜像/初始化脚本中安装 `shunit2`（如 `dnf install shunit2 -y`）。本次无需对仓库代码做任何修改。
 
 ## 潜在风险
 无
