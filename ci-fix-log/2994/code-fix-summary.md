@@ -1,22 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（BuildKit builder 容器意外终止），与 PR 代码变更无关。
+CI 基础设施故障：BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载系统包时被服务端主动关闭（`graceful_stop`），导致 gRPC 传输连接中断，构建失败。
 
 ## 修改的文件
-无
+无代码修改。该失败属于 infra-error，与 PR 代码变更无关。
 
 ## 修复逻辑
-CI 失败分析报告判定失败类型为 `infra-error`，置信度 **高**。直接错误为：
+CI 失败分析报告明确指出：Dockerfile 无语法错误，构建在基础镜像拉取成功后、包安装阶段因 builder 崩溃而中断，日志中无任何由 PR 代码引起的编译错误、依赖缺失或测试失败。失败原因是 dnf 包下载速度极慢（77 kB/s，2.8 MB 耗时 37 秒）可能导致构建耗时过长触发 builder 超时清理或资源回收。
 
-```
-ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
-ERROR: no builder "euler_builder_20260709_224657" found
-```
-
-Docker BuildKit builder 容器（`euler_builder_20260709_224657`）在 `dnf install` 下载元数据阶段被优雅终止（`graceful_stop`），属于 CI 基础设施层面的瞬时故障。PR 新增的 Dockerfile 中 `dnf install` 命令语法正确，所列包名均为 openEuler 有效包名，构建中断与代码变更**无因果关系**。
-
-**建议操作**：重新触发 CI 构建即可。
+**建议操作**：重试 CI 构建即可，无需修改任何代码。
 
 ## 潜在风险
 无
