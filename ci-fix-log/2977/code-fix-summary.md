@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 构建失败是由于 `repo.openeuler.org` 临时网络故障（HTTP/2 流层中断）导致 yum 无法下载 RPM 包，属于基础设施问题（infra-error），与 PR 变更无关。
+无需代码修复。CI 失败原因为基础设施层面：aarch64 runner 与 `repo.openeuler.org` 之间的网络波动（HTTP/2 帧错误 `Curl error 92`、SSL 读错误 `Curl error 56`），导致 RPM 包（vim-common 等）下载失败。
 
 ## 修改的文件
-无
+- 无
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`，置信度 **高**。Dockerfile 中的包列表、构建命令语法正确、逻辑合理。失败的直接原因是 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）在连接 `repo.openeuler.org` 时多次遇到 Curl error (92) "HTTP/2 stream was not closed cleanly: INTERNAL_ERROR" 和 Curl error (56) SSL 读取失败，导致 `vim-common` 等包在所有镜像源重试耗尽后仍无法下载。根据规范要求，infra-error 无需进行代码修改，重试 CI 即可。
+CI 失败分析报告判定失败类型为 `infra-error`，置信度"高"。失败原因是 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库在构建期间持续出现 HTTP/2 INTERNAL_ERROR，与本次 PR 新增的 Dockerfile 及配套文件内容无关。日志中多个无关包（gcc、kernel-headers、perl-MIME-Base64、vim-common）先后出现同类网络错误，进一步确认问题在于仓库服务端网络，而非包缺失或 Dockerfile 语法错误。建议重新触发 CI 运行，等待上游仓库网络恢复后构建即可通过。
 
 ## 潜在风险
-无。无代码变更，不引入任何风险。
+无
