@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施故障（`infra-error`），Docker BuildKit 在构建节点 `ecs-build-docker-x86-hk` 上启动失败（`Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`），PR 代码变更尚未进入执行阶段。
+无需代码修改。CI 失败为基础设施故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无（基础设施问题，不需要代码修改）
+无
 
 ## 修复逻辑
-CI 日志显示构建在 `[internal] booting buildkit` 阶段即失败，Dockerfile 中的任何指令均未被处理。此错误与 PR #2932 新增的 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及元数据文件无关。建议联系 CI 运维团队检查构建节点上的 Docker 守护进程状态及 BuildKit 配置，重试 CI 流水线。
+CI 分析报告明确判定该失败为 `infra-error`，置信度：高。Docker BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 在 `[internal] booting buildkit` 阶段即失败，报错 "Could not find the file / in container"。此阶段发生在任何 Dockerfile 构建指令执行之前，PR 变更的 `Others/glibc/` 文件从未被构建。
+
+根本原因是 CI runner 节点上 Docker 存储驱动或容器运行时瞬时异常，建议操作：
+1. 在 CI 系统中重新触发本次构建
+2. 若重试仍失败，检查 CI runner 节点 `ecs-build-docker-x86-hk` 的 Docker 版本、buildx 版本及存储驱动配置
 
 ## 潜在风险
-无
+无 — 未对任何源代码进行修改。
