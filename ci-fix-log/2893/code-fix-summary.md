@@ -1,17 +1,22 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施问题（`infra-error`），非 PR 代码缺陷。
+无需代码修改。CI 失败属于基础设施问题（infra-error），CI Runner 节点缺少 `shunit2` shell 测试框架。
 
 ## 修改的文件
-无
+无。
 
 ## 修复逻辑
-CI 分析报告已明确：Docker 镜像构建和推送均已成功完成（422/422 编译目标通过，镜像成功推送至 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`），失败发生在 CI 后处理验证阶段。
+CI 分析报告确认该失败为 infra-error 类型：
+- PR 的 Dockerfile 构建阶段完全成功（meson 配置、422/422 编译单元、链接均通过）
+- `[Build] finished` 和 `[Push] finished` 日志均显示成功
+- 镜像已成功构建并推送
+- 失败仅发生在构建完成后的 CI 自检阶段（`[Check] test failed`），原因是 `common_funs.sh` 尝试加载 `shunit2` 但该框架未安装在 CI Runner 环境中
 
-根因是 CI runner 环境中 `shunit2` shell 测试框架缺失，导致 `common_funs.sh` 脚本中 `. shunit2` source 命令报 "file not found"。这与 PR #2893 新增的 bind9 Dockerfile 及元数据文件无关，属于 CI 运行环境问题。
+根因在 CI 基础设施，与 PR 代码变更无关，Code Fixer 不进行任何代码修改。
 
-修复应在 CI 运维层面进行：在 CI runner 节点上安装 `shunit2` 包（如 `yum install shunit2` 或等效方式），确保 `common_funs.sh` 能正确 source 该框架。
+## 修复方向
+CI 运维人员需在 Runner 节点上安装 `shunit2`（如 `dnf install shunit2`），使容器镜像检查脚本恢复正常。
 
 ## 潜在风险
-无 — 未做任何代码修改。
+无。
