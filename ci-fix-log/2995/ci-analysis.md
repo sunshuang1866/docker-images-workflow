@@ -5,34 +5,38 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 测试脚本CRLF换行
-- 新模式症状关键词: /bin/sh^M, bad interpreter, CRLF, bwa_test.sh
+- 新模式标题: 测试脚本换行符错误
+- 新模式症状关键词: bad interpreter, ^M, No such file or directory, CRLF, bwa_test.sh
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-10 11:58:06,454 - INFO - [Check] checking ****test/bwa:0.7.18-oe2403sp4-x86_64 ...
 /bin/sh: /usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh: /bin/sh^M: bad interpreter: No such file or directory
-2026-07-10 11:58:06,457-/usr/local/lib/python3.9/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
+2026-07-10 11:58:06,457 - CRITICAL - [Check] test failed
 ```
 
 ### 根因定位
-- 失败位置: CI 编排工具 `eulerpublisher` 安装目录下的测试脚本 `/etc/eulerpublisher/tests/container/app/bwa_test.sh`
-- 失败原因: `bwa_test.sh` 脚本文件的换行符为 Windows 风格（CRLF `\r\n`）而非 Unix 风格（LF `\n`），导致 shebang 行 `#!/bin/sh` 实际被解析为 `#!/bin/sh\r`。内核尝试查找名为 `/bin/sh\r` 的解释器，因该路径不存在而报 `bad interpreter: No such file or directory`。
+- 失败位置: `/usr/etc/eulerpublisher/tests/container/app/bwa_test.sh`（CI eulerpublisher 工具内置测试脚本）
+- 失败原因: CI 基础设施中 eulerpublisher 工具自带的 `bwa_test.sh` 测试脚本包含 Windows 风格换行符（CRLF，即 `\r\n`），导致 shebang 行 `#!/bin/sh\r` 中的 `\r`（显示为 `^M`）被内核当作解释器路径的一部分，内核无法找到 `/bin/sh\r` 这个不存在的解释器，脚本执行失败。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增了 `HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile` 及配套元数据文件（README.md、image-info.yml、meta.yml），Docker 镜像构建和推送均已成功完成（日志中 `[Build] finished`、`[Push] finished`）。失败发生在 CI 工具链的 `[Check]` 阶段，由 `eulerpublisher` 包内置的 `bwa_test.sh` 测试脚本自身格式问题导致，属于 CI 基础设施缺陷。
+**与 PR 变更无关。** Docker 镜像构建（Build）和推送（Push）阶段均已成功完成：
+- `#7 DONE 199.0s` — Docker build 所有步骤（yum 安装依赖、curl 下载源码、make 编译、清理）均通过，仅有 `bwt_gen.c` 的两个编译 warning（未使用变量），不影响构建。
+- `[Build] finished` / `[Push] finished` — 镜像已成功构建并推送到 `****test/bwa:0.7.18-oe2403sp4-x86_64`。
+- 失败仅发生在 CI 流水线的 [Check] 后置测试阶段，且根因是 CI 服务器上 eulerpublisher 工具自带的 `bwa_test.sh` 文件存在 CRLF 换行符问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-`eulerpublisher` 仓库中的 `tests/container/app/bwa_test.sh` 文件需要将换行符从 CRLF 转换为 LF。在 `eulerpublisher` 仓库根目录执行 `dos2unix tests/container/app/bwa_test.sh` 或通过 `sed -i 's/\r$//' tests/container/app/bwa_test.sh` 转换后重新发布 `eulerpublisher` 包。
-
-### 方向 2（置信度: 低）
-如果 `eulerpublisher` 仓库中根本不存在 `bwa_test.sh` 文件，则说明 CI 在运行时从其他源动态生成了该脚本，且生成过程未正确处理换行符。需要排查 `eulerpublisher` 中生成/复制测试脚本的逻辑。
+**无需修改 PR 代码。** 这是一个纯 CI 基础设施问题，需要由 CI 平台运维人员修复：
+- 登录 CI runner 节点（`ecs-build-docker-x86-hk`），定位文件 `/usr/etc/eulerpublisher/tests/container/app/bwa_test.sh`
+- 使用 `dos2unix` 或 `sed -i 's/\r//'` 将文件换行符从 CRLF 转换为 LF
+- 如果该 file 是由 eulerpublisher pip 包安装的，则需从源头修复 eulerpublisher 包内的该文件并重新发布
 
 ## 需要进一步确认的点
+- 确认该 `bwa_test.sh` 文件是 eulerpublisher 包安装时自带的，还是由其他 CI 步骤动态生成的
+- 确认其他使用 bwa 镜像的 PR 是否也因同一测试脚本而失败（如果是，说明该文件已被污染一段时间）
+- 确认 aarch64 架构的 build job 是否存在同样的测试脚本问题
 
-1. 确认 `eulerpublisher` 仓库中是否确实存在 `tests/container/app/bwa_test.sh` 文件，以及其当前换行符格式。
-2. 确认该脚本是何时被添加到 `eulerpublisher` 仓库的——如果是在本 PR 之前不久才添加的，则可能是添加时引入的格式问题。
-3. 排除一种边缘情况：确认 CI 的 `[Check]` 步骤是否有从 PR 分支动态拉取测试脚本的机制。若测试脚本实际来源于 PR 分支目录（而非 `eulerpublisher` 包），则需要修复的是 PR 分支中的对应文件路径。
