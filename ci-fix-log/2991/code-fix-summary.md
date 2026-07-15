@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于基础设施错误（infra-error）：aarch64 构建节点通过 dnf 从 `repo.openeuler.org` 下载 RPM 包时，CDN 服务器出现 HTTP/2 流异常（Curl error 92: Stream error in the HTTP/2 framing layer），导致部分包下载失败，`dnf install` 退出码为 1。
+无需代码修复。CI 失败类型为 `infra-error`，根因是 `repo.openeuler.org` 仓库服务器端 HTTP/2 协议层间歇性故障（Curl error 92: INTERNAL_ERROR），与 PR 代码变更无关。
 
 ## 修改的文件
-无。此失败与 PR 代码变更无关，Dockerfile 语法正确，`dnf install` 列出的包名均为有效包名，依赖解析阶段已通过。
+无（无需代码修改）
 
 ## 修复逻辑
-分析报告确认失败类型为 infra-error（置信度: 高），根因定位在 `repo.openeuler.org` CDN 的 HTTP/2 实现存在间歇性问题。PR 新增的 Dockerfile 不存在代码缺陷，无需修改。
-
-建议操作：重新触发 CI 作业重试。如果持续复现，可在 Dockerfile 的 `dnf install` 前配置 dnf 禁用 HTTP/2（`echo "http2=False" >> /etc/dnf/dnf.conf`），但此优化不应作为本次 CI 修复的一部分，属于后续改进方向。
+CI 失败分析报告明确指出：
+- 失败原因是 `repo.openeuler.org` 在 aarch64 构建节点上下载 RPM 包时反复出现 HTTP/2 Stream error，属于 CI 基础设施/上游仓库网络问题。
+- PR 仅新增了标准的 Dockerfile（`dnf install -y git gcc gcc-c++ make cmake`），语法正确、包名有效，与失败无关。
+- 修复方向 1（高置信度）：等待上游仓库恢复后重试 CI 即可。
 
 ## 潜在风险
 无
