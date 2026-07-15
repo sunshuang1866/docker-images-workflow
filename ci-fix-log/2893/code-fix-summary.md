@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修改。CI 失败原因为 `infra-error`：CI Runner 环境缺失 `shunit2` 测试框架依赖，与 PR 代码变更无关。
+CI 失败属于 **infra-error**，无需对 PR 代码做任何修改。
 
 ## 修改的文件
-无
+无（无需修改代码）
 
 ## 修复逻辑
-CI 分析报告确认：
-- Docker 镜像构建（meson compile + install，全部 422 步）和推送均已成功完成
-- 失败仅发生在 CI Pipeline 的容器验证阶段（`[Check]`），原因是 CI Runner 的 `eulerpublisher` 测试环境缺少 `shunit2` Shell 测试框架
-- PR #2893 仅新增 bind9 24.03-lts-sp4 的 Dockerfile 及元数据文件，与 shunit2 缺失无关
+CI 分析报告明确指出：Docker 镜像构建（meson setup/compile/install，422 个目标全部通过）和推送（push 成功）均已完成，失败仅发生在 CI 后处理阶段 [Check] 中。根因是 CI runner 环境中 `shunit2`（Shell 单元测试框架）文件缺失，`common_funs.sh` 脚本第 13 行 `source shunit2` 时找不到该文件导致测试阶段报错。
 
-该问题需由 CI 运维团队在 Runner 镜像/初始化脚本中安装 `shunit2`（如 `dnf install shunit2 -y`）。本次无需对仓库代码做任何修改。
+此为 CI 基础设施配置问题，应由 CI 运维侧在 runner 镜像或测试环境中安装 `shunit2` 框架来解决，与 PR 新增的 bind9 Dockerfile、named.conf 及元数据文件无关。
 
 ## 潜在风险
-无
+无（未修改任何代码）
