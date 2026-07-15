@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败由 CI 基础设施（`eulerpublisher/update/container/app/update.py`）中的路径规范化缺陷导致，非 PR 改动内容本身有问题。
+无需代码修改 — CI 失败为基础设施问题（infra-error），非 PR 代码缺陷。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确指出：失败类型为 CI 工具自身的路径规范化问题——`git diff` 输出的相对路径 `README.md` 被传入 appstore 校验逻辑，与期望的绝对路径 `/README.md` 产生字符串不匹配。PR 仅修改了仓库根目录下的纯文档文件 `README.md`，无任何应用镜像相关文件变更，改动内容本身无问题。
+CI appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py`）对仓库根目录下的纯文档文件 `README.md` 执行了路径格式校验，将实际路径 `README.md` 与期望路径 `/README.md`（带前导 `/`）进行比对，因不匹配而判定失败。此问题源于 CI 工具的路径校验规则未合理豁免非镜像目录文件，与本 PR 的文档内容变更无关。该失败模式与历史 PR #2512 中 `.claude/README.md` 路径校验失败一致。
 
-根据分析报告的推定为 infra-error（CI 基础设施问题）：根因在 `eulerpublisher/update/container/app/update.py:273` 的 appstore 发布规范预检工具中，该工具应对 git diff 输出的路径进行归一化处理（补前导 `/`），或增加根目录文档文件的过滤豁免逻辑。该文件不在 PR 允许修改的文件列表 `['README.md']` 中，且按照修复原则，不应强行修改代码来绕过 CI 工具缺陷。
+根因在 CI 编排工具侧，需要在该工具中对根目录文档文件（如 `README*.md`）做白名单豁免，或对路径比较做标准化处理（统一前导 `/`）。本仓库 `README.md` 内容正确，无需且不应通过修改 PR 代码来绕过此 CI 工具缺陷。
 
 ## 潜在风险
-无。PR 未做任何代码修改，不会引入回归风险。CI 工具的问题需由 CI 维护团队在工具侧修复（路径归一化或文档文件豁免）。
+无 — 未对源代码做任何修改。
