@@ -3,19 +3,16 @@
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
 - 失败类型: infra-error
-- 置信度: 中
-- 知识库匹配: 新模式
-- 新模式标题: 根目录README路径校验偏差
-- 新模式症状关键词: Path Error, expected path should be, README.md, eulerpublisher, update.py
+- 置信度: 高
+- 知识库匹配: 模式11
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:27:51,489 - INFO: Difference: [
-    "README.md"
-]
-2026-07-14 11:28:17,839 - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:28:17,839-/.../update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
@@ -26,26 +23,28 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI 中 `eulerpublisher/update/container/app/update.py:273`（appstore 发布规范校验步骤）
-- 失败原因: CI 的 appstore 发布规范校验工具检测到仓库根目录的 `README.md` 发生了变更，对其进行路径合规性检查时，报告路径错误：期望路径为 `/README.md`，但 `README.md` 本身即位于仓库根目录。该检查所使用的路径比较逻辑（可能为严格字符串匹配含/不含前导斜杠的差异）未能正确识别根目录文件的有效路径，导致误报 `FAILURE`。PR 变更内容为纯文档修改（更新可用镜像 Tags 列表），与构建/测试/代码逻辑无关。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`
+- 失败原因: CI 的 appstore 发布规范预检对仓库根目录的 `README.md` 执行了路径校验，要求路径格式为 `/README.md`，但变更检测返回的路径为 `README.md`（无前导 `/`），路径字符串比较不匹配导致检查失败。该预检本应仅针对应用镜像目录（`{category}/{app}/{version}/{os-version}/`）下的文件执行，不应作用于仓库根级别的纯文档文件。
 
 ### 与 PR 变更的关联
-PR 仅修改了 `README.md` 和 `README.en.md` 中的可用镜像 Tags 列表（将 `24.03-lts-sp2` 更新为 `24.03-lts-sp4` 并新增 sp3、25.09 条目），未涉及任何 Dockerfile、构建脚本或代码逻辑变更。CI 失败是 eulerpublisher appstore 校验工具对根目录 README 文件的路径判断逻辑问题，与 PR 改动内容无实质关联。
+**该失败与 PR 的改动无代码逻辑层面的关联**。PR 仅修改了仓库根目录的 `README.md` 和 `README.en.md` 两个文件，内容是更新基础镜像可用 Tag 列表（新增 `24.03-lts-sp4`、`24.03-lts-sp3`、`25.09`、`24.03-lts-sp2` 条目，修正 past/latest 所指版本）。PR 不涉及任何 Dockerfile、`meta.yml`、`image-info.yml` 或 `image-list.yml` 的变更，纯属文档维护性提交。
+
+CI 流水线中的 appstore 发布规范预检（`update.py`）根据 git diff 检测到 `README.md` 发生变更后，自动对该文件执行路径格式校验，而该文件作为仓库根层级的说明文档，不属于任何应用镜像的最小目录单元，不适用 appstore 路径规范。CI 预检未区分"应用镜像目录内的 README"和"仓库根目录的 README"，属于 CI 工具侧的逻辑缺陷。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-此失败为 CI 基础设施问题（eulerpublisher 工具的 appstore 路径校验逻辑对根目录 README.md 存在误判），与 PR 代码变更无关。PR 作者无需修改任何文件内容。需由 CI 维护方排查 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑：
-- 确认校验逻辑是否对前导斜杠 `/` 的包含与缺失做了严格区分；
-- 确认校验逻辑是否应当排除根目录级别、非镜像目录层级的纯文档文件（如 `README.md`）的 appstore 路径检查。
+### 方向 1（置信度: 高）
+**CI 流水线侧修复**：在 `eulerpublisher/update/container/app/update.py` 的变更文件过滤逻辑中，增加对仓库根目录文件（`README.md`、`README.en.md`、`.gitignore` 等非应用镜像目录下的文件）的豁免规则，使 appstore 发布规范预检仅在检测到 `{category}/{app}/` 路径下的文件变更时才触发路径格式校验。或者，修复路径比较逻辑中的前导 `/` 规范化问题（确保 `README.md` 与 `/README.md` 在语义上被视为等同）。
 
 ### 方向 2（置信度: 低）
-如果 CI 校验逻辑本身不可更改，可尝试在 PR 提交前确认 `README.md` 的文件路径在 CI 校验时是否以特定格式传递（如在 git diff 输出中被表示为无前导斜杠的相对路径，而校验工具期望带 `/` 前缀的绝对路径），但这属于 CI 工具侧的兼容性问题，不应由 PR 作者修改文档内容来规避。
+**绕过方案**：如果 CI 工具的变更检测触发逻辑难以修改，可在 PR 工作流中增加策略——当 PR 仅包含根目录文档文件变更时，跳过 appstore 规范预检步骤。但这属于临时方案，不如方向 1 从工具侧根除问题。
 
 ## 需要进一步确认的点
-1. 确认 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑具体实现，明确 `/README.md` 与 `README.md` 的比较是否因路径格式差异导致误报。
-2. 确认 CI 管线中对纯文档 PR（仅修改 README 等非镜像目录文件）是否应跳过 appstore 发布规范检查。
-3. 验证同一 CI 流程中 `README.en.md` 是否同样触发了路径错误（日志中仅显示 `README.md` 的检查结果），如未触发，需对比两份文件的路径格式在 CI 工具中的处理差异。
+1. `eulerpublisher/update/container/app/update.py` 中第 273 行附近的路径校验逻辑具体实现（`[Path Error] The expected path should be /README.md` 的触发条件），确认是路径前缀规范化问题还是文件豁免逻辑缺失。
+2. CI 流水线是否有"纯文档 PR 跳过 appstore 检查"的策略配置项，若已有该配置，确认 PR 为何未被正确识别为纯文档变更。
+3. 历史 `模式11` 中记录的多起 `.claude/README.md` 和 `.claude/agents/README.md` 路径校验失败案例是否与本次根因相同，以确认这是一个已知但未彻底修复的 CI 工具缺陷。
 
-## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
-不适用。此 CI 失败为基础设施问题，不涉及对外部源文件的 patch 操作。
+## 修复验证要求
+此报告判定为 `infra-error`，修复应在 CI 工具代码（`eulerpublisher`）中进行，不涉及本仓库中任何 Dockerfile 或元数据文件的修改。修复后需验证：
+- 对仅修改仓库根层 README 的 PR，appstore 预检步骤应自动跳过（或通过），不再报告路径格式错误。
+- 对实际新增/修改应用镜像（含应用目录内 README.md）的 PR，路径校验仍需正常执行，确保回归防护不受影响。
