@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器断开
-- 新模式症状关键词: graceful_stop, no builder, closing transport, EOF, rpc error, euler_builder
+- 新模式标题: BuildKit Builder 崩溃
+- 新模式症状关键词: failed to receive status, Unavailable, closing transport, graceful_stop, no builder found, euler_builder
 
 ## 根因分析
 
@@ -19,18 +19,17 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 构建器 `euler_builder_20260709_224657`（非 PR 代码中任何文件）
-- 失败原因: CI 构建节点上的 BuildKit 守护进程向构建器实例发送了 `graceful_stop`（GOAWAY frame，code: NO_ERROR），随后连接断开。构建器在 Dockerfile 第 2/4 步（`dnf install` 下载 OS 元数据阶段，已执行约 39 秒）时被终止，导致后续步骤无法继续。
+- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install`（Dockerfile:11）
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 镜像构建过程中意外终止/失联，`graceful_stop` goaway 信号表明 builder 容器被关闭，导致 `dnf install` 步骤进行到 38 秒时（正在下载软件包元数据）RPC 连接断开，构建中断。
 
 ### 与 PR 变更的关联
-**无关。** 此次 PR 变更仅新增了 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容为标准的 `dnf install` 基础依赖 + Python 3.9.19 源码编译 + `pip install scann`。构建失败发生在 `dnf install` 下载仓库元数据的中途，根因是 BuildKit 构建器实例被 CI 基础设施回收/终止，与 PR 代码逻辑无关。
+**与 PR 代码变更无关。** 本次 PR 仅新增了一个标准的 Dockerfile（安装 dnf 基础包、编译 Python 3.9.19、pip 安装 scann），以及 README、image-info.yml、meta.yml 的配套文档更新。Dockerfile 本身语法正确、依赖声明合理（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel` 均为标准构建依赖）。失败发生在 BuildKit 基础设施层，`dnf install` 步骤尚在正常执行（正在下载 metadata）时 builder 即被关闭，属于 CI Runner 侧的 BuildKit daemon 异常。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需 PR 代码修改。** 该失败属于 CI 基础设施问题（BuildKit builder 被意外终止），应通过重新触发 CI job 重试。如果反复出现同类错误，需检查 CI 构建节点的资源配额（内存/磁盘/超时设置）或 BuildKit daemon 的稳定性。
+这是 CI 基础设施故障（BuildKit builder 容器意外终止），与 PR 代码无关。只需**重新触发 CI 构建**即可。`graceful_stop` 表明 builder 可能被 Runner 节点上的资源调度器或超时策略回收，重试通常能解决。
 
 ## 需要进一步确认的点
-- CI 构建节点 `ecs-build-docker-x86-hk` 在构建时间段（2026-07-09 22:46 左右）是否存在资源紧张、节点维护或被抢占的情况。
-- BuildKit builder 实例的 TTL/超时配置是否足够完成 `dnf install` 步骤（当前该步骤执行约 39 秒后被终止）。
-- 如果 JOB 状态确认为 CI_Failure 且反复重试仍失败，则可能不是单纯的 infra-error，需要获取更完整的 Runner 日志进一步排查。
+- 确认 CI Runner 节点 `ecs-build-docker-x86-hk` 的健康状态和资源水位（内存/磁盘/CPU），排查 builder 被 OOM Killer 或磁盘满逐出的可能。
+- 确认是否存在针对 BuildKit builder 的自动回收/超时策略导致正常构建被中断。
