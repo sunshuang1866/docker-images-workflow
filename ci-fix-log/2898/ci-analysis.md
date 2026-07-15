@@ -4,7 +4,7 @@
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39
+- 知识库匹配: 模式39（CI工具依赖缺失）
 - 新模式标题: (不适用)
 - 新模式症状关键词: (不适用)
 
@@ -20,30 +20,20 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 编排工具 `eulerpublisher` 在 [Check] 阶段执行镜像测试脚本 `common_funs.sh` 时，该脚本引用了 `shunit2`（Shell 单元测试框架），但当前 CI runner 上未安装 `shunit2`，导致测试脚本无法运行。
-
-Docker 镜像构建和推送本身均已成功完成——日志中可见：
-- `#7 DONE 67.8s`（下载并解压 Go）
-- `#8 DONE 40.5s`（文件时间戳处理）
-- `#9 DONE 1.5s`（清理构建工具）
-- `#10 DONE 0.0s`（设置 WORKDIR）
-- `#11 DONE 41.9s`（导出并推送镜像）
-- `[Build] finished` + `[Push] finished` 均正常
-
-失败仅发生在构建完成后的镜像测试/校验阶段，`shunit2` 缺失属于 CI 基础设施问题。
+- 失败位置: CI 编排工具 `eulerpublisher` 的 [Check] 阶段，文件 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI Runner 上的测试脚本 `common_funs.sh` 尝试 source 加载 `shunit2` 测试框架，但该框架未安装在 CI Runner 环境中（`No such file or directory`），导致容器镜像的 post-build 测试检查阶段失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，以及更新了 README.md、image-info.yml 和 meta.yml 三个元数据文件。这些改动不会、也不可能导致 CI runner 上 `shunit2` 缺失。Docker 镜像的编译和推送均已成功，证明 PR 的 Dockerfile 本身没有问题。
+**与 PR 变更无关**。证据如下：
+1. Docker 镜像构建和推送均成功完成：日志中 `#11 DONE 41.9s`、"`[Build] finished`"、"`[Push] finished`" 表明 Dockerfile 本身的构建逻辑无任何错误。
+2. 失败仅发生在构建后的 [Check] 测试阶段，错误为 CI Runner 自身缺少 `shunit2` 测试框架，属于 CI 基础设施环境问题。
+3. PR 变更仅涉及新增 1 个 Dockerfile（Go 1.25.6 on 24.03-LTS-SP4）及 3 个元数据文件（README.md、image-info.yml、meta.yml），所有构建步骤（yum 安装依赖、下载解压 go 二进制包、文件时间戳修正、构建工具卸载）均在日志中正常完成，无报错。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 环境上安装 `shunit2` Shell 测试框架。`shunit2` 是一个标准工具，可通过包管理器安装或从 [GitHub](https://github.com/kward/shunit2) 获取。这是 CI 基础设施层面的问题，**不需要对 PR 代码做任何修改**。
+CI Runner 环境缺少 `shunit2` 测试框架。需由 CI 基础设施维护者在 Runner 上安装 `shunit2`（如通过 `dnf install shunit2` 或将 shunit2 脚本部署到 `/usr/local/etc/eulerpublisher/tests/` 路径下），使其可被 `common_funs.sh` source 加载。
 
 ## 需要进一步确认的点
-- 确认 `shunit2` 是否已列入 CI runner 的基础依赖清单。如果该 runner 是临时分配的新节点，可能遗漏了安装步骤。
-- 确认同一 CI 流水线中其他镜像的 [Check] 步骤是否也遇到相同失败（若普遍存在，说明是全局 runner 配置问题）。
-
-## 修复验证要求
-(不适用 — 本失败为 infra-error，与 PR 代码无直接关联，无需 code-fixer 介入修改 Dockerfile 或元数据文件。)
+- 确认 CI Runner（`ecs-build-docker-aarch64-01-sp` 或同类节点）上 `shunit2` 是否曾正常安装、是否被意外移除或版本升级导致路径变更。
+- 确认同一 CI 环境中其他 PR 的 [Check] 阶段是否也出现相同 `shunit2` 缺失错误（若普遍存在，则确认为 Runner 级别问题）。
