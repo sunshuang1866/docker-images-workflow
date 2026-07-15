@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 构建器意外终止
-- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, euler_builder
+- 新模式标题: BuildKit构建器终止
+- 新模式症状关键词: graceful_stop, closing transport, error reading from server: EOF, no builder found, euler_builder
 
 ## 根因分析
 
@@ -19,18 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建第 7 层（Dockerfile 第 8-9 行 `RUN dnf install -y ... && dnf clean all`）
-- 失败原因: CI 基础设施中的 BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 命令过程中被外部发送 `graceful_stop` 信号强制终止，导致构建连接断开，与 PR 代码变更无关。
+- 失败位置: Dockerfile 第一个 `RUN dnf install` 步骤（Dockerfile 第 6-9 行）
+- 失败原因: BuildKit builder 容器（`euler_builder_20260709_224657`）在执行 `dnf install` 的元数据下载阶段被异常终止（GOAWAY `graceful_stop`），导致 Docker 客户端与服务端之间的 transport 连接断开（`error reading from server: EOF`），构建中断。
 
 ### 与 PR 变更的关联
-PR 新增了一个全新的 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`），这是标准的镜像新增流程，Dockerfile 内容本身无明显错误。`dnf install` 步骤正在正常下载元数据（已下载 38.59 MB）时构建器被外部终止，属于 CI 基础设施异常，非 PR 代码问题。
+**与 PR 代码变更无关。** 此次 PR 仅新增了一个标准格式的 Dockerfile（安装构建依赖 → 编译 Python 3.9.19 → pip 安装 scann）和配套的元数据文件。构建中断发生在 `dnf install` 下载 openEuler 24.03-lts-sp4 仓库元数据过程中，属于 CI 构建基础设施层的故障（builder 容器被服务端主动关闭），Dockerfile 本身的指令无任何语法或逻辑问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**不需要修改 PR 代码。** 该失败是 CI 基础设施问题——BuildKit 构建器容器在构建过程中被强制停止。应重新触发 CI 构建（re-run），如果反复出现则需要排查 Jenkins 节点资源、构建超时配置或 Docker daemon 稳定性。
+### 方向 1（置信度: 中）
+**重新触发 CI 流水线。** 此失败为 BuildKit 基础设施瞬时故障，与 PR 代码无关。建议手动重新触发 workflow（Re-run），大多数情况下 builder 资源恢复正常后构建可顺利完成。若多次重试仍复现，需排查 CI runner 节点（`ecs-build-docker-x86-hk`）上的 BuildKit daemon 资源状况（内存、磁盘、builder 实例数上限等）。
 
 ## 需要进一步确认的点
-- 同一 CI 节点上是否有其他并发构建触发了资源争抢导致构建器被驱逐
-- BuildKit 构建器 `euler_builder_20260709_224657` 的停止是超时触发还是手动/自动运维操作
-- 该节点是否有磁盘空间、内存不足等资源告警
+1. 同一时间段内是否有其他 PR 的 CI 构建也因类似 `graceful_stop` / `no builder found` 错误而失败——若存在，可确认为 CI 基础设施的批量性问题。
+2. `ecs-build-docker-x86-hk` runner 节点的 BuildKit daemon 日志，确认 `graceful_stop` 的触发原因（是资源限制、运维重启、还是 daemon 崩溃）。
+3. 重跑 CI 后观察是否通过，若仍然失败则需进一步排查 builder 节点健康状态。
