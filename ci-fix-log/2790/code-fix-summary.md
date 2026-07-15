@@ -1,17 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需代码修改。
+无需代码修改。此 CI 失败是基础设施问题（infra-error）：CI 的 appstore 发布规范校验器将根级 `README.md` 误判为需校验的应用镜像 README，导致路径校验失败。
 
 ## 修改的文件
-无
+无。`README.md` 的内容正确，无需修改。
 
 ## 修复逻辑
-CI 失败分析报告将此次失败定性为 **infra-error**（置信度：高）。PR #2790 仅修改了仓库根目录下的 `README.md` 和 `README.en.md`，更新了基础镜像可用 Tags 列表（纯文档内容更新），不涉及任何 Dockerfile、构建脚本或镜像元数据文件。
+CI 分析报告明确指出：
+- 失败类型为 `lint-error`，由 `eulerpublisher/update/container/app/update.py` 中的 appstore 发布规范校验器触发
+- "该失败并非由 PR 内容错误引起，而是 CI 规范检查器对纯文档 PR 的误判"
+- 根级 `README.md` 是仓库主文档，不隶属于任何应用镜像目录，不应被 appstore 发布规范校验器检查
 
-CI 的 `eulerpublisher/update/container/app/update.py:273` 中的 appstore 发布规范预检工具对根级 README 文件变更触发了路径校验误报（`[Path Error] The expected path should be /README.md`），这是 CI 工具行为缺陷导致的阻断，与 PR 代码变更无实质性关联。
-
-根据任务指令：分析报告明确指出 `infra-error`，应在摘要中说明无需代码修改，不强行改代码。因此本 PR 无需进行任何代码层面的修复。
+由于 `pr.changed_files` 仅包含 `README.md`，而真正的修复需要修改 CI 工具脚本（`eulerpublisher/update/container/app/update.py`）为其添加根级文档文件的跳过/白名单逻辑，不在本次可修改范围内。对 `README.md` 做任何修改均无法解决此 CI 校验失败。
 
 ## 潜在风险
-无 — 此问题需由 CI 团队确认 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑是否需要排除仓库根级文档文件的变更，或修复路径比较时的前导 `/` 缺失问题。
+无。本次未修改任何代码。
