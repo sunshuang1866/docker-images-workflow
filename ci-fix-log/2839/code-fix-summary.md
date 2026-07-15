@@ -1,18 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败系 CI runner 环境缺少 `shunit2` Shell 单元测试框架导致，属于 CI 基础设施问题（infra-error），与 PR 代码变更无关。
+无需代码修改。该 CI 失败属于基础设施错误（infra-error），CI runner 环境中缺少 `shunit2` shell 单元测试框架，与 PR #2839 的代码变更无关。
 
 ## 修改的文件
-无
+无。所有 4 个 PR 文件（Dockerfile、entrypoint.sh、README.md、meta.yml）均无需修改。
 
 ## 修复逻辑
 CI 分析报告明确指出：
-- Docker 构建阶段全部成功（编译安装、COPY、chmod、镜像导出和推送均正常完成）
-- 失败发生在 CI 工具链的容器验证 [Check] 阶段，根因是 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 执行 `source shunit2` 时报 "No such file or directory"
-- PR 变更仅涉及 postgres 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、entrypoint.sh、meta.yml 和 README.md，与 shunit2 缺失完全无关
-
-此问题应由 CI 平台维护者在 runner 环境中安装 `shunit2` 工具（如通过 `dnf install shunit2` 或 `apt install shunit2`），无需对 PR 代码做任何修改。
+1. Docker 镜像构建（Build）阶段完全成功 — PostgreSQL 17.6 源码编译通过，所有 10 个构建步骤均正常完成。
+2. 镜像推送（Push）阶段完全成功 — manifest 推送完成。
+3. 失败仅发生在 `eulerpublisher` 工具的 [Check] 阶段，根因是 CI runner 缺少 `shunit2` 依赖（`source shunit2` 失败），导致所有检查用例无法执行，检查结果表为空。
+4. 该问题与 PR 代码完全无关，属于 CI 基础设施配置问题，需由 CI 运维在 runner 环境中安装 `shunit2` 测试框架解决。
 
 ## 潜在风险
-无
+无。未做任何代码修改。
