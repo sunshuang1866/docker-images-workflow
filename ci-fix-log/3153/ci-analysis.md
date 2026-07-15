@@ -4,15 +4,15 @@
 - PR: #3153 — docs: update available base image tags in README
 - 失败类型: infra-error
 - 置信度: 低
-- 知识库匹配: 模式11
-- 新模式标题: 根级文档路径校验误报
-- 新模式症状关键词: appstore specification errors, Path Error, root README.md, documentation-only PR
+- 知识库匹配: 新模式
+- 新模式标题: 路径格式不匹配
+- 新模式症状关键词: Path Error, expected path should be, README.md, update.py, appstore specification
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:28:17,839-.../update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:28:17,839-.../eulerpublisher/update/container/app/update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
@@ -23,26 +23,30 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI appstore 发布规范预检脚本 `update.py:273`（`eulerpublisher/update/container/app/update.py`）
-- 失败原因: CI 的 appstore 发布规范检查工具对所有 PR 中修改的文件执行路径校验。该 PR 仅修改了仓库根目录的 `README.md` 和 `README.en.md`（纯文档更新，无任何 Dockerfile 或 meta.yml 变更）。CI 工具对根级 `README.md` 执行路径校验时，报 `[Path Error] The expected path should be /README.md`，但该文件实际就位于根路径 `/README.md`。这与模式11（PR #2512 中 `.claude/agents/README.md` 路径校验失败）症状相似，但本质不同——该 PR 中 `README.md` 的路径本身是**正确的**，校验工具给出的错误信息与实际情况矛盾，疑似 CI 工具对纯文档类 PR 的边界处理存在缺陷。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`（appstore 发布规范预检）
+- 失败原因: CI 的 appstore 规范检查工具通过 `git diff` 检测到变更文件 `README.md`（无前导 `/` 的相对路径形式），但其内部的路径格式校验规则期望路径以 `/` 开头（即 `/README.md`）。两者格式不匹配，导致路径校验项失败。
 
 ### 与 PR 变更的关联
-PR #3153 的变更完全集中在 `README.md` 和 `README.en.md` 的文档内容更新（更新可用的基础镜像 tag 列表），未涉及任何镜像构建文件（Dockerfile、meta.yml、image-info.yml、image-list.yml）的新增或修改。CI 的 appstore 发布规范检查将所有变化文件纳入校验范围，对根级 `README.md` 产生了路径校验误报。此失败与 PR 的具体文档内容无关，属于 CI 工具的覆盖范围/边界条件问题。
+PR 变更仅涉及两个 README 文件的纯文档更新（在 `README.md` 和 `README.en.md` 中更新可用基础镜像的 Tags 列表）。变更内容本身无关构建、测试或应用镜像——无 Dockerfile、无 meta.yml、无 image-info.yml 变更。
+
+该失败由 CI 工具（`eulerpublisher`）的路径解析/校验逻辑触发：只要 PR 修改了仓库根目录下的任何文件（包括 README），工具就会将其纳入 appstore 规范检查，而 `git diff` 返回的相对路径格式与工具内部期望的绝对路径格式不一致，导致校验失败。并非 PR 的文档内容有误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-CI 工具 `eulerpublisher/update/container/app/update.py` 中的 appstore 规范检查逻辑对根级 `README.md` 文件的路径校验处理可能存在缺陷（如路径解析相对基准目录有误、或未排除纯文档类变更）。需由 CI 维护者检查 `update.py` 中负责文件路径校验的函数（约 line 222–273 区间），排查为何根路径 `/README.md` 被判定为不符合预期路径。
+CI 工具 `eulerpublisher/update/container/app/update.py` 第 273 行附近的 appstore 规范检查逻辑中，路径比较/校验环节可能未对 `git diff` 输出的相对路径做规范化处理（如添加前导 `/`），导致根目录文件被误判为路径格式错误。需审查该处路径校验实现，确认路径格式归一化逻辑是否正确。
 
 ### 方向 2（置信度: 低）
-可能是上游 CI 工具版本与当前仓库规范存在不兼容——例如 CI 检查期望 `README.md` 仅存在于特定镜像目录下，而根级 `README.md` 被错误地纳入了 image 路径校验流程。需确认 CI 流水线触发条件是否正确排除了纯文档类 PR。
+若 appstore 发布规范检查的设计意图是仅校验应用镜像目录下的文件（如 `Bigdata/`、`AI/` 等场景目录），则根级文档文件 `README.md` 不应被纳入检查范围。需确认 `update.py` 中变更文件列表的过滤逻辑是否遗漏了对仓库根级非镜像文件的排除。
 
 ## 需要进一步确认的点
-1. **获取 `eulerpublisher/update/container/app/update.py` 源码**（约 line 222–273），核实路径校验的逻辑：校验时使用的基准目录是什么，`/README.md` 如何被解析和比对。
-2. **确认 CI 触发条件**：是否对纯文档 PR（无 Dockerfile/meta.yml 变更）做了正确跳过。若该 CI 检查本不应在文档 PR 上触发，则需修正 CI 流水线的触发规则。
-3. **确认 PR #3153 的目录结构**是否在 CI 克隆后存在路径异常（如仓库被克隆到子目录导致根路径偏移）。
-4. **对照历史案例 PR #2512（模式11）**：其中 `.claude/agents/README.md` 的路径校验错误是因为文件确实在错误位置。但本 PR 中 `README.md` 已在根路径，需确认 `update.py` 是否存在回归性缺陷。
-5. 由于本次失败仅提供 x86-64 job 日志，且该 job 报错已明确指向 `README.md` 路径校验，**不需要**额外获取 aarch64 job 日志。
+1. **`update.py` 源码确认**：需要获取 `eulerpublisher/update/container/app/update.py` 中路径校验逻辑（约第 260-280 行）的实际代码，确认路径比较时是否使用了硬编码的 `/` 前缀格式。
+2. **上游仓库确认**：`eulerpublisher` 工具的源码仓库不在本 PR 中，需要从 CI 日志中的 clone 路径（`Cloning into 'eulerpublisher'...`）确认工具的版本及对应源码。
+3. **历史成功案例分析**：确认此前修改根级 `README.md` 的 PR 是否也触发了相同校验（若是，则证明该检查与 PR 内容无关）。当前日志未能提供此信息。
 
 ## 修复验证要求
-本失败类型为 `infra-error`，不涉及 Dockerfile 或代码文件的修复，Code Fixer 无需执行修复操作。若 CI 维护者修复了 `update.py` 的路径校验逻辑，验证方式为：对任意纯文档类 PR（仅修改根级 README 文件）重新触发 CI，确认 appstore 检查通过。
+若修复方向涉及对 `eulerpublisher` 工具源码中路径校验逻辑的修改，code-fixer 必须：
+1. 从 CI 日志中确认 `eulerpublisher` 工具的 clone 仓库地址和分支/commit。
+2. 在对应源码中找到 `update.py` 第 273 行附近的路径校验逻辑。
+3. 构造一个仅修改根级 README.md 的测试变更，验证修改后路径校验项不再失败。
+4. 同时确保修改不影响 `Bigdata/`、`AI/` 等场景目录下文件的正常校验。
