@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败原因为 openEuler 24.03-LTS-SP4 镜像仓库（`repo.****.org`）在下载 RPM 包时发生 HTTP/2 流中断（Curl error 92: INTERNAL_ERROR），属于 CI 基础设施层面的网络 transient 故障，与 PR 代码改动无关。
+无需代码修改。CI 失败为基础设施错误（infra-error），根因是 openEuler 24.03-LTS-SP4 RPM 仓库服务器的 HTTP/2 协议层存在间歇性 Stream Error（Curl error 92），导致 `gcc` 等包下载失败。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-- CI 分析报告判定失败类型为 `infra-error`，置信度 **高**。
-- 失败发生在 `dnf install` 从外部仓库下载 GCC、glibc-devel 等 RPM 包阶段，多路镜像均出现 HTTP/2 stream 被服务端非正常关闭（`INTERNAL_ERROR (err 2)`）。
-- 同一个 CI 构建中 stage-1 镜像（`#7`）和 builder 镜像（`#8`）均遇到相同错误，确认是仓库侧问题而非 PR 专属。
-- PR 仅新增了 multiwfn 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及元数据文件，Dockerfile 语法和内容均正确，不涉及任何可触发此故障的代码。
-- 按照项目规范中"如果是 infra-error，无需修改代码"的要求，不对任何文件做改动。
+根据 CI 失败分析报告，本次失败与 PR #2992 的代码变更**无直接因果关系**。PR 仅新增了一个结构正确、语法无误的 Dockerfile（与现有 SP3 版本同构）及配套元数据文件更新。失败根因是 CI 构建环境中 RPM 仓库服务器的 HTTP/2 帧层间歇性错误，属于偶发性网络基础设施问题。建议操作：重新触发 CI 构建，等待仓库服务恢复后重试。
 
 ## 潜在风险
 无
