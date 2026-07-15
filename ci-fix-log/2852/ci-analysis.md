@@ -2,58 +2,48 @@
 
 ## 基本信息
 - PR: #2852 — chore(milvus): add openEuler 24.03-LTS-SP4 support
-- 失败类型: build-error
+- 失败类型: dependency-error
 - 置信度: 中
-- 知识库匹配: 新模式（近似于模式04）
-- 新模式标题: 预下载绕过镜像hook致403
-- 新模式症状关键词: curl: (22), 403, sourceware.org, bzip2, Conan hook, pre-download
+- 知识库匹配: 新模式
+- 新模式标题: Conan依赖源下载403
+- 新模式症状关键词: conan install failed, AuthenticationException 403, bzip2, Error in source() method, build-3rdparty
 
 ## 根因分析
 
 ### 直接错误
-
 ```
-#13 [builder 4/5] RUN mkdir -p /root/.conan/downloads/ab && \
-    curl -fsSL --retry 3 --retry-delay 5 \
-      -o /root/.conan/downloads/ab/ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269 \
-      https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
-#13 3.298 curl: (22) The requested URL returned error: 403
-#13 ERROR: process "/bin/sh -c ..." did not complete successfully: exit code: 22
-------
-ERROR: failed to solve: process "/bin/sh -c ..." did not complete successfully: exit code: 22
+#13 444.6 [HOOK - bzip2_source_fix.py] pre_source(): Patched bzip2/1.0.8 source URLs to use working mirrors
+#13 444.6 bzip2/1.0.8: Configuring sources in /root/.conan/data/bzip2/1.0.8/_/_/source/src
+#13 445.4 ERROR: bzip2/1.0.8: Error in source() method, line 50
+#13 445.4 	get(self, **self.conan_data["sources"][self.version], strip_root=True)
+#13 445.4 	AuthenticationException: 403: Forbidden
+#13 445.5 conan install failed
+#13 445.5 make: *** [Makefile:263: build-3rdparty] Error 1
+#13 ERROR: process "/bin/sh -c git clone -b v${VERSION} https://github.com/milvus-io/milvus.git &&     cd milvus/ &&     ./scripts/install_deps.sh &&     CXXFLAGS=\"-I/usr/include/openblas\" make build-cpp &&     make build-go" did not complete successfully: exit code: 2
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile builder 阶段第 4/5 步（对应日志 step #13），Dockerfile:43-46
-- 失败原因: CI 构建流程在 Conan 构建前执行 bzip2 预下载步骤，直接访问 `sourceware.org` 下载 bzip2-1.0.8.tar.gz，该站点返回 HTTP 403。而 step #12 中已设置了 Conan hook（`bzip2_source_fix.py`）将 bzip2 源 URL 从 `sourceware.org` 替换为 `mirrors.kernel.org`，但 step #13 的预下载绕过了此 hook，直接使用原始且已不可用的 URL。
+- 失败位置: `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile:42-46`（`make build-cpp` 步骤触发的 `build-3rdparty` 目标）
+- 失败原因: Milvus 构建流程中 `make build-cpp` → `make build-3rdparty` 调用 Conan 包管理器安装第三方依赖。Conan 的 `bzip2/1.0.8` recipe 在 `source()` 方法中尝试从配置的 URL 下载 bzip2 源码 tarball，所有源均返回 HTTP 403 Forbidden。构建环境中虽存在 `bzip2_source_fix.py` 钩子尝试修复 URL，但钩子修补后的 URL 仍然不可用（同样返回 403）。
 
 ### 与 PR 变更的关联
-PR 仅为 milvus 2.6.0 新增了 openEuler 24.03-LTS-SP4 的支持 Dockerfile（53 行）。PR diff 中 Dockerfile 的 builder 阶段仅包含 3 个 RUN 指令：
-1. `yum install` + Go 安装
-2. `rustup` + `pip install conan==1.61.0`
-3. `git clone milvus` + `scripts/install_deps.sh` + `make build-cpp` + `make build-go`
+PR 变更是纯粹的新增操作：添加了 `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile`（新文件，53 行）、更新了 `README.md` 和 `image-info.yml` 以添加新 tag 条目、更新了 `meta.yml` 以注册新版本路径。
 
-但 CI 日志显示实际构建的 Dockerfile 在 step #12 和 #13 中包含了额外的 hook 设置与 bzip2 预下载逻辑，这些内容不在 PR diff 范围内。失败的 step #13（bzip2 预下载）是由 CI 构建编排层注入的步骤，非 PR 作者直接提交。该步骤与 step #12 中设置的 Conan hook 存在逻辑矛盾——hook 已正确将 bzip2 URL 替换为镜像源，但预下载步骤却绕过了它。
+Dockerfile 中的构建命令 `./scripts/install_deps.sh && make build-cpp && make build-go` 是 Milvus 的标准构建流程，与 PR 的 Dockerfile 编写方式无关。该失败属于 Conan 上游依赖源（bzip2 1.0.8 的下载 URL）可用性问题，即使用同样的构建命令在已有的 SP2 Dockerfile 上重新触发构建，也可能遇到相同错误。**失败并非由 PR 代码变更引入的逻辑缺陷导致**，而是 Conan 包管理器尝试下载 bzip2 1.0.8 源码时所有可用镜像均返回 403。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 step #13 中 bzip2 预下载的源 URL 与 step #12 Conan hook 中的替换目标保持一致，即将 `https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz` 改为 `https://mirrors.kernel.org/sourceware/bzip2/bzip2-1.0.8.tar.gz`（该镜像源在 step #12 中已验证为可用的替代源），使预下载与 hook 逻辑一致。
+### 方向 1（置信度: 中）
+更新构建环境中 `bzip2_source_fix.py` 钩子脚本，将 bzip2 1.0.8 的下载 URL 替换为当前可用的镜像源（如 `https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz` 或通过 `repo.huaweicloud.com` 等已验证可达的镜像站提供该文件）。需确认目标 URL 可从 CI 构建环境正常下载且 hash 值与 Conan recipe 期望一致。
 
-### 方向 2（置信度: 中）
-移除 step #13 的 bzip2 预下载步骤，依赖 step #12 中设置的 Conan hook 在 Conan 构建阶段自动从镜像源下载 bzip2。预下载本身是对 Conan 下载缓存的预热，如果 Conan hook 能正确工作，预下载为冗余步骤。
-
-### 方向 3（置信度: 低）
-将预下载步骤移入 Conan hook 内部（在 `bzip2_source_fix.py` 中完成），或将 URL 改用对 CI 环境更友好的镜像站（如 `mirrors.tuna.tsinghua.edu.cn` 等）进行预下载。
+### 方向 2（置信度: 低）
+在 Dockerfile 的构建步骤中，于 `./scripts/install_deps.sh` 之前预先下载 bzip2 1.0.8 源码包并放入 Conan 本地缓存（`~/.conan/data/bzip2/1.0.8/_/_/source/`），绕过 Conan 的 `source()` 下载步骤（Conan 检测到源码已存在时会跳过下载）。
 
 ## 需要进一步确认的点
-1. Step #12 和 #13 中的额外构建步骤（bzip2 hook 设置和预下载）是由哪个 CI 编排层注入的？需要确认注入机制（如 `euler_builder` 的 Dockerfile 预处理逻辑），以便准确定位应在何处修改源 URL。
-2. `mirrors.kernel.org/sourceware/bzip2/bzip2-1.0.8.tar.gz` 在 CI 构建环境中的网络可达性是否已通过验证。
-3. PR diff 中的 Dockerfile 是否被后续提交/amend 更新过（当前 diff 与 CI 构建的 Dockerfile 可能不一致）。
-4. 预下载的目标 SHA256（`ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269`）是否与 `mirrors.kernel.org` 上的 bzip2-1.0.8.tar.gz 实际 hash 一致——若镜像站文件有差异，需要同时更新 hash 值。
+1. 该 `bzip2_source_fix.py` 钩子位于构建环境的哪个路径（宿主机全局 Conan hooks 目录或项目级配置），需要查看其当前尝试的 URL 列表，确定是哪个/哪些 URL 返回了 403。
+2. 确认已有的 Milvus 2.6.0 SP2 Dockerfile 在当前时间点重新构建是否也会触发相同的 bzip2 403 错误——如果 SP2 也失败，则确认这是时间相关（upstream 源短期故障或永久变更）而非 SP4 特定问题。
+3. 确认 Conan recipe 中 bzip2 1.0.8 期望的源码 hash（SHA256），以确保替换下载源后 hash 校验通过。
+4. 排查是否需要将 Conan 或 pip 的整体镜像源改为内部/华为云等更稳定的镜像，而非针对单个包打补丁（`bzip2_source_fix.py` 的方式属于逐个包修补，可能持续出现类似问题）。
 
 ## 修复验证要求
-若修复方向 1 被采用，code-fixer 必须在提交前：
-1. 确认 `https://mirrors.kernel.org/sourceware/bzip2/bzip2-1.0.8.tar.gz` 在 CI runner 网络环境中可达且返回 HTTP 200
-2. 验证下载文件的 SHA256 与预下载步骤中硬编码的 hash（`ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269`）一致
-3. 确认 `./scripts/install_deps.sh` 在依赖安装过程中不会重复触发同一个 sourceware.org 下载而导致二次失败
+若采用方向 1：code-fixer 必须找到构建环境中 `bzip2_source_fix.py` 的实际文件，确认当前配置的 URL 列表，替换为可从 CI 环境正常下载的镜像 URL。提交前必须验证新 URL 返回 HTTP 200 且下载文件 hash 与 Conan 期望一致。若采用方向 2：code-fixer 必须在 Dockerfile 中加入 bzip2 预下载步骤并验证 Conan 在 `source()` 阶段检测到已有缓存文件时确实跳过下载。
