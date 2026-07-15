@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit启动容器失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, docker-container driver, Error response from daemon
+- 新模式标题: BuildKit 启动失败
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit
 
 ## 根因分析
 
@@ -28,23 +28,19 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: CI Runner（`ecs-build-docker-x86-hk`）上的 Docker BuildKit 引导阶段
-- 失败原因: Docker buildx 在启动 `docker-container` 驱动下的 BuildKit 容器（`buildx_buildkit_euler_builder_20260709_2057000`）时，Docker daemon 返回 `Could not find the file / in container` 错误。该容器创建后立即失败，导致整个构建流程无法进入 Dockerfile 的 `RUN` 阶段。此错误发生在 Docker 守护进程与 buildkit 容器交互时（可能在尝试挂载工作目录或复制构建上下文时），属于 CI Runner 节点的 Docker 环境问题。
+- 失败位置: BuildKit builder 容器启动阶段（Dockerfile 指令尚未执行）
+- 失败原因: Docker daemon 在创建 `buildx_buildkit_euler_builder_20260709_2057000` 容器后报告 "Could not find the file / in container"，BuildKit builder 实例初始化失败，导致后续 Dockerfile 构建无法执行。此错误发生在 BuildKit 内部引导（`[internal] booting buildkit`）阶段，PR 中的 Dockerfile 尚未被解析或执行，属于 CI 基础设施层面的问题。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了一个标准的 glibc 2.42 Dockerfile 及配套的元数据文件（`meta.yml`、`README.md`、`image-info.yml`），这些变更是常规的镜像新增操作，不涉及任何 CI 配置或 buildx 机制变更。错误发生在 buildx builder 容器启动阶段（步骤 `#0`/`#1`），此时尚未开始解析或构建 PR 中的任何 Dockerfile。该 Runner 节点上的 Docker buildx `docker-container` 驱动实例可能存在状态异常或版本兼容性问题。
+**与 PR 改动无关**。PR 新增的 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 和元数据文件变更均未进入构建流程——构建在 BuildKit builder 实例启动阶段即已失败，Dockerfile 尚未被实际解析或执行。该错误属于 docker daemon / BuildKit 运行时的基础设施故障，可能是 CI 构建节点（`ecs-build-docker-x86-hk`）上 Docker 引擎或 BuildKit 组件瞬时异常导致。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**重新触发 CI。** 此为 CI Runner 节点上的 Docker buildx 基础设施问题（BuildKit 容器启动失败），与代码变更无关。直接重新运行 CI Job 即可。若多次重试均失败，需排查 Runner 节点的 Docker daemon 状态、buildx builder 实例残留、或 `moby/buildkit:buildx-stable-1` 镜像缓存问题。
-
-### 方向 2（置信度: 低）
-若重试持续失败，可尝试在 Runner 上清理 buildx builder 实例：`docker buildx rm euler_builder_*`，清理后 CI 会自动重建 builder。
+### 方向 1（置信度: 中）
+**触发 CI 重试 / rerun**。该错误为 BuildKit 基础设施瞬时故障，不涉及代码问题。Code Fixer 无需修改任何文件，应由 CI 管理员或开发者手动重新触发构建流水线。通常会因 Docker daemon 状态恢复而自动通过。
 
 ## 需要进一步确认的点
-- Runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon 日志是否有更多上下文（如 mount 失败、cgroup 错误等）
-- 该 Runner 上是否存在残留的 `buildx_buildkit_euler_builder_*` 容器或相关资源，干扰新 builder 创建
-
-## 修复验证要求
-无需代码修复，仅需重新触发 CI 验证基础设施是否恢复正常。
+- 确认 CI 构建节点 `ecs-build-docker-x86-hk` 上的 Docker 引擎版本和 BuildKit 版本是否存在已知缺陷。
+- 观察该节点上其他并发构建是否存在类似的 BuildKit 启动失败，判断是否为节点级故障。
+- 如果重试后仍然失败，需检查该节点的 Docker 日志（`journalctl -u docker`），确认 daemon 是否处于异常状态。
+- 确认 `docker-container` driver 的 BuildKit builder 实例（`euler_builder_*`）是否正确注册和可复用，是否存在 builder 实例残留/泄漏问题。
