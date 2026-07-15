@@ -5,13 +5,14 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit启动失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, Error response from daemon, booting buildkit
+- 新模式标题: BuildKit 容器启动失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
 
 ### 直接错误
 ```
+#0 building with "euler_builder_20260709_205700" instance using docker-container driver
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -25,18 +26,24 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 初始化阶段（`[internal] booting buildkit`）
-- 失败原因: Docker daemon 在创建 buildx builder 容器后，无法访问容器根文件系统（`Could not find the file /`），导致 builder 实例创建失败。此错误发生在任何 Dockerfile 指令执行之前（构建阶段为 `#0`，`#1` 为 BuildKit 内部启动步骤），属于 CI 基础设施层面的 Docker 运行时故障。
+- 失败位置: CI 构建环境（Docker BuildKit 初始化阶段）
+- 失败原因: Docker BuildKit (`moby/buildkit:buildx-stable-1`) 容器 `buildx_buildkit_euler_builder_20260709_2057000` 创建后，Docker daemon 报错 "Could not find the file / in container"，导致 BuildKit 构建器无法启动。Dockerfile 的构建步骤（`#2` 及之后）从未被执行。
 
 ### 与 PR 变更的关联
-**无关。** 此 PR 仅新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及更新 3 个元数据文件（README.md、image-info.yml、meta.yml）。构建尚未进入 Dockerfile 执行阶段即已失败，日志中可见 `#0 building with "euler_builder_20260709_205700" instance` 后直接进入 BuildKit 内部启动，Dockerfile 中的任何指令（如 `dnf install`、`wget`、`configure`、`make`）均未被处理。
+**与 PR 变更无关。** 该失败发生在 Docker BuildKit 容器运行时初始化阶段，早于任何 Dockerfile 构建指令的执行。日志中可以确认：
+1. 代码克隆、CI 工具（eulerpublisher）的镜像规范校验均已通过（`The image specification check for releasing on appstore has passed.`）
+2. BuildKit 构建器 `euler_builder_20260709_205700` 启动后，在 `[internal] booting buildkit` 阶段即失败
+3. 日志中没有任何 `#2` 及后续构建步骤的输出，说明 glibc Dockerfile 本身从未被构建
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需 Code Fixer 处理。** 此为 CI 基础设施故障（Docker daemon / BuildKit 运行时异常），与 PR 代码变更无关。应联系 CI 运维团队检查构建节点（`ecs-build-docker-x86-hk`）上 Docker 守护进程状态、BuildKit 配置及容器运行时健康度，重试 CI 流水线即可。
+**重试 CI 构建。** 这是一个 Docker daemon / 容器运行时的瞬时基础设施故障。BuildKit 容器创建后容器内的文件系统无法被正常访问（"Could not find the file /"），可能是 CI runner 节点上的 Docker 存储驱动、文件系统或资源竞争导致的偶发问题。建议在 CI 系统中重新触发本次构建。
+
+### 方向 2（置信度: 低）
+若重试仍失败，检查 CI runner 节点 `ecs-build-docker-x86-hk` 上的 Docker 版本、`docker buildx` 版本以及存储驱动配置。错误信息暗示容器 rootfs 不可用，可能与 overlay2 存储驱动的状态异常或磁盘空间不足有关。
 
 ## 需要进一步确认的点
-- 构建节点 `ecs-build-docker-x86-hk` 的 Docker 守护进程日志，确认 buildx builder 容器创建后为何无法访问根文件系统
-- 该节点上的 Docker 版本和 BuildKit 版本是否与正常运行的其他节点一致
-- 是否为一次性的 Docker 运行时抖动（可重试验证）
+1. 重新触发 CI 构建后问题是否复现 — 若不再复现，证实为瞬时 infra 故障
+2. 若持续复现，需检查 CI runner 节点的 Docker daemon 日志（`journalctl -u docker`）确认容器创建失败的具体原因
+3. 确认 CI runner 节点磁盘空间是否充足（日志中 "清理缓存" 步骤显示有 14.85GB 的 Local Volumes，但未显示磁盘整体使用率）
