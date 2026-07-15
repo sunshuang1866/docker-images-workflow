@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败原因为 openEuler 镜像站 `repo.openeuler.org` 的 HTTP/2 服务端临时性故障，属于 `infra-error`（CI 基础设施问题），与 PR #2991 的代码变更无关。
+无代码修复。失败为 infra-error（CI 基础设施问题），`repo.openeuler.org` 的 aarch64 镜像站在构建时刻存在 HTTP/2 流传输异常（Curl error 92: INTERNAL_ERROR），导致 RPM 包下载失败。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 构建在 `Dockerfile:6` 执行 `dnf install` 下载 RPM 包时，`repo.openeuler.org` 的 aarch64 仓库返回了多个 `Curl error (92): Stream error in the HTTP/2 framing layer`，导致 `guile` 等依赖包下载失败。这是镜像站服务端 HTTP/2 流未正常关闭的间歇性问题，与 PR 新增的 vvenc Dockerfile 及配套文件无关。
-
-建议操作：重新触发 CI 构建（retry），大概率可正常通过。若多次重试仍失败，可联系 openEuler 基础设施团队排查镜像站 aarch64 仓库的 HTTP/2 服务可用性。
+CI 分析报告明确指出：失败根因是 openEuler 24.03-LTS-SP4 的 aarch64 仓库镜像在构建时刻存在 HTTP/2 服务端流传输异常，属于基础设施层面的暂时性故障。PR 新增的 Dockerfile 内容（`dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）语法和逻辑均正确，与失败无关。无需代码修改，重试 CI 构建即可。
 
 ## 潜在风险
 无
