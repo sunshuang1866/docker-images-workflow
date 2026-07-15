@@ -4,9 +4,9 @@
 - PR: #3088 — chore(druid): add openEuler 24.03-LTS-SP4 support
 - 失败类型: build-error
 - 置信度: 高
-- 知识库匹配: 模式01（变体）
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式（与模式01高度同类——Apache CDN 404）
+- 新模式标题: CDN 不托管 Druid 制品
+- 新模式症状关键词: dlcdn.apache.org, 404 Not Found, wget, exit code: 8, apache-druid
 
 ## 根因分析
 
@@ -20,34 +20,33 @@
 #9 0.655 2026-07-10 04:55:51 ERROR 404: Not Found.
 ------
 Dockerfile:9
---------------------
    9 | >>> RUN wget https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz \
-  10 | >>>     && tar -zxvf apache-druid-${VERSION}-bin.tar.gz \
-  11 | >>>     && mv apache-druid-${VERSION} ${DRUID_HOME} \
-  12 | >>>     && rm -f apache-druid-${VERSION}-bin.tar.gz
+------
+ERROR: failed to solve: process "/bin/sh -c wget ..." did not complete successfully: exit code: 8
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9`
-- 失败原因: Apache Druid 35.0.0 的二进制包在 CDN 节点 `dlcdn.apache.org` 上不存在（HTTP 404）。该 CDN 通常仅保留最新版本，历史版本会被下架。
+- 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9`（builder 阶段的 `wget` 步骤）
+- 失败原因: `dlcdn.apache.org` CDN 对 Druid 35.0.0 的下载请求返回 HTTP 404，该 CDN 可能不托管 Druid 项目或已移除该版本
 
 ### 与 PR 变更的关联
-PR 新增了 Druid 35.0.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，其中第 9 行硬编码使用 `dlcdn.apache.org` 作为下载源。该 CDN 已不再托管 Druid 35.0.0 版本的二进制包，导致 Docker 构建在下载阶段立即失败。PR 改动直接触发了该失败——上传到 CDN 可用的下载源就不会有问题。
+**直接关联**——PR 新增了 `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`（全新文件），其中下载 URL 写为 `dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`（VERSION=35.0.0）。该 URL 在 Apache CDN 上不存在（404），这是本次 PR 引入的唯一构建错误。`stage-1` 阶段（安装 `java-17-openjdk-headless`、`busybox`、`shadow-utils`、`perl` 等依赖）本身被 CANCELED，因为 builder 阶段先失败导致整个构建中止，这些 RPM 安装步骤本身没有问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将下载源从 `dlcdn.apache.org` 更换为 `archive.apache.org`，Apache Archive 长期保留历史版本：
+将 Druid 35.0.0 的下载源从 `dlcdn.apache.org` 更换为 `archive.apache.org/dist/druid/`（Apache 归档站，保留所有历史版本），URL 格式变为 `https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`。该类修复与历史模式01（Apache CDN Maven 404）同根，`archive.apache.org` 是已验证可用的替代源。
 
-```
-wget https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz
-```
-
-若 `archive.apache.org` 在 CI 环境中不可达（参考模式33），则可换用已证可达的镜像站（如 `repo.huaweicloud.com/apache/druid/`）。
+### 方向 2（置信度: 中）
+若 `archive.apache.org` 不可达（参考模式33中该域名的网络超时问题），可改用华为云镜像站 `https://repo.huaweicloud.com/apache/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`，该镜像站已在模式01/33中多次验证可达。
 
 ## 需要进一步确认的点
-- 需要确认 `35.0.0-oe2403sp2` 的 Dockerfile（`Bigdata/druid/35.0.0/24.03-lts-sp2/Dockerfile`）是否使用相同 URL 且当前构建正常。若 SP2 也使用 `dlcdn.apache.org` 且构建正常，说明 CDN 可能在最近才移除该版本，SP2 需要同步修复。
-- 需要验证 `archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 或镜像站对应路径确实存在该文件。
+1. **验证 Druid 35.0.0 在 `archive.apache.org` 的实际路径和文件名**：确认 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 确实存在且可下载。
+2. **参考同仓库已有 SP2 Dockerfile**：`Bigdata/druid/35.0.0/24.03-lts-sp2/Dockerfile` 中使用的下载源 URL 格式应作为修复的直接参考，SP2 版本应已有可正常工作的下载 URL。
+3. **Dockerfile 第3行的小写 `as` 问题**：日志中出现警告 `FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 3)`，Dockerfile 中 `FROM ${BASE} as builder` 的 `as` 为小写，而 `FROM` 为大写，建议统一为大写 `AS` 以消除构建警告（非致命，不影响构建）。
 
 ## 修复验证要求
-code-fixer 必须确认替换后的下载 URL（如 `archive.apache.org/dist/druid/35.0.0/` 或 `repo.huaweicloud.com/apache/druid/35.0.0/`）在提交前可访问且能返回 HTTP 200 及完整二进制包，不可仅凭路径规则推断 URL 正确性。
+code-fixer 必须在提交前执行以下验证步骤：
+1. 从 `archive.apache.org/dist/druid/35.0.0/` 确认 `apache-druid-35.0.0-bin.tar.gz` 文件存在且可正常下载（非 404）。
+2. 若 archive.apache.org 不可达，需验证华为云镜像站 `repo.huaweicloud.com/apache/druid/35.0.0/` 上该文件的可用性。
+3. 确认选用下载源后，`wget` 命令能成功获取文件且 `tar -zxvf` 可正常解压。
