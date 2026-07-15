@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf, repo.openeuler.org, aarch64
+- 新模式标题: openEuler仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -18,23 +18,28 @@
 #7 1709.6 [MIRROR] guile-2.2.7-6.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/guile-2.2.7-6.oe2403sp4.aarch64.rpm [HTTP/2 stream 49 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1709.6 [FAILED] guile-2.2.7-6.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1709.7 Error: Error downloading packages:
-#7 1709.7   guile-5:2.2.7-6.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
 #7 ERROR: process "/bin/sh -c dnf install -y git gcc gcc-c++ make cmake && dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: CI 的 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）在执行 `dnf install` 安装构建依赖时，`repo.openeuler.org` 仓库服务器出现 HTTP/2 流传输异常（Curl error 92: INTERNAL_ERROR），导致多个 RPM 包（git-core、gcc-c++、guile）下载中断。其中 `git-core` 和 `gcc-c++` 在重试后下载成功，但 `guile`（git 的间接依赖）重试耗尽所有镜像后最终失败，导致整个构建终止。
+- 失败位置: Dockerfile 第 6 行 `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`
+- 失败原因: CI 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 的 HTTP/2 传输层反复出现流错误（`Curl error 92: Stream error in the HTTP/2 framing layer`），导致多个 RPM 包（`git-core`、`gcc-c++`、`guile`）下载失败。`guile` 包的所有镜像/重试均耗尽（"No more mirrors to try"），dnf 安装以 exit code 1 终止。
 
 ### 与 PR 变更的关联
-
-**与 PR 变更无关。** 本次 PR 仅新增了一个标准 Dockerfile，其 `dnf install` 命令安装的包（git、gcc、gcc-c++、make、cmake）与其他同类 Dockerfile 完全一致，没有任何异常配置。失败原因是 openEuler 官方软件源 `repo.openeuler.org` 在 CI 构建期间出现 HTTP/2 服务端异常，属于基础设施层面的临时故障。
+**与 PR 无关。** PR 的变更仅新增了一个 Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`）及其关联的 README、image-info.yml、meta.yml 元数据更新。Dockerfile 内容完全正确——安装了构建 vvenc 所需的 `git gcc gcc-c++ make cmake`。失败纯粹是因为 openEuler 官方仓库（`repo.openeuler.org`）在该次 CI 运行期间 HTTP/2 服务不稳定，在 aarch64 架构上无法正常下载 RPM 包。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试 CI 构建。** 这是典型的临时性基础设施故障。错误来自 openEuler 官方 RPM 仓库（`repo.openeuler.org`）的 HTTP/2 服务端流异常，与 PR 代码无关。等待仓库服务恢复后重新触发 CI 构建即可通过。
+**CI 基础设施问题，无需修改代码。** 失败是 `repo.openeuler.org` 镜像站在构建窗口内的瞬时网络/HTTP/2 服务异常（`Curl error 92`）导致的。应在 CI 侧重试该 job（retry），或等待仓库服务恢复后重新触发构建。PR 的 Dockerfile 和元数据文件本身没有任何错误。
+
+### 方向 2（置信度: 低）
+如果在多次重试后该问题持续出现，可以考虑在 Dockerfile 中为 `dnf` 添加重试参数（如 `--setopt=retries=10`），或将 `dnf install` 拆分为多次调用以降低单次下载的包数量。但这属于治标不治本，根因仍是上游仓库的 HTTP/2 服务器问题。
 
 ## 需要进一步确认的点
+- 确认 `repo.openeuler.org` 在构建时段是否存在已知的 HTTP/2 服务问题或 aarch64 架构的包服务中断。
+- 确认其他同期构建的 aarch64 job 是否也遇到同样的 `Curl error 92` 问题——若存在同类失败则进一步印证是仓库侧问题。
+- 重新触发一次 CI 构建，观察问题是否自行消失（临时性网络波动）。
 
-- 无。日志证据充分，错误模式清晰：HTTP/2 协议层流中断（err 2 = INTERNAL_ERROR）为服务端问题，dnf 自动重试机制已生效，部分包成功恢复，仅 `guile` 耗尽重试次数。此 PR 无需任何代码修改。
+## 修复验证要求
+不适用。本次失败为 infra-error，与 PR 代码变更无关，无需对文件进行修复。
