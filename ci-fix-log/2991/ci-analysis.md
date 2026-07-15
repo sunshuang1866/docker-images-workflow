@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 镜像站HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, MIRROR, FAILED, No more mirrors to try, dnf install
+- 新模式标题: RPM仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, dnf install, repo.openeuler.org, No more mirrors to try
 
 ## 根因分析
 
@@ -22,21 +22,20 @@
 ```
 
 ### 根因定位
-- 失败位置: `Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
-- 失败原因: openEuler 镜像站 `repo.openeuler.org` 的 HTTP/2 连接不稳定，多个 RPM 包（git-core、gcc-c++、guile）下载时出现 `Curl error (92): Stream error in the HTTP/2 framing layer`（HTTP/2 流未正常关闭，`INTERNAL_ERROR`），DNF 重试所有镜像后 `guile` 包下载失败，导致构建中断。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 镜像站对多个 RPM 包（git-core、gcc-c++、guile）返回 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR），重试耗尽后 `guile` 包下载失败，导致整个 dnf 事务回滚。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 本次 PR 仅新增了 `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`（安装 git、gcc、gcc-c++、make、cmake 并通过 cmake 构建 vvenc）以及更新 README、meta.yml、image-info.yml。失败发生在 DNF 从 `repo.openeuler.org` 下载依赖包阶段，属于 openEuler 官方镜像站 aarch64 仓库的 HTTP/2 服务端临时性问题，与 PR 代码逻辑无关。
+**与 PR 变更无关**。PR 新增的 Dockerfile 内容正确——`dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 是常规合法的包安装命令。失败根因是 openEuler 24.03-LTS-SP4 的 aarch64 仓库镜像在构建时刻存在 HTTP/2 服务端流传输异常，属于基础设施层面的暂时性故障。Dockerfile 第 6 行的指令本身没有任何语法或逻辑错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复。** 这是 openEuler 镜像站 `repo.openeuler.org` 的 HTTP/2 服务端临时性故障，属于 CI 基础设施问题。重新触发 CI 构建（retry）大概率可以正常通过。
-
-### 方向 2（置信度: 低，仅在方向 1 多次重试仍失败时考虑）
-如果多次重试仍然失败，可在 Dockerfile 的 `dnf install` 命令中添加 `--setopt=timeout=60 --setopt=retries=5` 等重试参数，提高网络波动的容错性。但需注意，HTTP/2 流错误是服务端问题，客户端重试的缓解效果有限。
+**重试构建**。这是 CI 基础设施侧 `repo.openeuler.org` 镜像源在 aarch64 上的 HTTP/2 传输层暂时性故障，与 PR 代码无关。等待镜像站恢复后重新触发 CI 构建即可通过。如果问题持续出现，需要在 CI 配置层面对 dnf 添加重试机制（如 `--retries` 或 `dnf makecache` 预检），但这不属于 Dockerfile 修改范畴。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 在 CI 构建当时是否有服务端异常或网络抖动（可从 repo 运营方查证）
-- 确认同一时段其他 PR 的 aarch64 构建是否也遇到相同问题，若普遍出现则为镜像站故障，可联系 openEuler 基础设施团队排查
-- 确认 `guile`、`gcc-c++`、`git-core` 等包在 aarch64 仓库中的可用性和完整性
+- `repo.openeuler.org` 的 aarch64 仓库在构建时刻是否存在已知的服务端 HTTP/2 问题（可查阅 openEuler 基础设施状态页面）
+- 该失败是否仅出现在 aarch64 架构（日志中 runner 为 `ecs-build-docker-aarch64-04-sp`），x86_64 构建是否正常通过
+
+## 修复验证要求
+无需验证。本次失败为 infra-error，不存在代码修复。重试 CI 构建即可。
