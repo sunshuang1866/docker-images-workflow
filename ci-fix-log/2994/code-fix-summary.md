@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 BuildKit 基础设施瞬时故障（builder 容器被 `graceful_stop`，连接断开），与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施故障（BuildKit builder 被异常关闭），与 PR #2994 的代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告将本次失败归类为 `infra-error`，置信度中。失败发生在 `RUN dnf install` 阶段下载 openEuler 24.03-lts-sp4 仓库元数据过程中，BuildKit builder 容器 (`euler_builder_20260709_224657`) 被服务端主动发送 GOAWAY `graceful_stop` 关闭，导致 transport 连接断裂（`error reading from server: EOF`）。Dockerfile 本身的指令无任何语法或逻辑问题。
+CI 失败分析报告确认失败类型为 `infra-error`，根因是 BuildKit builder 守护进程 `euler_builder_20260709_224657` 在构建过程中被异常关闭（`graceful_stop`），导致 DOCKER_BUILDKIT 客户端连接中断。失败发生在 Dockerfile 第 2/4 层的 `dnf install` 元数据下载阶段，当时构建速度极慢（77 kB/s），尚未执行到 PR 特有逻辑。PR 新增的 Dockerfile 结构与同仓库现有其他 SP 版本的 Dockerfile 一致，不包含代码缺陷。
 
-根据修复规范，`infra-error` 类型的 CI 失败无需修改代码，不应强行改动源文件。建议重新触发 CI 流水线（Re-run），多数情况下 builder 资源恢复正常后构建可顺利完成。
+**修复方向**：重新触发构建即可。基础设施恢复后，该 PR 的 Dockerfile 预期可正常通过构建。
 
 ## 潜在风险
-无。未修改任何文件。
+无
