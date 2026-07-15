@@ -746,3 +746,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2962: `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile` — Mesa 25.3.4 构建时 meson 子项目 wayland-protocols 下载 hash 不匹配，meso
+
+---
+
+## 模式41：MariaDB ABI 检查工具链不兼容
+
+**症状关键词**: ABI check found difference, do_abi_check.cmake, plugin_audit.h.pp, Check size of uint32 - failed
+
+**根因**: - 失败位置: MariaDB 源码内 `cmake/do_abi_check.cmake:84`（abi_check 构建目标）
+- 失败原因: openEuler 24.03-LTS-SP4 上的 GCC 预处理器输出与 MariaDB 12.1.1 源码自带的 `abi_check.out` 参考文件不一致，ABI 检查目标构建失败，进而导致 `make -j8` 整体返回错误码 2。
+
+**修复方法**: 在 cmake 配置中添加 `-DWITHOUT_ABI_CHECK=1` 禁用 ABI 检查，解决 openEuler 24.03-LTS-SP4 上 GCC 预处理器输出与 MariaDB 12.1.1 自带 `abi_check.out` 参考文件不一致导致的构建失败。
+
+**历史案例**:
+- PR #2848: `Database/mariadb/12.1.1/24.03-lts-sp4/Dockerfile` — 在 cmake 配置中添加 `-DWITHOUT_ABI_CHECK=1` 禁用 ABI 检查，解决 openEuler
