@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施网络问题（infra-error），无需代码修改。
+无需代码修改。CI 构建失败为 openEuler 24.03-LTS-SP4 软件仓库镜像站的 HTTP/2 协议栈间歇性错误（`Curl error (92): Stream error in the HTTP/2 framing layer`，服务端报 `INTERNAL_ERROR (err 2)`），属于基础设施故障。
 
 ## 修改的文件
-无（infra-error，不涉及任何代码变更）。
+无代码修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出：本次失败为 CI 构建节点与 openEuler 24.03-LTS-SP4 仓库镜像之间的 HTTP/2 协议层网络故障（`Curl error 92: Stream error in the HTTP/2 framing layer`），导致 `dnf install` 下载包失败。该问题与 PR #2980 新增的 Dockerfile 代码无关——Dockerfile 中的 `dnf install` 命令语法和包列表均正确，遵循了仓库中同类镜像的一致模式。根据分析报告结论，属于 transient infra 问题，Code Fixer 无需处理代码。
-
-**建议**：重新触发 CI 构建（retry），如果镜像仓库端网络恢复，构建应能成功。
+分析报告明确指出：构建失败与 PR 代码变更无关，Dockerfile 中 `dnf install` 步骤所列依赖包列表语法正确、包名合法，依赖解析成功（日志显示 "258 Packages" 和 "Installed size: 1.3 G"）。失败根因是 dnf 从 openEuler 24.03-LTS-SP4 仓库下载 RPM 包时，仓库服务器返回 HTTP/2 协议层流错误，导致 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 经历两次流中断后下载失败。建议通过重试 CI（re-run the failed job）解决，或待仓库镜像站恢复后再次触发构建。
 
 ## 潜在风险
-无（未修改任何代码）。
+无。
