@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是基础设施问题（infra-error）：CI runner 上缺少 `shunit2` shell 测试框架，导致容器镜像测试的 [Check] 阶段无法启动。
+CI 失败原因为 `infra-error`：CI Runner 缺少 `shunit2` 测试框架依赖，导致 `[Check]` 阶段无法加载测试脚本。与 PR 代码变更无关，无需修改源代码。
 
 ## 修改的文件
-无
+无（基础设施问题，不涉及代码修改）
 
 ## 修复逻辑
-分析报告明确指出，CI 失败的根因是 CI runner 环境缺少 `shunit2` 测试框架（`common_funs.sh: line 13: .: shunit2: file not found`），属于 CI 基础设施问题。PR 仅新增了 httpd 2.4.66 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、启动脚本及元数据文件，Docker 构建和推送阶段均成功完成，失败与 PR 代码变更无关。需由 CI 运维人员在 runner 上安装 `shunit2` 包解决，无需修改 PR 中的任何代码。
+分析报告确认：
+- Docker 镜像构建（`[Build]`）13 个步骤全部成功
+- 镜像推送（`[Push]`）成功
+- 失败仅发生在 `eulerpublisher` 的 `[Check]` 后置检查阶段，原因是在 CI Runner 上 source `shunit2` 时找不到该文件（`common_funs.sh:13`）
+- 需由 CI 运维在 Runner 镜像中安装 `shunit2` 测试框架，或确认 `eulerpublisher` 包安装完整性
+
+PR 变更的 5 个文件（Dockerfile、httpd-foreground、README.md、image-info.yml、meta.yml）均与 `shunit2` 依赖无关，无需也无法通过修改这些文件解决此问题。
 
 ## 潜在风险
 无
