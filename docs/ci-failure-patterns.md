@@ -146,6 +146,7 @@ RUN dnf install -y shadow python3-pip ...
 - PR #2206: `Bigdata/logstash/9.3.4`
 - PR #2163: `Bigdata/logstash/9.3.3`
 - PR #2743: `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile` — SeisSol 202103.Sumatra 的 CMakeLists.txt 无 `install()` 目标，`cm
+- PR #2901: `Others/kselftests-virtme/1.27/24.03-lts-sp4/Dockerfile` — Docker 构建失败：`COPY entrypoint.sh tap2json.py /` 引用的两个文件在 `24.
 
 ---
 
