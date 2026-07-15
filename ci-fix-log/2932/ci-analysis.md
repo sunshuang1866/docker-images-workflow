@@ -3,16 +3,15 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 启动失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, Error response from daemon, docker-container driver
+- 新模式标题: BuildKit守护进程异常
+- 新模式症状关键词: Could not find the file /, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
 
 ### 直接错误
 ```
-euler_builder_20260709_205700
 #0 building with "euler_builder_20260709_205700" instance using docker-container driver
 
 #1 [internal] booting buildkit
@@ -26,28 +25,26 @@ euler_builder_20260709_205700
 ERROR: Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000
 euler_builder_20260709_205700 removed
 ```
-Check Items 表格为空，说明构建尚未进入任何实际检查步骤即已失败。
 
 ### 根因定位
-- 失败位置: Docker BuildKit 初始化阶段（`[internal] booting buildkit`），早于任何 Dockerfile 指令的执行
-- 失败原因: Docker 守护进程在创建 BuildKit 构建容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，尝试在容器内查找文件 `/` 时失败，导致 buildx builder 实例无法启动，后续 Docker 镜像构建步骤完全未执行
+- 失败位置: CI runner `ecs-build-docker-x86-hk` 上的 Docker BuildKit 初始化阶段
+- 失败原因: Docker daemon 在创建 buildx builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法正常访问容器根目录 `/`，返回 "Could not find the file / in container"。这是 Docker daemon 的内部状态异常，可能由 runner 上的 overlay2 存储驱动、容器运行时或 buildkit 容器残留状态引起。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 本次 PR 的改动为：
-1. 新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`（31 行，标准的 glibc 源码构建 Dockerfile）
-2. 更新 `README.md`、`doc/image-info.yml`、`meta.yml` 添加新版本条目
-
-错误发生在 BuildKit 守护进程初始化容器阶段，远在 Dockerfile 的 `FROM` / `RUN` 指令执行之前。CI 日志中 eulerpublisher 的镜像规范预检（"The image specification check for releasing on appstore has passed."）已通过，说明 PR 引入的文件本身符合格式规范。BuildKit 容器启动失败属于 CI 运行环境（Docker Engine / BuildKit daemon）的瞬时故障，与代码变更无因果关系。
+**与 PR 代码变更无关。** Docker 镜像构建过程从未实际启动——错误发生在 BuildKit builder 容器创建的瞬间，在 `eulerpublisher` 工具完成变更检测和镜像规格校验之后、但在执行任何 Dockerfile 指令（`FROM`、`RUN` 等）之前。PR 新增的 Dockerfile、README.md、image-info.yml、meta.yml 均未被实际构建验证。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-CI Runner（`ecs-build-docker-x86-hk`）上的 Docker 守护进程或 BuildKit builder 实例状态异常。建议：
-- 清理 runner 上残留的 buildx builder 实例（`docker buildx rm`）
-- 重启 Docker 守护进程或重建 builder
-- 重试 CI job，观察问题是否复现
+### 方向 1（置信度: 高）
+**CI runner 环境清理与重试**：该错误属于 Docker BuildKit 基础设施瞬时故障。正常情况下应清理 runner 上残留的 buildx builder 实例后触发 CI 重跑（re-run）。建议的操作（由 CI 管理员执行）：
+- 清理 runner 上已有的 `euler_builder_*` builder 实例：`docker buildx rm euler_builder_*`
+- 清理可能的残留 buildkit 容器和 volume
+- 重新触发 CI
+
+### 方向 2（置信度: 低）
+若重试后依然失败，可能是 runner 节点的 Docker storage driver（overlay2）出现磁盘空间不足或 inode 耗尽问题，需检查 runner 磁盘状态。
 
 ## 需要进一步确认的点
-- 该 CI runner（`ecs-build-docker-x86-hk`）同一时段其他 PR 的构建是否也出现相同错误，以确认是否为 runner 级别的基础设施故障
-- Runner 磁盘空间是否充足（`Could not find the file /` 可能与容器文件系统挂载或 overlay2 存储驱动异常有关）
-- 如果重试后问题仍持续且仅该 PR 复现，需要检查 buildx builder 创建时的上下文路径或 Dockerfile 路径传递是否有特殊字符/空路径导致 daemon 误解析
+- runner `ecs-build-docker-x86-hk` 的 Docker daemon 日志（`journalctl -u docker`），确认 "Could not find the file /" 的具体底层错误
+- runner 的磁盘空间和 inode 使用情况
+- 如果 CI 重跑后仍然失败，需要检查 `moby/buildkit:buildx-stable-1` 镜像是否有版本兼容性问题
