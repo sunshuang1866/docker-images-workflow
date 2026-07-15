@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2991 — chore(vvenc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, dnf install
+- 新模式标题: RPM仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, Stream error, INTERNAL_ERROR, repo.openeuler.org, No more mirrors to try, dnf download packages
 
 ## 根因分析
 
@@ -22,21 +22,18 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
-- 失败原因: aarch64 构建节点在执行 `dnf install` 时，从 `repo.openeuler.org` 下载 RPM 包过程中遭遇 HTTP/2 流错误（Curl error 92），4 个包（`git-core`、`gcc-c++` x2、`guile`）均出现 `INTERNAL_ERROR (err 2)`，其中 `guile` 在耗尽所有镜像重试后最终失败，导致整个 dnf 事务中断。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
+- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上构建时，`dnf install` 从 `repo.openeuler.org` 下载多个 RPM 包（git-core、gcc-c++、guile）时遭遇 HTTP/2 流错误（Curl error 92: Stream error in the HTTP/2 framing layer），所有重试耗尽后 `guile-2.2.7-6.oe2403sp4.aarch64.rpm` 仍下载失败，导致 `dnf install` 以 exit code 1 退出。根因是 openEuler 官方 RPM 镜像站 `repo.openeuler.org` 的 HTTP/2 服务端在构建时段不稳定，与 PR 代码变更完全无关。
 
 ### 与 PR 变更的关联
-**无关。** PR 仅新增了 vvenc 1.14.0 的 Dockerfile（标准 `dnf install` + `cmake` 构建）及配套元数据文件。`dnf install -y git gcc gcc-c++ make cmake` 命令本身正确，失败完全源于构建节点与 `repo.openeuler.org` 之间的网络传输层问题，属于 CI 基础设施故障。同一 Dockerfile 在 x86_64 runner 上很可能构建成功（但该 runner 的日志未提供）。
+PR 仅新增了 vvenc 1.14.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 以及配套的 README.md、image-info.yml、meta.yml 元数据更新。Dockerfile 中的 `dnf install` 命令写法与同类镜像（如 24.03-lts-sp3 版本）一致，无语法错误。本次失败纯属 CI 构建时的网络基础设施问题，与 PR 改动无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**无需修改代码，触发 CI 重试即可。** 该失败为 `repo.openeuler.org` 镜像站 HTTP/2 服务的间歇性故障，多个包（`git-core`、`gcc-c++`、`guile`）均在同一构建过程中出现流错误，表明问题在服务器端或中间网络层。重新触发 CI 构建大概率会成功。
-
-### 方向 2（置信度: 低）
-若多次重试均失败，可考虑在 Dockerfile 的 `dnf install` 命令中添加 `--setopt=retries=10` 增加重试次数，以应对 `repo.openeuler.org` 的 HTTP/2 不稳定性。但更建议从 CI 基础设施侧排查 aarch64 构建节点到 `repo.openeuler.org` 的网络连通性。
+### 方向 1（置信度: 高）
+**无需代码修复。** 失败原因为 `repo.openeuler.org` 在 aarch64 构建时段出现 HTTP/2 流不稳定，导致 RPM 包下载失败。Code Fixer 无需处理此 PR。建议在 CI 中重新触发构建（retry），等待镜像站恢复后构建即可通过。
 
 ## 需要进一步确认的点
-1. 同一 PR 的 x86_64 架构构建 job 是否成功（当前仅提供了 aarch64 job 日志）。
-2. `repo.openeuler.org` 在该时间段是否有已知的 HTTP/2 服务抖动或 CDN 节点异常。
-3. aarch64 构建节点 `ecs-build-docker-aarch64-04-sp` 的历史构建成功率，是否存在类似网络问题的复发模式。
+- 确认 `repo.openeuler.org` 当前是否已恢复正常（可在浏览器或 CI 环境中直接 wget 测试上述失败 URL）
+- 如果反复重试仍失败，考虑是否为 aarch64 runner 所在网络与 `repo.openeuler.org` 之间存在持续的网络连通性问题
+- 可检查同一时段其他 openEuler 24.03-LTS-SP4 镜像的 CI 构建是否也出现了相同的 HTTP/2 错误，以确认是否为通用 mirror 故障
