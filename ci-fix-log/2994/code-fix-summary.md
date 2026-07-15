@@ -1,13 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 infra-error（基础设施故障），与 PR 代码无关。
+无需代码修复。CI 失败属于基础设施问题（`infra-error`），BuildKit builder `euler_builder_20260709_224657` 在 Docker 镜像构建过程中被优雅关闭（`graceful_stop`），导致 gRPC 连接中断（`error reading from server: EOF`），随后 builder 实例被移除，CI 访问时报 `no builder found`。与 PR 代码变更无直接关联。
 
 ## 修改的文件
-无。所有 PR 文件（Dockerfile、README.md、image-info.yml、meta.yml）语法正确、内容合理，无需修改。
+无代码修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：Docker BuildKit 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据期间被 `graceful_stop` 信号异常终止，属于 CI 基础设施层面的运行时故障。Dockerfile 中的 `dnf install` 命令语法正确、包名有效，DNF 下载速度仅 77 kB/s 疑似网络拥塞导致构建器被回收。根据分析报告的置信度评估（高，修复方向 1），重新触发 CI 构建即可。
+- 分析报告判断失败类型为 `infra-error`，置信度为中。
+- 失败原因是 BuildKit builder daemon 被基础设施层面的回收/关闭操作终止，不是 Dockerfile 内容或代码问题。
+- dnf 在下载 OS 仓库 metadata 时网速仅约 77 kB/s，网络延迟延长了构建耗时，使得构建更容易撞上 builder 实例的回收窗口，但这同样属于基础设施/网络层面问题。
+- 建议的重试方案仅为可选的低置信度方案（方向 2），且以重试持续失败为前提，当前不应主动修改 Dockerfile 加入 dnf 重试逻辑。
 
 ## 潜在风险
-无。
+无。本次不修改任何代码，不存在引入新问题的风险。
