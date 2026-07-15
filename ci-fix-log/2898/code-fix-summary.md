@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败类型为 `infra-error`：CI Runner 缺少 `shunit2` shell 测试框架，导致 [Check] 阶段失败。Docker 镜像构建和推送均已成功完成。
+无需代码修复。本次 CI 失败为 infra-error：CI runner（openEuler 24.03-LTS-SP4 aarch64）上执行 `eulerpublisher` 的 [Check] 阶段时，`common_funs.sh` 尝试加载 `shunit2` Shell 单元测试框架失败（`shunit2: No such file or directory`），属于 CI 运行环境基础设施依赖缺失。
 
 ## 修改的文件
-无。PR 的四个文件（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，Docker 构建过程无任何错误。
+无
 
 ## 修复逻辑
-分析报告明确指出：
-- 失败位置在 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`，报错 `shunit2: No such file or directory`
-- Docker 镜像构建（#7-#11 步骤）和推送（[Push] finished）均已成功
-- 失败仅发生在 CI pipeline 的 [Check] 阶段，原因是 CI runner 上缺少 `shunit2` 测试框架依赖
-- 根因与 PR 变更无关
+Docker 镜像构建（#7~#10 步骤）和推送（[Push]）均已成功完成，镜像 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64` 已正确推送。PR 新增的 Dockerfile 及元数据文件（README.md、image-info.yml、meta.yml）均无问题。
 
-此问题需要在 CI 基础设施侧修复：在负责执行 [Check] 阶段的 CI runner 上安装 `shunit2`（如 `dnf install shunit2`）。
+失败根因是 CI runner 的 `eulerpublisher` 测试工具依赖 `shunit2` 未安装，需要在 CI 执行环境中通过包管理器安装该依赖（如 `dnf install shunit2 -y`），而非修改本次 PR 的任何源码文件。
 
 ## 潜在风险
-无。未修改任何代码文件。
+无
