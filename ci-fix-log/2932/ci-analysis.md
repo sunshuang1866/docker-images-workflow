@@ -5,13 +5,15 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit容器初始化失败
-- 新模式症状关键词: Could not find the file /, buildx_buildkit, booting buildkit, Error response from daemon
+- 新模式标题: BuildKit 容器启动失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
 
 ### 直接错误
 ```
+#0 building with "euler_builder_20260709_205700" instance using docker-container driver
+
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -25,22 +27,18 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: BuildKit 引导阶段（Docker daemon 层），在 Dockerfile 任何指令执行之前
-- 失败原因: Docker daemon 在 BuildKit 构建器容器 `buildx_buildkit_euler_builder_20260709_2057000` 创建后立即报错 "Could not find the file /"，这是 Docker daemon/BuildKit 基础设施层面的内部错误，容器处于异常状态，Docker 无法访问其根路径 `/`
+- 失败位置: CI 构建节点 `ecs-build-docker-x86-hk` 上的 Docker BuildKit 引导阶段（`[internal] booting buildkit`）
+- 失败原因: Docker daemon 在创建 BuildKit 构建容器 `buildx_buildkit_euler_builder_20260709_2057000` 后无法访问其根文件系统（`/`），导致构建会话在加载任何 Dockerfile 之前即被终止
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 glibc 2.42 的 Dockerfile（含标准构建步骤：dnf 安装依赖、wget 下载源码、configure + make + make install）及对应的 README.md、image-info.yml、meta.yml 元数据更新。Dockerfile 语法正确，且 CI 在 BuildKit 引导阶段（`[internal] booting buildkit`）即失败，此时尚未开始解析或执行 Dockerfile 中的任何指令。日志中也明确显示 CI 的前置检查（镜像规范检查）已通过。
+**无关**。PR 新增的 Dockerfile 和元数据文件均未被实际加载。错误发生在 BuildKit 的 `[internal] booting buildkit` 内部阶段——此时 Docker 引擎尚未开始解析 Dockerfile、准备构建上下文或拉取基础镜像。CI 日志中 `eulerpublisher` 的前置检查（镜像规范校验）已通过，但 BuildKit 容器自身的启动阶段就失败了。这是运行在 `ecs-build-docker-x86-hk` 节点上的 Docker daemon / BuildKit 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试 CI job。** 这是 Docker daemon/BuildKit 在 CI runner 上的瞬态基础设施故障，与代码变更无关。BuildKit 构建器容器创建后 Docker daemon 内部状态异常（根路径 `/` 不可访问），通常重启 Docker daemon 或重新调度 CI job 即可恢复。
-
-### 方向 2（可选，置信度: 中）
-若持续复现，CI runner `ecs-build-docker-x86-hk` 可能需要运维检查：
-- Docker daemon 健康状态（`systemctl status docker`）
-- 磁盘空间是否耗尽（`df -h`）
-- BuildKit 缓存是否损坏（`docker buildx prune`）
+**CI 基础设施问题，无需修改代码。** 该错误是 BuildKit 容器运行时的 Docker daemon 异常（可能由节点磁盘满、Docker 存储驱动故障、内核资源耗尽等引起）。建议：
+1. 在 Jenkins 上对该 job 执行 **重试（retry）**，观察是否能正常通过
+2. 若多次重试均失败，检查 `ecs-build-docker-x86-hk` 节点上 Docker daemon 状态、磁盘空间及 BuildKit 相关日志
 
 ## 需要进一步确认的点
-无。错误信息明确指向 BuildKit 基础设施故障，且发生在任何 Dockerfile 指令执行之前，与 PR 代码变更无关联。Code Fixer 无需处理此 PR。
+（无——错误信息明确指向 BuildKit 容器启动阶段的基础设施故障，与 PR 代码变更无因果关联。）
