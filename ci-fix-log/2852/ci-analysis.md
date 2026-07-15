@@ -2,55 +2,56 @@
 
 ## 基本信息
 - PR: #2852 — chore(milvus): add openEuler 24.03-LTS-SP4 support
-- 失败类型: dependency-error
+- 失败类型: build-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: Conan源下载403
-- 新模式症状关键词: AuthenticationException, 403: Forbidden, bzip2, conan install failed, build-3rdparty, conan_sources.tgz
+- 新模式标题: 上游脚本OS不兼容
+- 新模式症状关键词: `Unable to find a match, epel-release, centos-release-scl-rh, devtoolset, scl_source, install_deps.sh, openEuler`
 
 ## 根因分析
 
 ### 直接错误
 ```
-#13 317.3 Downloading conan_sources.tgz
-#13 317.6 bzip2/1.0.8: Configuring sources in /root/.conan/data/bzip2/1.0.8/_/_/source/src
-#13 318.3 ERROR: bzip2/1.0.8: Error in source() method, line 50
-#13 318.3 	get(self, **self.conan_data["sources"][self.version], strip_root=True)
-#13 318.3 	AuthenticationException: 403: Forbidden
-#13 318.4 conan install failed
-#13 318.4 make: *** [Makefile:263: build-3rdparty] Error 1
-#13 ERROR: process "/bin/sh -c git clone -b v${VERSION} https://github.com/milvus-io/milvus.git &&     cd milvus/ &&     ./scripts/install_deps.sh &&     CXXFLAGS=\"-I/usr/include/openblas\" make build-cpp &&     make build-go" did not complete successfully: exit code: 2
+#13 206.0 No match for argument: epel-release
+#13 206.0 No match for argument: centos-release-scl-rh
+#13 206.0 Error: Unable to find a match: epel-release centos-release-scl-rh
+#13 206.3 No match for argument: devtoolset-11-gcc
+#13 206.3 No match for argument: devtoolset-11-gcc-c++
+#13 206.3 No match for argument: devtoolset-11-gcc-gfortran
+#13 206.3 No match for argument: devtoolset-11-libatomic-devel
+#13 206.3 No match for argument: llvm-toolset-11.0-clang
+#13 206.3 No match for argument: llvm-toolset-11.0-clang-tools-extra
+#13 206.3 No match for argument: lcov
+#13 206.3 Error: Unable to find a match: devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran devtoolset-11-libatomic-devel llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra lcov
+#13 209.1 /etc/profile.d/llvm-toolset-11.sh: line 1: scl_source: No such file or directory
+#13 ERROR: process "/bin/sh -c ... ./scripts/install_deps.sh && ..." did not complete successfully: exit code: 8
 ```
 
 ### 根因定位
-- 失败位置: `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile:22-26`（`make build-cpp` 的 `build-3rdparty` 子目标）
-- 失败原因: Milvus 2.6.0 的 C++ 构建系统通过 Conan（包管理器）下载第三方依赖时，`bzip2/1.0.8` 的 Conan recipe 在其 `source()` 方法中尝试从上游服务器下载源码包，服务器返回 403 Forbidden，导致 `conan install` 失败，整个 `make build-cpp` 中断。
+- 失败位置: Dockerfile 第 22 行，RUN 指令中执行的 `./scripts/install_deps.sh`
+- 失败原因: Milvus 2.6.0 上游项目的 `./scripts/install_deps.sh` 脚本针对 CentOS/RHEL 操作系统设计，脚本内通过 yum/dnf 尝试安装 CentOS 专有的 SCL（Software Collections）仓库包（`epel-release`、`centos-release-scl-rh`、`devtoolset-11-*`、`llvm-toolset-11.0-*`）以及 `lcov` 包，这些包在 openEuler 24.03-LTS-SP4 的仓库中均不存在，导致 yum 包查询失败。此外脚本还试执行 `source scl_source enable devtoolset-11` 等命令，但 `scl_source` 命令在 openEuler 上亦不可用。虽然脚本在个别包安装失败后仍继续执行后续步骤（pip 安装 conan、rust 工具链更新），但最终累积了非零退出码（exit code 8），导致 RUN 指令的 `&&` 链中断，构建失败。
 
 ### 与 PR 变更的关联
-- PR 新增了 Milvus 2.6.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，本身语法正确、逻辑合理。
-- 失败并非 Dockerfile 写法问题，而是 Milvus 构建系统的 Conan 依赖解析阶段，bzip2 1.0.8 的上游源码下载源返回 403，属于外部依赖可用性变化。
-- 已有的 SP2 版本（`2.6.0/24.03-lts-sp2/Dockerfile`）如果当前重建，理论上也会遇到同样的 bzip2 下载 403 问题，因为使用的是同一个 Milvus 版本和同一套 Conan recipes。
+PR 新增的 `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile` 第 22-24 行无条件调用 `./scripts/install_deps.sh`。该脚本来自 Milvus 上游仓库（`github.com/milvus-io/milvus` 的 `v2.6.0` tag），并非 openEuler 社区维护，其内部硬编码了对 CentOS/RHEL 包管理体系的依赖，无法在 openEuler 24.03-LTS-SP4 上正确执行。PR 的其他变更（README.md、image-info.yml、meta.yml）均为元数据更新，与此失败无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-在 Dockerfile 的 `make build-cpp` 之前，通过 Conan 配置或环境变量替换 bzip2 的下载源为可用镜像。例如：
-- 在 `conan install` 前设置 bzip2 Conan recipe 的 `sources` URL 为替代镜像（如 `https://sourceware.org/pub/bzip2/` 或其他 CDN）。
-- 或将 bzip2 的源码包提前下载到 Conan 本地缓存，绕过 recipe 的 `source()` 下载步骤。
+### 方向 1（置信度: 高）
+在 Dockerfile 中不直接调用上游的 `./scripts/install_deps.sh`，改为手动安装 openEuler 上可用的等效依赖包。需要：
+1. 移除 RUN 指令中的 `./scripts/install_deps.sh` 调用
+2. 分析 `install_deps.sh` 中各个安装步骤的实际目的（gcc/g++ 工具链、LLVM/clang 工具链、cmake、rust、conan、lcov 等），在 openEuler 仓库中寻找对应的包或替代方案
+3. 对 openEuler 24.03-LTS-SP4 上无法替代的依赖（如 `lcov`），评估是否可跳过或从源码编译
 
-### 方向 2（置信度: 低）
-升级 bzip2 版本。Milvus 2.6.0 的 `conanfile` 或 Conan recipe 锁定了 `bzip2/1.0.8`，如果 Conan Center 的 bzip2 1.0.8 recipe 的下载源已整体失效，需要排查是否有更新的 bzip2 版本（如 1.0.9）可替代，并确认 Milvus 构建系统是否兼容。
-
-### 方向 3（置信度: 低）
-检查是否为临时网络问题。403 可能来自服务端的临时访问限制或 IP 风控，重新触发 CI 构建可能自动通过。
+### 方向 2（置信度: 中）
+保留 `./scripts/install_deps.sh` 调用，但在此之前通过 `sed`/`patch` 修改该脚本，移除其中对 CentOS/RHEL 专属包（`epel-release`、`centos-release-scl-rh`、`devtoolset-11-*`、`llvm-toolset-11.0-*`）的安装指令，并将 `scl_source` 调用替换为空操作或等效的 openEuler 命令。此方向需要深入理解上游脚本的完整逻辑，确保 patch 后不会遗漏关键依赖。
 
 ## 需要进一步确认的点
-1. bzip2 1.0.8 的 Conan recipe（来自 conan-center）当前 `source()` 方法中配置的下载 URL 是什么，该 URL 在浏览器或 wget 中是否也返回 403。
-2. 已有的 `2.6.0/24.03-lts-sp2/Dockerfile` 对应的 CI 构建是否已缓存了 Conan 包；如果清除缓存后重新构建 SP2 版本，是否也会触发相同的 bzip2 403 错误。
-3. 该 403 是否为 CI 构建节点 IP 被上游服务器风控拦截所致（临时性），还是上游源已永久不可用。
+1. Milvus 2.6.0 上游 `install_deps.sh` 脚本的完整内容，确认所有被安装的包及其在 openEuler 上的可用性
+2. 已有的 `Database/milvus/2.6.0/24.03-lts-sp2/Dockerfile` 是如何处理同一问题的——该镜像已在 24.03-LTS-SP2 上构建成功，可以参考其依赖安装策略
+3. `lcov` 包在 openEuler 24.03-LTS-SP4 上的替代方案（如 `gcov` 或从源码编译），或确认构建流程是否可跳过代码覆盖率工具
+4. CI 系统是否对 Dockerfile 注入了额外的 RUN 步骤（日志中出现了 PR diff 中不存在的 `conan config set`、`bzip2` 预缓存等步骤），需确认 PR 实际提交的 Dockerfile 与 CI 构建时使用的 Dockerfile 是否一致
 
 ## 修复验证要求
-若采用方向 1（替换 bzip2 下载源），code-fixer 必须：
-- 从 Conan Center 获取 bzip2/1.0.8 当前 recipe 的 `conanfile.py`，确认 `source()` 方法中的实际下载 URL。
-- 验证替代下载源确实可公开访问且提供的是合法的 bzip2 1.0.8 源码包（SHA256 应与 Conan recipe 中的 `sha256` 值一致）。
-- 若采用方式 2（升级 bzip2 版本），需确认 Milvus 2.6.0 的 Conan 依赖配置允许版本替换，且 C++ 构建不会因版本变更而产生编译或链接错误。
+1. 修改后的 Dockerfile 需在 CI 环境中重新构建验证（`docker build` 完整流程通过）
+2. 若采用方向 2（patch install_deps.sh），必须从 `https://github.com/milvus-io/milvus/raw/v2.6.0/scripts/install_deps.sh` 获取原始脚本内容，确保 sed/patch 正则能正确匹配目标行
+3. 同步验证构建产物 `lib64/`、`lib/`、`bin/` 目录下的文件是否被正确 COPY 到最终镜像，确保 Milvus 运行时功能正常
