@@ -1,19 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于基础设施问题（infra-error），由 openEuler 官方包仓库 `repo.openeuler.org` 在构建期间的临时性网络异常导致。
+无需代码修改。CI 失败为基础设施问题（`infra-error`）：`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库在本次构建中频繁返回 HTTP/2 流协议错误（curl error 92）和 SSL 连接断开（curl error 56），导致 `vim-common` 包下载失败，`yum install` 步骤退出码为 1。
 
 ## 修改的文件
-无（未修改任何文件）
+无。本次 CI 失败与 PR 代码变更无关，Dockerfile、README.md、image-info.yml、meta.yml 四个文件均无问题。
 
 ## 修复逻辑
-CI 失败分析报告明确指出：
-- 失败位置在 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4` 的 `RUN yum install -y ...` 步骤
-- 失败原因为 aarch64 runner 从 `repo.openeuler.org` 下载 RPM 包时遭遇多次 HTTP/2 流错误（Curl error 92）和 SSL 读取错误（Curl error 56），最终 `vim-common` 包在所有镜像尝试后仍无法下载
-- PR 变更仅涉及新增 Dockerfile 和更新清单文件，Dockerfile 语法正确，依赖包名称和来源合理
-- 根因与 PR 代码无关，属于开放欧拉包仓库网络的临时故障
+分析报告明确指出：
+- 失败位置在 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4` 的 `RUN yum install` 步骤
+- 根因为 openEuler 镜像站 aarch64 仓库的临时性 HTTP/2 协议不稳定，属于 CI 基础设施问题
+- PR 的 Dockerfile 结构和 `yum install` 方式与其他已有 brpc Dockerfile 完全一致，代码本身无缺陷
+- 日志中 gcc（30 MB）和 kernel-headers（1.7 MB）等大型包均通过 dnf/yum 内置重试机制成功下载，进一步佐证这是临时性网络问题
 
-结论：无需任何代码修改，建议在 openEuler 包仓库服务恢复后重新触发 CI 构建。
+**建议操作**：重新触发 CI 构建（retry / re-run），等待仓库服务器恢复稳定即可。
 
 ## 潜在风险
-无。未对代码做任何改动。
+无。未对任何代码文件进行修改。
