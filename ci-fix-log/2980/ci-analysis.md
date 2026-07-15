@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 仓库镜像 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -18,22 +18,24 @@
 #7 1970.5 [MIRROR] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-c%2b%2b-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 83 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
+#7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
 ```
 
 ### 根因定位
 - 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 软件仓库镜像存在 HTTP/2 传输层问题，导致多个 RPM 包下载过程中出现 Curl error (92)（HTTP/2 stream 未正常关闭），其中 `gcc-c++` 包两次重试均失败，所有镜像均已尝试完毕，dnf 无法完成安装。
+- 失败原因: DNF 从 openEuler 24.03-LTS-SP4 软件仓库下载 RPM 包时，多个包（`cmake-data`、`git-core`、`gcc-c++`）遭遇 HTTP/2 流层错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），`gcc-c++` 在所有镜像源重试后均失败，导致整个 `dnf install` 命令以 exit code 1 退出。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 此次 PR 仅新增了 4 个文件：Dockerfile（含标准 `dnf install` 命令）、README.md 条目、image-info.yml 条目、meta.yml 条目。Dockerfile 中的 `dnf install` 命令语法和包名均正确（日志中 `Dependencies resolved` 阶段列出了全部 258 个包，依赖解析成功）。失败纯粹是因为 CI 构建环境访问 openEuler 24.03-LTS-SP4 仓库镜像时遭遇 HTTP/2 流错误，属于基础设施层面的临时网络问题。
-
-值得注意的是：`cmake-data` 和 `git-core` 同样遭遇了 HTTP/2 流错误，但重试后下载成功；唯有 `gcc-c++`（13 MB）两次尝试均失败，耗尽所有镜像。
+**与 PR 代码变更无关。** PR 新增的 Dockerfile 语法正确，`dnf install` 所列包名均存在于 openEuler 24.03-LTS-SP4 仓库中（依赖解析阶段已成功列出 258 个包和 914 MB 总下载量）。失败纯粹是因为 CI 构建环境与 openEuler 软件仓库之间的网络连接在 HTTP/2 层面不稳定，部分 RPM 包下载时流被服务端异常关闭。日志中另有部分包（如 `cmake`、`cpp`、`gcc` 等）下载成功，说明仓库地址正确、包名有效，问题出在网络传输层而非 Dockerfile 配置。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** 该错误为基础设施/网络临时故障，HTTP/2 流错误（Curl error 92）具有间歇性特征。PR 中的 Dockerfile 代码本身没有问题，重新运行 CI pipeline 大概率可以通过。
+**无需修改代码，等待基础设施恢复后重试。** 这是典型的 CI 基础设施网络问题（软件仓库 HTTP/2 流异常），与 PR 代码无关。建议在 CI 中重新触发本次构建，或在仓库网络状况稳定后重试。
+
+### 方向 2（置信度: 低）
+如反复重试仍失败，可在 Dockerfile 的 `dnf install` 命令前添加 `RUN echo "retries=10" >> /etc/dnf/dnf.conf && echo "timeout=120" >> /etc/dnf/dnf.conf` 增加 DNF 的重试次数和超时时间，提高对偶发网络波动的容忍度。但这仅能缓解症状，不能根治 HTTP/2 流错误。
 
 ## 需要进一步确认的点
-- 该错误仅在本次 x86_64 架构构建中出现。如果 aarch64 架构的构建也同时失败，需确认其具体错误信息是否同为 HTTP/2 流错误。
-- 建议确认 openEuler 24.03-LTS-SP4 仓库镜像服务在 CI 触发时段是否有已知的 HTTP/2 服务端问题。
+- openEuler 24.03-LTS-SP4 软件仓库镜像（`repo.****.org`）在 CI 构建时段是否存在服务端 HTTP/2 实现缺陷或负载过高的问题。
+- 同一时段其他使用 openEuler 24.03-lts-sp4 基础镜像的 PR 是否也遇到相同错误（如果是，则确认为仓库端问题）。
