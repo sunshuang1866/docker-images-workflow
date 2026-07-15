@@ -5,30 +5,31 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器异常终止
-- 新模式症状关键词: failed to receive status, rpc error, closing transport, graceful_stop, no builder found, euler_builder
+- 新模式标题: BuildKit Builder 意外终止
+- 新模式症状关键词: graceful_stop, no builder found, connection error, EOF, rpc error, reading from server
 
 ## 根因分析
 
 ### 直接错误
 ```
 #7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
+#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4]`（即 `dnf install` 阶段），非 PR 代码文件内的行号错误
-- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 dnf 安装过程中被异常终止，RPC 传输通道关闭（`graceful_stop`），导致 `dnf install` 中断，后续因构建器实例已不存在（`no builder ... found`）无法恢复
+- 失败位置: 不适用（非代码层面错误）
+- 失败原因: Docker BuildKit builder 容器（`euler_builder_20260709_224657`）在 `dnf install` 下载元数据过程中被优雅终止（graceful_stop），导致 BuildKit gRPC 连接断开，构建任务中断。这是 CI 基础设施层面的问题，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-与本 PR 的代码变更**无直接关联**。PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`（一个标准 Dockerfile）、更新了 README、image-info.yml 和 meta.yml 元数据——这些都是纯文件级变更。Dockerfile 的 `dnf install` 步骤语法正确，构建在 dnf 下载元数据阶段（`OS 77 kB/s | 2.8 MB`）因构建器实例被回收/断开而中断，属 CI 基础设施层面的问题。
+PR 变更仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及其配套的 README、image-info.yml、meta.yml 条目。Dockerfile 中的 `dnf install` 命令语法正确，所列包名（gcc、gcc-c++、make、wget、openssl-devel、bzip2-devel、zlib-devel）均为 openEuler 有效包名。构建在 dnf 元数据下载阶段因 BuildKit builder 消失而中断，而非因 dnf 命令本身或包依赖错误失败。该失败与此次 PR 的代码变更**无因果关系**。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**触发 CI 重新构建即可**。此失败为 BuildKit 构建器实例在构建中途被意外终止（`graceful_stop`），属于 CI 基础设施的瞬时故障或节点回收事件。PR 代码本身无需任何修改，直接重新触发 CI 流水线（retry）大概率可通过。
+**重试 CI 构建**。该失败是 CI 基础设施的 BuildKit builder 容器被意外回收/终止所致（`graceful_stop` + `no builder found`），属于瞬时基础设施故障。重新触发 CI job 即可验证 Dockerfile 是否能正常构建通过。
 
 ## 需要进一步确认的点
-（日志已足够确定根因，无需进一步确认）
+- 确认 CI 平台的 BuildKit builder 回收策略（是否存在空闲超时或资源配额限制导致 builder 被终止）
+- 此次构建仅涉及 x86-64 架构（日志 runner 为 `ecs-build-docker-x86-hk`），如果该镜像同样需要在 aarch64 上构建，需确认 aarch64 job 是否也存在类似基础设施问题
