@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 构建器异常终止
-- 新模式症状关键词: gracefull_stop, error reading from server: EOF, no builder found, docker-container driver
+- 新模式标题: 构建守护进程连接丢失
+- 新模式症状关键词: rpc error, closing transport, connection error, graceful_stop, no builder found, buildkit
 
 ## 根因分析
 
@@ -19,25 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit builder `euler_builder_20260709_224657`（容器内构建层 `#7 [2/4] RUN dnf install ...`，即 Dockerfile 中第一个 `dnf install` 步骤的 metadata 下载阶段）
-- 失败原因: BuildKit 构建器 daemon 在 Docker 镜像构建过程中被优雅关闭（`graceful_stop`），导致与 builder 的 gRPC 连接中断（`error reading from server: EOF`）。此后 builder 实例被移除，CI 尝试继续访问时报 `no builder found`。该错误与 Dockerfile 内命令的执行逻辑无关，属于 CI 基础设施层面的构建器生命周期管理问题。
-
-值得注意的是，dnf 在下载 OS 仓库元数据时网速仅约 77 kB/s（下载 2.8 MB 耗时 37+ 秒），网络延迟可能延长了构建耗时，使得构建更容易撞上 builder 实例的回收窗口。
+- 失败位置: Docker 构建步骤 #7（`dnf install` 软件包阶段），构建进程运行约 38.59 秒时
+- 失败原因: BuildKit 构建守护进程（`euler_builder_20260709_224657`）被 CI 平台主动触发 `graceful_stop`，导致正在执行 `dnf install` 的 Docker 构建连接中断。`graceful_stop` 是 BuildKit 收到 SIGTERM 后的正常关闭流程，说明 CI 平台因超时或资源回收主动终止了该 builder 实例。第二条错误 `no builder found` 是 builder 已销毁后的连带后果。
 
 ### 与 PR 变更的关联
-与 PR 变更无直接关联。PR 仅新增了一个标准的 Dockerfile（从 openEuler 24.03-LTS-SP4 基础镜像构建 scann，通过 pip 安装），该 Dockerfile 的 `dnf install` 步骤尚未完成 metadata 下载阶段，没有任何包安装错误或命令执行失败。构建器终止发生在基础设施层，与代码无关。
+**与 PR 代码变更无关。** 本次 PR 仅新增了一个标准 Dockerfile（安装编译依赖 + 编译 Python 3.9 + pip 安装 scann），以及 README/meta.yml/image-info.yml 等元数据文件更新。没有任何代码改动能够触发 BuildKit builder 被 CI 平台终止。`dnf install` 正在正常下载仓库元数据时（OS 仓库 2.8 MB，下载中），builder 被外部终止，属于纯粹的 CI 基础设施事件。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**触发 CI 重试/重新运行。** BuildKit builder 的 `graceful_stop` 是典型的 CI 基础设施瞬态故障（节点回收、资源清理等），通常重试即可恢复。另外 dnf metadata 下载速度仅 77 kB/s 可能是瞬态网络波动，重试时网络状况可能改善。
-
-### 方向 2（置信度: 低）
-如果重试持续失败且每次均在 dnf metadata 下载阶段出现类似超时/连接中断，需考虑：
-- 检查 CI 构建节点的网络到 openEuler 24.03-LTS-SP4 DNF 仓库的连通性是否有问题
-- 在 Dockerfile 中添加 dnf 重试逻辑（如 `dnf install --setopt=retries=5 ...`）
+### 方向 1（置信度: 高）
+**无需代码修复，需要重新触发 CI 构建。** 此失败为 CI 基础设施层面的 buildkit builder 连接中断（`graceful_stop`），与 PR 代码变更无关。建议在 CI 平台重新触发该 Job，若再次同样失败，需排查 CI runner 节点的资源状况（内存不足 OOM、磁盘空间不足、或构建超时被平台 kill）。
 
 ## 需要进一步确认的点
-- BuildKit builder 被回收的具体原因（是 Jenkins 节点回收策略、资源限制、还是 builder 自身超时）。当前日志中仅有 `graceful_stop` 信息，缺乏 builder 的生命周期管理日志。
-- 若重试后仍失败，需要获取 BuildKit daemon 自身的日志（非容器构建日志），以确认 builder 终止的真实触发条件。
-- Dockerfile 中安装的 `zlib-devel`、`bzip2-devel` 等包在 openEuler 24.03-LTS-SP4 中是否存在且命名正确，本次构建未到达包解析阶段，无法验证。
+- CI runner 节点（`ecs-build-docker-x86-hk`）在构建期间的资源使用情况（内存、磁盘是否耗尽导致 builder 被 kill）
+- 构建是否有硬性超时限制，本次 `dnf install` 下载阶段耗时约 38.59 秒是否触发了某个中间层超时阈值
+- `graceful_stop` 的触发来源：是 CI 平台的作业超时机制还是 kubernetes pod 驱逐/资源回收
