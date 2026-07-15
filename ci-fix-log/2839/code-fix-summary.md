@@ -1,19 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（infra-error）：CI runner 缺少 `shunit2` Shell 测试框架，导致镜像构建完成后的 [Check] 验证阶段失败。
+无需代码修改。CI 失败为基础设施问题（infra-error）：CI Runner 环境缺少 `shunit2` 测试框架，导致 `eulerpublisher` 的 Check 阶段在 `common_funs.sh:13` 处因 `source shunit2` 失败而崩溃。Docker 镜像构建（make → COPY → chmod → export → push）全程成功完成，与 PR 代码变更无关。
 
 ## 修改的文件
-无（无需修改任何源代码文件）
+无。CI 失败类型为 infra-error，PR 引入的 Dockerfile、entrypoint.sh 等文件无需修改。
 
 ## 修复逻辑
-CI 分析报告确认：
-- Docker 镜像构建（`./configure && make -j "$(nproc)" && make install`）已成功完成
-- 镜像推送也已完成（日志中 [Build] finished / [Push] finished 均标记成功）
-- 失败仅发生在后续的 [Check] 验证阶段，因 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh` 第 13 行尝试 source `shunit2`，但该文件在 CI runner 上不存在
-- 此问题与 PR #2839 的 Dockerfile、entrypoint.sh、README.md、meta.yml 变更完全无关
+分析报告指出：
+- 失败发生在 CI Runner 的 `eulerpublisher` Check 后处理阶段，而非 Docker 构建阶段
+- 镜像构建日志显示 `[Build] finished` 和 `[Push] finished`，构建成功
+- 根因是 CI Runner 环境缺少 `shunit2` 测试框架，属于基础设施配置问题
 
-此为 CI 运维层面的问题，需在 CI runner 测试环境中安装 `shunit2` Shell 测试框架，Code Fixer 不对源码做任何修改。
+此问题需要 CI 运维人员在 Runner 环境/镜像中安装 `shunit2` 包（如 `dnf install shunit2`），而非修改源码。
 
 ## 潜在风险
 无
