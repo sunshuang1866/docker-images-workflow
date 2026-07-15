@@ -2,46 +2,41 @@
 
 ## 基本信息
 - PR: #2836 — chore(cassandra): add openEuler 24.03-LTS-SP4 support
-- 失败类型: build-error
-- 置信度: 高
-- 知识库匹配: 模式01
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 失败类型: infra-error
+- 置信度: 中
+- 知识库匹配: 模式33
+- 新模式标题: (无需填写)
+- 新模式症状关键词: (无需填写)
 
 ## 根因分析
 
 ### 直接错误
 ```
-#9 0.051   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-#9 0.051                                  Dload  Upload   Total   Spent    Left  Speed
-#9 0.051
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100   196  100   196    0     0  11035      0 --:--:-- --:--:-- --:--:-- 11529
-#9 0.071
-#9 0.071 gzip: stdin: not in gzip format
-#9 0.071 tar: Child returned status 1
-#9 0.071 tar: Error is not recoverable: exiting now
-#9 ERROR: process "/bin/sh -c curl -o /tmp/cassandra-${VERSION}.tar.gz https://dlcdn.apache.org/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz &&     tar -zxvf /tmp/cassandra-${VERSION}.tar.gz -C /tmp &&     cd /tmp/apache-cassandra-${VERSION}/bin &&     rm -rf /tmp/cassandra-${VERSION}.tar.gz" did not complete successfully: exit code: 2
+#9 134.3 curl: (28) Failed to connect to archive.apache.org port 443 after 134252 ms: Couldn't connect to server
+#9 ERROR: process "/bin/sh -c curl -o /tmp/cassandra-${VERSION}.tar.gz https://archive.apache.org/dist/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz &&     tar -zxvf /tmp/cassandra-${VERSION}.tar.gz -C /tmp &&     cd /tmp/apache-cassandra-${VERSION}/bin &&     rm -rf /tmp/cassandra-${VERSION}.tar.gz" did not complete successfully: exit code: 28
 ```
 
 ### 根因定位
-- 失败位置: `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile:13`（`RUN curl ... tar -zxvf ...` 步骤）
-- 失败原因: `dlcdn.apache.org` 对 Cassandra 5.0.6 的二进制包只返回了 **196 字节**的响应（极可能是 HTML 404/错误页面），`curl` 下载完成但 `tar -zxvf` 解压时发现内容不是 gzip 格式，导致构建失败。
+- 失败位置: `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile:13`（curl 下载步骤）
+- 失败原因: CI 构建环境无法与 `archive.apache.org:443` 建立 TCP 连接，curl 在 134 秒后超时（exit code 28）
 
 ### 与 PR 变更的关联
-PR 变更直接触发了该失败。PR 新增了 `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile`，其中第 13 行使用 `dlcdn.apache.org` 作为 Cassandra 二进制包的下载源。该 CDN 遵循 Apache 的惯例——仅保留各项目的最新版本，历史版本（如 Cassandra 5.0.6）可能已被下架，与知识库中**模式01**（Apache CDN Maven 404）和**模式38**（ActiveMQ 下载源 404）的根因完全一致。PR 本身的 Dockerfile 写法、版本号、元数据均无错误。
+PR 新增了 Cassandra 5.0.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile。该 Dockerfile 中的 curl 下载步骤触发了此失败。
+
+**重要发现 — URL 不一致**：PR diff 中 Dockerfile 使用的下载 URL 为 `https://dlcdn.apache.org/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz`，但 CI 实际执行时使用的是 `https://archive.apache.org/dist/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz`。两者 host 和路径均不同（`dlcdn.apache.org/cassandra/` vs `archive.apache.org/dist/cassandra/`）。这暗示 CI 流程中存在 URL 改写/镜像层，将作者指定的 CDN 地址改写为了归档站地址，而归档站从当前 CI runner 网络不可达。
+
+对比历史模式 33 的建议修复方向——"将下载源切换为已验证可达的 `dlcdn.apache.org`"——PR 作者原始使用的正是 `dlcdn.apache.org`，理论上应可行。失败的关键在于 CI 将其改写为 `archive.apache.org` 后网络不通。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 Cassandra 5.0.6 的下载源从 `dlcdn.apache.org` 替换为 `archive.apache.org`（Apache 官方归档站，永久保留历史版本），或替换为已验证可达的国内镜像站（如 `repo.huaweicloud.com`）。URL 格式需对应调整为归档路径：`https://archive.apache.org/dist/cassandra/${VERSION}/apache-cassandra-${VERSION}-bin.tar.gz`。
+### 方向 1（置信度: 中）
+**绕过 CI URL 改写**：将下载源从 Apache CDN/Archive 改为已验证可达的华为云镜像站（`repo.huaweicloud.com`）。参考历史模式 33 中已成功修复的同类案例（如 PR #3101、#3077），使用华为云镜像站可避免 Apache 服务器的网络可达性问题。
 
-### 方向 2（置信度: 中）
-若 `archive.apache.org` 也不可达（参照模式33中部分 Apache 域名在 CI 环境网络不通的情况），可改用华为云镜像站或其他已证实 CI 环境可达的镜像源。
+### 方向 2（置信度: 低）
+**保留 `dlcdn.apache.org` 但排除 CI 改写**：如果 CI 的 URL 改写策略对某些 host 有例外规则（如 `dlcdn.apache.org` 或特定 URL pattern 不触发改写），可通过调整 URL 格式绕过改写，直接使用 `dlcdn.apache.org` 完成下载。需要确认 CI 网关/编排层的 URL 改写逻辑。
 
 ## 需要进一步确认的点
-1. 确认 Cassandra 5.0.6 在 `archive.apache.org`（`https://archive.apache.org/dist/cassandra/5.0.6/`）上确实存在该二进制包。
-2. 检查同仓库下已有的 `Database/cassandra/5.0.6/24.03-lts-sp3/Dockerfile` 是否使用相同的 `dlcdn.apache.org` 下载源——如果 SP3 版本仍在正常构建，则可能是 CDN 的间歇性问题；如果 SP3 也失败，则确认是版本下架问题。
-
-## 修复验证要求
-code-fixer 必须在提交前手动验证新的下载 URL 可访问且返回的是有效的 gzip 压缩包（而非 HTML 页面）。可用 `curl -sI <新URL>` 确认 HTTP 状态码为 200，且 `Content-Type` 为 `application/x-gzip` 或类似二进制类型的响应。
+1. **CI URL 改写机制**：需确认 CI pipeline 中是否存在将 Apache 下载 URL 从 `dlcdn.apache.org` 自动改写为 `archive.apache.org` 的逻辑，以及该逻辑的触发条件和例外规则。
+2. **`dlcdn.apache.org` 可达性**：从 CI runner 直接测试 `curl -I https://dlcdn.apache.org/cassandra/5.0.6/apache-cassandra-5.0.6-bin.tar.gz` 是否可达，如果可达则问题仅在于 URL 改写层。
+3. **华为云镜像站可用性**：确认 `https://repo.huaweicloud.com/apache/cassandra/5.0.6/apache-cassandra-5.0.6-bin.tar.gz` 是否存在且可从 CI runner 访问。
+4. **现有 sp3 Dockerfile 参考**：查看 `Database/cassandra/5.0.6/24.03-lts-sp3/Dockerfile` 使用的下载 URL，确认同一项目的其他 OS 版本是否也面临相同的网络问题。
