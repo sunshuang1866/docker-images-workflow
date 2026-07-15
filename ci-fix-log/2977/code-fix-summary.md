@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施网络故障（infra-error），与 PR 代码变更无关。
+无需代码修复 — 本次 CI 失败为 infra-error（基础设施网络问题）。
 
 ## 修改的文件
-无
+无（未修改任何文件）
 
 ## 修复逻辑
-CI 分析报告明确指出：失败类型为 `infra-error`，根因是 aarch64 构建节点 `ecs-build-docker-aarch64-04-sp` 在通过 `yum install` 从 `repo.openeuler.org` 下载 RPM 包时，遭遇多次 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR）和 SSL 读取错误（Curl error 56），导致部分包下载失败。这是典型的镜像站网络波动问题。
+CI 分析报告确认此为 infra-error，根因为 CI 的 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）在从 `repo.openeuler.org` 下载 openEuler 24.03-LTS-SP4 的 RPM 包时，遭遇多次 HTTP/2 流错误（`INTERNAL_ERROR` err 2）和 SSL 连接中断（`SSL_ERROR_SYSCALL`），导致 yum install 步骤失败。PR 新增的 Dockerfile 中 yum install 命令语法正确、包名有效，约 170 个包已成功下载，失败纯粹由外部网络因素引起。
 
-PR 仅新增了 Dockerfile（标准 yum install → git clone → cmake → make 流程）及 README、image-info.yml、meta.yml 三个元数据文件，Dockerfile 中列举的包名均为 openEuler 24.03-LTS-SP4 仓库中的合法包名。日志显示部分包已下载成功（如 abseil-cpp、cmake 等），证明包名和版本不存在问题，失败与 Dockerfile 内容无关。
-
-**建议操作**：在 Jenkins 上重新触发 aarch64 构建任务。
+建议操作：
+- 重新触发 CI 构建（retry），网络恢复后构建即可通过。
+- 若持续复现，需由 CI 运维团队排查 runner 到 `repo.openeuler.org` 的网络质量。
 
 ## 潜在风险
 无
