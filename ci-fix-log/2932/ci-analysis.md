@@ -3,17 +3,15 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit启动失败
-- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, euler_builder
+- 新模式标题: BuildKit 容器启动失败
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit
 
 ## 根因分析
 
 ### 直接错误
 ```
-euler_builder_20260709_205700
-#0 building with "euler_builder_20260709_205700" instance using docker-container driver
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -27,22 +25,25 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker buildx builder 初始化阶段（未进入 Dockerfile 构建步骤）
-- 失败原因: Docker daemon 在创建 BuildKit builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后立即报错 `Could not find the file / in container`，builder 容器被移除，导致整个构建流程失败。该错误发生在 Docker 引擎层面，与 PR 提交的 Dockerfile 内容无关。
+- 失败位置: Docker BuildKit 引导阶段（booting buildkit），尚未进入 Dockerfile 构建步骤
+- 失败原因: CI 构建节点上的 Docker 守护进程在创建 buildx builder 容器（`buildx_buildkit_euler_builder_20260709_2057000`）后无法访问其根文件系统 `/`，容器立即被移除，导致整个构建流程在启动阶段即告失败
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`（glibc 2.42 的构建文件）、更新 README.md、image-info.yml 和 meta.yml 等元数据文件。CI 流程在镜像规范检查（`The image specification check for releasing on appstore has passed`）已通过，但在 BuildKit builder 启动阶段崩溃，构建从未到达执行 Dockerfile 的步骤。该错误属于 Docker/BuildKit 基础设施层面的问题，极可能是 CI runner 节点的 Docker daemon 状态异常或 BuildKit builder 容器文件系统损坏导致。
+**与 PR 无关。** 该错误发生在 Docker BuildKit 的 `[internal] booting buildkit` 引导阶段——此时 BuildKit 正在拉取 `moby/buildkit:buildx-stable-1` 镜像并创建 builder 容器，尚未执行任何 Dockerfile 指令。PR 中新增的 Dockerfile（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`）未被解析或执行。CI 在此前的差异检测（4 个变更文件正确识别）和镜像规范检查（"The image specification check for releasing on appstore has passed"）均通过，进一步印证失败发生在构建基础设施层而非代码层。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**重新触发 CI 流水线。** 由于该错误属于 BuildKit/Docker daemon 基础设施临时故障，PR 代码本身没有问题，通常重新运行 CI（retry/rerun）即可通过。如果多次重试均失败，则需要检查 CI runner 节点（`ecs-build-docker-x86-hk`）的 Docker daemon 状态、磁盘空间以及 BuildKit builder 配置。
+### 方向 1（置信度: 高）
+<这是 CI 基础设施问题（Docker 守护进程或 buildx builder 容器异常），需要运维侧排查构建节点 `ecs-build-docker-x86-hk` 上的 Docker 守护进程状态。可能的原因包括：
+- 构建节点的 Docker 守护进程文件系统状态异常（如 overlay2 存储驱动问题）
+- buildx builder 实例 `euler_builder_20260709_205700` 的残留状态导致新建同名容器时冲突
+- 节点磁盘空间或 inode 耗尽导致容器文件系统初始化失败>
 
-### 方向 2（置信度: 低）
-**清理 CI runner 上的残留 BuildKit 容器和缓存。** 如果 `euler_builder_*` 的旧容器/缓存残留导致新 builder 创建异常，可在 runner 节点上执行 `docker buildx rm` 清理旧的 builder 实例后重试。
+### 方向 2（置信度: 中）
+<重新触发 CI 运行。若为 buildx builder 容器的偶发性启动竞态问题，重试后可能通过。建议先检查 `docker system prune -f` 清理 buildx builder 实例后再重试。>
 
 ## 需要进一步确认的点
-- CI runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon 运行状态和版本信息
-- 该 runner 节点是否存在磁盘空间不足或 inode 耗尽
-- 是否存在残留的 BuildKit builder 容器（`docker buildx ls`）干扰新 builder 创建
-- 该错误是否在多次重试后持续复现（若持续复现则可能是 runner 节点环境系统性异常）
+- 构建节点 `ecs-build-docker-x86-hk` 的 Docker 守护进程日志（`journalctl -u docker`），确认容器启动阶段是否有更详细的错误信息
+- 节点磁盘使用情况（`df -h` / `df -i`），排除空间或 inode 耗尽
+- 该节点上 buildx builder 实例是否有残留（`docker buildx ls`），如有建议清理后重试
+- 该错误是否为本周/本日首次出现，还是在其他 PR 上也出现过——若为首次且重试后消失，则为偶发性基础设施抖动
