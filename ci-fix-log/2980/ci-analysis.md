@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 镜像站HTTP/2协议错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 仓库镜像HTTP/2协议错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, dnf install, No more mirrors to try
 
 ## 根因分析
 
@@ -22,20 +22,19 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: CI 构建环境中 `repo.****.org`（openEuler 24.03-LTS-SP4 官方 RPM 镜像仓库）出现 HTTP/2 协议层错误（Curl error 92: Stream error in the HTTP/2 framing layer），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载失败。其中 `git-core` 重试后成功下载，但 `gcc-c++` 的两次重试均以相同的 HTTP/2 流错误失败，所有可用镜像均已尝试，`dnf` 最终报错退出。
+- 失败位置: Dockerfile:6（`RUN dnf install -y ...` 步骤）
+- 失败原因: CI 构建环境访问 openEuler 24.03-LTS-SP4 仓库镜像时，HTTP/2 连接层出现协议帧错误（`Curl error 92: Stream error in the HTTP/2 framing layer`），导致 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 包下载失败。该包经过两次镜像重试均以相同错误失败，dnf 耗尽所有可用镜像后终止构建。其他包（cmake-data、git-core）也遇到同类 HTTP/2 错误，但在后续重试中成功下载。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅为新增 grADS 镜像在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套的 README、image-info.yml、meta.yml 更新。Dockerfile 中的 `dnf install` 命令语法正确，所列包名均为 openEuler 24.03 仓库中的有效包（从日志中可见 Dependencies resolved 阶段列出了全部 258 个待安装包及其正确仓库来源）。失败纯粹是由于 CI 基础设施中 `repo.****.org` RPM 镜像仓库的 HTTP/2 协议层瞬时故障导致的包下载失败，与 PR 代码内容无关。
+**与 PR 变更无关**。PR 仅新增了一个符合项目规范的 Dockerfile（`Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`），`dnf install` 命令语法和包列表均正确，遵循了仓库中同类镜像的一致模式。失败原因为 CI 基础设施与 openEuler 24.03-LTS-SP4 仓库镜像之间的 HTTP/2 协议层网络故障，属于 transient infra 问题，Code Fixer 无需处理 Dockerfile 代码。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建。** 这是一个镜像仓库瞬时网络故障，与 PR 代码变更无关。在 `repo.****.org` 镜像仓库恢复正常后重新触发 CI 构建即可通过。无需修改任何代码。
-
-### 方向 2（置信度: 低，仅在问题持续出现时考虑）
-若重试后仍持续出现相同错误，可考虑在 Dockerfile 的 `dnf install` 前添加重试逻辑（如 `dnf install -y --setopt=retries=10 ...`），或降级 DNF 的 HTTP 后端为 HTTP/1.1（`echo "http2=false" >> /etc/dnf/dnf.conf`），以规避 HTTP/2 协议的瞬时错误。但这不是推荐的修复方案，优先应确认镜像仓库端的问题是否已修复。
+**无需代码修改。** 这是 CI 基础设施的网络问题——构建节点与 openEuler 24.03-LTS-SP4 仓库镜像之间的 HTTP/2 连接出现了协议帧错误。建议：
+1. 重新触发 CI 构建（retry），如果镜像仓库端网络恢复，构建应能成功
+2. 如果反复出现，联系 CI 运维排查仓库镜像代理/缓存的 HTTP/2 配置，或者将 dnf 配置为使用其他远端仓库源进行构建
 
 ## 需要进一步确认的点
-1. 确认 `repo.****.org` 镜像仓库当前状态是否正常（是否正在进行维护或存在已知的 HTTP/2 代理层故障）。
-2. 确认在其他 openEuler 24.03-lts-sp4 镜像的近期构建中是否也出现了相同的 HTTP/2 流错误，以判断影响范围（是 `repo.****.org` 的瞬时故障还是对特定 IP/子网的访问量限制）。
+- 确认 CI 构建环境配置的 openEuler 24.03-LTS-SP4 仓库镜像地址（日志中为 `repo.****.org`）在当前时间段是否存在可复现的 HTTP/2 协议异常
+- 确认该仓库镜像是否支持回退到 HTTP/1.1 作为备选协议
