@@ -1,17 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（infra-error）：Docker BuildKit 容器启动时发生瞬态故障（`Could not find the file / in container`），与 PR 代码变更无关。
+无代码修改 — 此为 CI 基础设施故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无。此失败不需要修改任何源代码文件。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：失败发生在 BuildKit 引导阶段（`[internal] booting buildkit`），此时尚未开始解析或执行任何 Dockerfile 指令。PR 新增的 4 个文件（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`、`Others/glibc/README.md`、`Others/glibc/doc/image-info.yml`、`Others/glibc/meta.yml`）没有机会被读取或执行。
+CI 失败发生 Docker BuildKit 引导阶段（`[internal] booting buildkit`），在从 `moby/buildkit:buildx-stable-1` 镜像创建 builder 容器时，Docker daemon 报错 `Could not find the file / in container`。此时尚未进入 PR 所提交的 Dockerfile 构建步骤（未执行任何 RUN、COPY 等指令），PR 中的 4 个文件变更（Dockerfile、README.md、image-info.yml、meta.yml）均不涉及 CI 基础设施或 Docker daemon 配置。
 
-错误信息 `Could not find the file / in container` 是 Docker 守护进程/overlay2 存储驱动的瞬态故障，可能原因包括 CI runner 磁盘 I/O 延迟或 BuildKit 容器根文件系统未及时就绪。
-
-**建议操作**：重新触发 CI 流水线（重试 CI Job）。若多次重试仍失败，需检查 CI runner（`ecs-build-docker-x86-hk`）的 Docker/ BuildKit 版本及 overlay2 存储驱动健康状态。
+因此无需修改任何 PR 代码。应通过以下 CI 基础设施操作解决：
+- 检查 CI runner 节点 `ecs-build-docker-x86-hk` 上 Docker daemon 存储驱动和磁盘状态
+- 清理残留的 buildkit 容器或重启 Docker daemon
+- 必要时重新拉取 `moby/buildkit:buildx-stable-1` 镜像后重试 CI
 
 ## 潜在风险
-无。
+无 — 未修改任何代码，无引入新问题的风险。
