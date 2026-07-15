@@ -2,57 +2,43 @@
 
 ## 基本信息
 - PR: #2852 — chore(milvus): add openEuler 24.03-LTS-SP4 support
-- 失败类型: build-error
-- 置信度: 高
+- 失败类型: infra-error
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: sourceware.org 403
-- 新模式症状关键词: sourceware.org, 403 Forbidden, curl: (22), bzip2, conan
+- 新模式标题: conan bzip2 源站 403
+- 新模式症状关键词: `bzip2/1.0.8`, `conan install`, `403 Forbidden`, `AuthenticationException`, `source() method`, `bzip2_source_fix.py`
 
 ## 根因分析
 
 ### 直接错误
 ```
-#13 [builder 4/5] RUN mkdir -p /root/.conan/data/bzip2/1.0.8/_/_/source &&     curl -fsSL --retry 3 --retry-delay 5       -o /root/.conan/data/bzip2/1.0.8/_/_/source/bzip2-1.0.8.tar.gz       https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
-#13 1.026 curl: (22) The requested URL returned error: 403
-#13 ERROR: process "/bin/sh -c mkdir -p /root/.conan/data/bzip2/1.0.8/_/_/source &&     curl -fsSL --retry 3 --retry-delay 5       -o /root/.conan/data/bzip2/1.0.8/_/_/source/bzip2-1.0.8.tar.gz       https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz" did not complete successfully: exit code: 22
-------
-Dockerfile:42
+#14 626.0 [HOOK - bzip2_source_fix.py] pre_source(): Patched bzip2/1.0.8 source URLs to use working mirrors
+#14 626.0 bzip2/1.0.8: Configuring sources in /root/.conan/data/bzip2/1.0.8/_/_/source/src
+#14 626.8 ERROR: bzip2/1.0.8: Error in source() method, line 50
+#14 626.8 	get(self, **self.conan_data["sources"][self.version], strip_root=True)
+#14 626.8 	AuthenticationException: 403: Forbidden
+#14 626.9 conan install failed
+#14 626.9 make: *** [Makefile:263: build-3rdparty] Error 1
+#14 ERROR: process "/bin/sh -c ... make build-cpp ..." did not complete successfully: exit code: 2
 ```
 
 ### 根因定位
-- 失败位置: `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile:42`（实际构建文件，已与 PR diff 产生差异）
-- 失败原因: Dockerfile 中显式 `curl` 预下载 bzip2-1.0.8 源码包时，`https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz` 返回 HTTP 403 Forbidden，导致 Docker 构建在 builder 阶段第 4 步失败。
+- 失败位置: `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile:47-51`（`make build-cpp` 步骤 → `Makefile:263: build-3rdparty` 目标）
+- 失败原因: Milvus 构建过程中 `make build-cpp` 调用 conan 安装第三方依赖 `bzip2/1.0.8`，conan 的 `bzip2_source_fix.py` hook 虽已尝试将下载源 URL 替换为可用镜像，但替换后的镜像站仍返回 `403 Forbidden`，导致 bzip2 源码下载失败，conan install 整体失败
 
 ### 与 PR 变更的关联
-PR 新增了 milvus 2.6.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile。milvus 的 C++ 构建依赖 bzip2（通过 conan 管理）。CI 首次构建失败后，已有人为 Dockerfile 增加了两处 workaround：① conan hook（step #12）将 conandata.yml 中的 bzip2 URL 替换为 distfiles.macports.org 镜像；② 新增补 pre-download RUN 步骤（step #13）试图提前将 bzip2 缓存到 `/root/.conan/data/`。但 step #13 中显式 curl 仍使用了原始的 `sourceware.org` URL（而非 hook 中的镜像 URL），导致预下载步骤本身因 403 而失败。**PR 变更直接触发了此失败。**
-
----
+PR 新增了 milvus 2.6.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile。Dockerfile 的 RUN 指令、依赖安装脚本、conan 配置本身均为正常模板写法，**失败与 PR 代码逻辑无关**，属于 conan 依赖下载的网络/源站访问问题。该问题可能在 sp4 环境下更易触发（镜像站访问策略差异），但不排除是临时性网络波动。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 Dockerfile 第 42-45 行（bzip2 预下载 RUN 指令）中的 URL 从 `https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz` 替换为已验证可达的镜像 URL（如 `https://distfiles.macports.org/bzip2/bzip2-1.0.8.tar.gz`），与同文件中 conan hook（step #12）使用的镜像保持一致。
+### 方向 1（置信度: 中）
+conan 的 `bzip2_source_fix.py` hook 内置的 bzip2 源站镜像列表在当前 CI 网络环境下不可达（全部返回 403）。需要找到 bzip2/1.0.8 的备用下载源，通过 conan 的 `source_replace_urls` 或自定义 hook 替换为当前 CI 环境可达的镜像站（如 `repo.huaweicloud.com`），或在 Dockerfile 中预下载 bzip2 源码包并配置 conan 使用本地源。
 
-### 方向 2（置信度: 中）
-如已验证镜像 URL 同样不可达，可改为先尝试 curl 原始 URL，失败时自动 fallback 到镜像 URL：
-```sh
-curl -fsSL --retry 3 https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz -o ... ||
-curl -fsSL --retry 3 https://distfiles.macports.org/bzip2/bzip2-1.0.8.tar.gz -o ...
-```
-
-### 方向 3（置信度: 低，备选）
-移除显式的预下载 RUN 步骤（step #13），仅依赖 step #12 中已创建的 conan hook 在 conan 解析 bzip2 依赖时自动 patch URL。风险：若 conan hook 因路径或权限问题未生效，构建仍会失败。
-
----
+### 方向 2（置信度: 低）
+若问题属于暂时性网络波动（上游镜像站短时不可用），重试 CI 即可通过，无需修改代码。
 
 ## 需要进一步确认的点
-
-1. **Dockerfile 实际内容与 diff 不一致**：PR diff 中 Dockerfile 仅 53 行，不包含 bzip2 预下载步骤，但 CI 构建日志显示该步骤位于 Dockerfile:42。需确认当前分支上 Dockerfile 的实际完整内容是否为修正后的版本，以及 conan hook 与预下载步骤是否在同一个 RUN 中还是分开的。
-2. **sourceware.org 403 的时效性**：sourceware.org 对 bzip2 旧版本返回 403 是临时性限制还是永久性政策。如果是一致性问题，需考虑将所有 conan 依赖中指向 sourceware.org 的 URL 一并替换。
-3. **镜像 URL 可用性验证**：`https://distfiles.macports.org/bzip2/bzip2-1.0.8.tar.gz` 是否在 CI 构建环境中确实可达，建议在修复前单独 curl 测试。
-
-## 修复验证要求
-code-fixer 必须在修复后确认：
-1. `curl -fsSL --retry 3` 测试新的镜像 URL 在 CI 同网段环境中可达（返回 200 且文件为有效 gzip）。
-2. Dockerfile 中 bzip2 预下载 URL 与同文件中 conan hook（step #12）的替换 URL 一致（均为 `distfiles.macports.org`）。
-3. 若选择方向 3（移除预下载步骤），需验证 conan hook 在实际 build-cpp 过程中确实被调用并成功 patch 了 conandata.yml。
+1. 该 CI runner 能否访问 `https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz`（bzip2 官方源）？
+2. `bzip2_source_fix.py` hook 中配置的镜像站列表有哪些 URL？是否可追加 huaweicloud 等国内镜像站地址？
+3. 同仓库中其他 milvus 版本（如 `2.6.0/24.03-lts-sp2`）的 Dockerfile 构建是否也触发了同样的 conan 安装步骤，是否存在类似失败历史？
+4. 若重试 CI 后持续复现，则确认是 sp4 环境下 conan 镜像站的稳定性问题，需从方向 1 入手。
