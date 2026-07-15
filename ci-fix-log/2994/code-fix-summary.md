@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：BuildKit builder `euler_builder_20260709_224657` 在 dnf 下载元数据过程中被 `graceful_stop` 信号终止，导致构建中断。与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施问题（infra-error），BuildKit builder 实例在执行 `dnf install` 期间被意外终止（`graceful_stop`），与 PR 代码变更无关。
 
 ## 修改的文件
-无（无需代码修改）
+无
 
 ## 修复逻辑
-CI 分析报告将该失败归类为 `infra-error`，明确指出失败原因是 BuildKit builder 实例在构建过程中被 CI 平台主动终止（`graceful_stop` 的 GOAWAY 信号），属于基础设施层面的瞬时问题。PR 新增的 Dockerfile 内容无语法错误或逻辑问题，构建命令模式与已有 SP3 版本一致。修复方式为重新触发 CI 运行，无需修改任何代码。
+CI 失败分析报告确认：
+- 失败类型为 `infra-error`，置信度高
+- 根因为 BuildKit builder 容器/进程被外部信号终止（`graceful_stop`），可能由 CI 节点资源不足（OOM）、Docker 守护进程重启、或 builder 会话超时导致
+- PR 仅新增了标准的 Dockerfile、README、image-info.yml 和 meta.yml，Dockerfile 语法有效、基础镜像可用
+- 与 PR 代码变更**无关**，Code Fixer 无需处理
+
+建议重新触发 CI 流水线重试。如果重试后反复出现同类错误，需排查 CI 节点的 BuildKit builder 生命周期配置。
 
 ## 潜在风险
 无
