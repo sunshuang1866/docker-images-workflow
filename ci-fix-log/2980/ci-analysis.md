@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: DNF仓库HTTP2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,20 +22,16 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: CI 构建环境中，openEuler 24.03-LTS-SP4 的 RPM 仓库（repo.****.org）在 HTTP/2 传输层出现流错误（`Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2)`）。多个包（cmake-data、git-core、gcc-c++）均遭遇此错误，其中 cmake-data 和 git-core 在重试后下载成功，但 gcc-c++ 两次重试均失败，最终因 "No more mirrors to try" 导致 `dnf install` 命令退出码为 1，Docker 构建失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`RUN dnf install -y ...` 步骤）
+- 失败原因: Docker 构建过程中 `dnf install` 从 openEuler 24.03-LTS-SP4 RPM 仓库下载软件包时，多个包遭遇 HTTP/2 流层错误（Curl error 92）。其中 `cmake-data` 和 `git-core` 在重试后恢复，但 `gcc-c++`（13 MB）经过两次重试后耗尽所有镜像源，最终下载失败，导致整个 `dnf install` 步骤退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 新增的 Dockerfile 在语法和包依赖声明上均正确——列出的所有包都存在于仓库的元数据中（Dependencies resolved 步骤正常完成，258 个包的事务摘要已生成）。失败发生在 `dnf` 实际下载 RPM 包阶段，是 openEuler 24.03-LTS-SP4 仓库服务器的 HTTP/2 实现问题导致传输层中断，属于 CI 基础设施 / 上游仓库可用性问题。
+**与 PR 无关。** PR 变更仅为新增 Dockerfile（`Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`）和配套元数据文件（`meta.yml`、`README.md`、`image-info.yml`），未修改仓库源配置。失败是 CI 构建时 openEuler RPM 仓库的 HTTP/2 服务端临时性故障所致，属于基础设施层面的瞬时网络问题。任何在此时段尝试安装相同 RPM 包的构建任务都会遇到相同错误。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**重试触发 CI**。该错误为仓库服务器端 HTTP/2 流传输的偶发性问题（INTERNAL_ERROR 是服务端主动关闭流的错误码），并非代码缺陷。在仓库服务恢复正常后，重新触发 CI 大概率可以通过。Code Fixer 无需对 Dockerfile 做任何修改。
-
-### 方向 2（置信度: 低）
-**降级 curl 的 HTTP 版本**。如果在 Dockerfile 构建步骤中为 `dnf` 配置强制使用 HTTP/1.1 可绕过此问题。但这属于对上游基础设施问题的规避性 workaround，不属于代码修复，且不保证仓库未来行为的兼容性。
+### 方向 1（置信度: 高）
+无需修改任何代码。这是 RPM 仓库服务器的瞬时网络故障，`dnf install` 中 `cmake-data` 和 `git-core` 在重试后已成功下载，说明问题仅影响特定时段的特定连接。**重新触发 CI 构建**大概率会通过。如果在 CI 流程中允许，可以在 `dnf install` 前添加 `dnf makecache` 或设置 `--retries` 选项以增强重试容忍度，但非必须。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库（repo.****.org）的 HTTP/2 服务是否已恢复正常。可通过手动 `curl --http2 -I <repo URL>` 或重试 CI 来验证。
-- 如果多次重试 CI 均失败，需排查仓库服务器端是否存在 HTTP/2 配置问题或负载过高导致的流中断。
+无。日志证据充分，根因明确为 RPM 仓库 HTTP/2 连接层故障，与 PR 代码变更无关。
