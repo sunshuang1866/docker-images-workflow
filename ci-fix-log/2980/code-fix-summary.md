@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。此 CI 失败为基础设施错误（infra-error），openEuler 24.03-LTS-SP4 软件仓库在 HTTP/2 协议层返回 `Stream error in the HTTP/2 framing layer`，导致 `gcc-c++`、`cmake-data`、`git-core` 等 RPM 包下载失败。
+无需代码修复。此 CI 失败属于基础设施问题（infra-error），openEuler 24.03-LTS-SP4 仓库镜像服务器在下载 RPM 包时出现 HTTP/2 流层错误（curl error 92），为暂态网络故障，与 PR 代码变更无关。
 
 ## 修改的文件
-无（无需修改任何代码）
+无
 
 ## 修复逻辑
-CI 失败分析报告判定该失败类型为 `infra-error`，根因是 `repo.****.org` 仓库服务器的 HTTP/2 协议层故障（`INTERNAL_ERROR (err 2)`），属于临时性基础设施问题，与 PR #2980 新增的 Dockerfile 及文档变更无关。建议在仓库服务恢复正常后重新触发 CI 构建。
+根据分析报告，失败直接原因是 `dnf install` 过程中 openEuler 仓库镜像的 HTTP/2 流异常中断，导致 `gcc-c++` 等多个包下载失败。Dockerfile 中的 `dnf install` 命令语法正确、包名有效（258 个包在依赖解析阶段已通过）。此问题与 PR 引入的 Dockerfile 内容无关，属于 CI 基础设施/外部仓库服务端的 transient 问题。等待仓库镜像恢复后重新触发 CI 构建即可。
 
 ## 潜在风险
 无
