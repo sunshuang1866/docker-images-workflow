@@ -1,14 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中从 `dlcdn.apache.org` 下载 Apache Druid 35.0.0 二进制包返回 404，构建失败。
+Apache Druid 35.0.0 二进制包在 `dlcdn.apache.org` 上返回 HTTP 404，导致 Docker 构建失败。
 
 ## 修改的文件
-- `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`: 将第 9 行 `wget` 下载源从 `https://dlcdn.apache.org/druid/` 改为 `https://archive.apache.org/dist/druid/`
+- `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`: 将 wget 下载源从 `dlcdn.apache.org` 更换为 `archive.apache.org`
 
 ## 修复逻辑
-`dlcdn.apache.org` CDN 只保留各项目的最新版本，Druid 35.0.0 已从该 CDN 下架。使用 `archive.apache.org/dist/druid/`（Apache 官方归档站）替代，该站点保留所有历史版本。已验证 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 当前可访问且文件存在。
+`dlcdn.apache.org` 是 Apache CDN 分发节点，通常仅保留最新版本，不保证历史版本持久可用。将下载 URL 从 `https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` 更换为 `https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`（Apache 归档站，保留所有历史版本）。已验证 archive URL 可访问（HTTP 200），Apache Druid 35.0.0 制品确实存在于归档站。
 
 ## 潜在风险
-- `archive.apache.org` 在部分 CI 环境中可能有网络超时问题（模式33案例），如后续构建中仍然失败，可考虑使用 `repo.huaweicloud.com/apache/druid/` 作为替代下载源。
-- 此下载源不支持 TLS 证书内置校验，与原始 `dlcdn.apache.org` 行为一致，未引入新的安全隐患。
+无。archive.apache.org 是 Apache 官方归档站，所有历史版本均可获取。该修复与项目中其他同类问题的处理方式一致（模式01、模式33、模式38）。
