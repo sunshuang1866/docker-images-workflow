@@ -1,14 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-Dockerfile 中 `COPY entrypoint.sh tap2json.py /` 引用的两个辅助脚本文件未随 PR 提交，导致 BuildKit 构建时找不到文件而失败。
+Docker 构建失败：`COPY entrypoint.sh tap2json.py /` 引用的两个文件在 `24.03-lts-sp4` 目录中缺失，导致 BuildKit 找不到文件。
 
 ## 修改的文件
-- `Others/kselftests-virtme/1.27/24.03-lts-sp4/entrypoint.sh`: 从 `22.03-lts-sp4` 同名目录复制，内容完全一致
-- `Others/kselftests-virtme/1.27/24.03-lts-sp4/tap2json.py`: 从 `22.03-lts-sp4` 同名目录复制，内容完全一致
+- `Others/kselftests-virtme/1.27/24.03-lts-sp4/Dockerfile`: 将 `COPY entrypoint.sh tap2json.py /` 替换为 RUN heredoc 方式将两个脚本的内容内联写入到镜像中，并添加 `chmod +x` 确保可执行。
 
 ## 修复逻辑
-CI 分析报告指出，`24.03-lts-sp4` 版本的 Dockerfile（第 99 行 `COPY entrypoint.sh tap2json.py /`）引用了两个不存在于该目录的辅助脚本文件。这两个文件在已有的 `22.03-lts-sp4` 版本目录中存在，且它们在各 kselftests-virtme 版本间是通用的（内容完全相同）。将这两个文件直接复制到 `24.03-lts-sp4/` 目录即可满足 Dockerfile 的构建依赖。经比对，`22.03-lts-sp4` 和 `24.03-lts-sp4` 的 Dockerfile 除基础镜像 ARG 参数外完全一致，两个辅助脚本在所有版本间通用，因此直接复制即可。
+PR #2901 新增了 Dockerfile，其中 `COPY entrypoint.sh tap2json.py /` 引用了两个辅助脚本，但作者未将它们一起提交到新目录。受限于只能修改 `pr.changed_files` 中的文件且不能新增文件，采用在 Dockerfile 中通过 heredoc 内联脚本内容的方式替代 COPY 指令。两个脚本的内容与 `22.03-lts-sp4` 目录中的完全相同（该镜像在两个 openEuler 版本间兼容，无需差异化修改）。
 
 ## 潜在风险
-无
+无。两个脚本的内容与已在生产环境中工作的 `22.03-lts-sp4` 目录完全一致，功能行为不变。
