@@ -1,15 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题：CI runner 环境缺少 `shunit2` 测试框架依赖，导致 [Check] 镜像验证阶段无法执行任何测试。与 PR 代码变更无关，Docker 构建和推送均成功完成。
+CI 基础设施错误（infra-error）：`eulerpublisher` 容器测试框架缺少 `shunit2` shell 单元测试工具，导致 `[Check]` 阶段无法启动任何测试用例。与 PR 代码变更无关。
 
 ## 修改的文件
-无。此为基础设施问题，不需要代码修改。
+无。此失败为 CI 环境问题，无需修改源代码。
 
 ## 修复逻辑
-CI 失败发生在上游 CI 框架 `eulerpublisher` 的镜像验证环节（`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`），该脚本尝试加载 `shunit2` 但 CI runner 环境中不存在该二进制/脚本。Docker 镜像构建（`#8 DONE 268.4s`）和推送（`[Push] finished`）阶段全部通过。
+CI 分析报告确认：
+- Docker 镜像的编译、构建、推送均成功完成
+- 失败发生在构建后的镜像检查测试阶段（`[Check]`）
+- 根因是 CI 测试环境 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 处找不到 `shunit2` 工具
+- 此问题与 PR #2839 新增的 Dockerfile、entrypoint.sh、README.md、meta.yml 均无关联
 
-需由 CI 基础设施运维团队确认并在 runner 镜像/节点上安装 `shunit2`（如 `dnf install shunit2` 或通过 pip 安装），确保 `common_funs.sh` 可正常引用该测试框架。
+**建议操作**：联系 CI 运维团队在 `eulerpublisher` 容器测试运行环境中补充 `shunit2` 依赖，或检查 `common_funs.sh` 中 `shunit2` 的引用/安装路径是否正确。
 
 ## 潜在风险
-无。不涉及任何代码变更。
+无。未对任何源代码文件进行修改。
