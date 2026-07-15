@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 崩溃
-- 新模式症状关键词: no builder found, BuildKit, graceful_stop, closing transport, euler_builder
+- 新模式标题: BuildKit构建器断开
+- 新模式症状关键词: graceful_stop, no builder, closing transport, EOF, rpc error, euler_builder
 
 ## 根因分析
 
@@ -19,20 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 #7（`dnf install` 安装 gcc/gcc-c++/make/wget/openssl-devel/bzip2-devel/zlib-devel）
-- 失败原因: Docker BuildKit builder 实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载 OS 元数据过程中（耗时约 38.6 秒，下载 2.8 MB）被优雅关闭（`graceful_stop`），导致 gRPC 传输层连接中断，构建无法继续。
+- 失败位置: Docker BuildKit 构建器 `euler_builder_20260709_224657`（非 PR 代码中任何文件）
+- 失败原因: CI 构建节点上的 BuildKit 守护进程向构建器实例发送了 `graceful_stop`（GOAWAY frame，code: NO_ERROR），随后连接断开。构建器在 Dockerfile 第 2/4 步（`dnf install` 下载 OS 元数据阶段，已执行约 39 秒）时被终止，导致后续步骤无法继续。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 和三条元数据记录（README.md、image-info.yml、meta.yml），均为纯文本追加操作，不涉及任何可能影响 BuildKit builder 行为的配置。Docker 构建在基础镜像层之后、系统包安装阶段因 builder 实例销亡而失败，属于 CI 基础设施偶发故障。
+**无关。** 此次 PR 变更仅新增了 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容为标准的 `dnf install` 基础依赖 + Python 3.9.19 源码编译 + `pip install scann`。构建失败发生在 `dnf install` 下载仓库元数据的中途，根因是 BuildKit 构建器实例被 CI 基础设施回收/终止，与 PR 代码逻辑无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改 PR 代码。** 此为 CI 基础设施的 BuildKit builder 实例崩溃/被回收导致的偶发失败。应重新触发 CI 构建即可。若反复出现，需由 CI 运维团队排查 BuildKit builder 的稳定性（是否存在资源不足、超时回收、或节点故障等问题）。
+**无需 PR 代码修改。** 该失败属于 CI 基础设施问题（BuildKit builder 被意外终止），应通过重新触发 CI job 重试。如果反复出现同类错误，需检查 CI 构建节点的资源配额（内存/磁盘/超时设置）或 BuildKit daemon 的稳定性。
 
 ## 需要进一步确认的点
-- 确认 `euler_builder_20260709_224657` 被 `graceful_stop` 的原因（是否为 CI 调度器主动回收、节点 OOM、或健康检查失败）。
-- 如果重新触发 CI 多次后依然在同一阶段失败，需排查 `dnf install` 下载 OS 元数据期间是否存在网络波动触发 builder 超时回收。
-
-## 修复验证要求
-（无需填写——本次失败为 infra-error，不涉及代码修复。）
+- CI 构建节点 `ecs-build-docker-x86-hk` 在构建时间段（2026-07-09 22:46 左右）是否存在资源紧张、节点维护或被抢占的情况。
+- BuildKit builder 实例的 TTL/超时配置是否足够完成 `dnf install` 步骤（当前该步骤执行约 39 秒后被终止）。
+- 如果 JOB 状态确认为 CI_Failure 且反复重试仍失败，则可能不是单纯的 infra-error，需要获取更完整的 Runner 日志进一步排查。
