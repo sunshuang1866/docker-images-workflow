@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（infra-error）：BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 在 Docker daemon 层创建时引导（booting）失败，错误信息为 `Could not find the file / in container`。该失败发生在 Dockerfile 加载之前，Dockerfile 中的所有构建指令（dnf install / wget / configure / make）均未实际执行。
+无需代码修复。CI 失败是基础设施问题（Docker BuildKit 容器在 Runner 节点上启动失败），与 PR 代码变更无关。
 
 ## 修改的文件
-无。PR 中所有变更文件（Dockerfile、README.md、image-info.yml、meta.yml）内容均正确，无需修改。
+无
 
 ## 修复逻辑
-CI 失败分析报告明确指出该错误为 `infra-error`，与 PR 变更无关。根因是 Docker daemon 在 `docker-container` 驱动下创建 BuildKit 容器时出现瞬态故障，可能由 CI runner（`ecs-build-docker-x86-hk`）的 overlay2 存储驱动状态异常、磁盘 I/O 临时耗尽或 `moby/buildkit:buildx-stable-1` 镜像的容器文件系统初始化竞态条件导致。建议重新触发 CI pipeline 即可恢复。
+CI 分析报告明确指出失败类型为 `infra-error`。错误发生在 Docker buildx 的 BuildKit 容器引导阶段（`buildx_buildkit_euler_builder_*`），Docker daemon 返回 `Could not find the file / in container`。此错误发生在 PR 中的任何 Dockerfile 被解析或构建之前，属于 CI Runner 节点 `ecs-build-docker-x86-hk` 上的 Docker 环境问题。PR 仅新增了标准的 glibc 2.42 openEuler 24.03-LTS-SP4 Dockerfile 及元数据文件，不涉及任何 CI 配置或 buildx 机制变更。
+
+建议操作：重新触发 CI Job。若多次重试仍失败，需排查 Runner 节点的 Docker daemon 状态或清理残留的 buildx builder 实例。
 
 ## 潜在风险
-无。
+无
