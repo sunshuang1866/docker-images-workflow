@@ -4,40 +4,41 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: CI测试框架缺失
-- 新模式症状关键词: shunit2: No such file or directory, Check test failed, common_funs.sh
+- 知识库匹配: 模式39
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-09 09:40:24,013 - INFO - [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
+2026-07-09 09:40:24,021-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
-+-------------+-------------+--------------+
-| Check Items | Description | Check Result |
-+-------------+-------------+--------------+
-+-------------+-------------+--------------+
-Build step 'Execute shell' marked build as failure
-Notifying upstream projects of job completion
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（CI 测试框架层）
-- 失败原因: CI 运行环境的 eulerpublisher 测试框架中，`common_funs.sh` 脚本尝试加载 `shunit2` shell 单元测试框架，但该工具在当前 CI runner 上未安装或不可用，导致整个 Check 阶段失败。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI Runner 环境中缺少 `shunit2` Shell 单元测试框架，导致 eulerpublisher 的 [Check] 阶段无法执行镜像测试脚本，判定测试失败。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** 此次 PR 新增了 PostgreSQL 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、entrypoint.sh 及元数据文件。Docker 镜像构建（`#8 DONE 268.4s`）和推送（`[Push] finished`）均成功完成。失败发生在构建完成后的 CI Check 验证阶段——测试框架 `shunit2` 缺失导致验证脚本无法执行，而非镜像构建或代码本身的问题。
+**与 PR 代码变更无关。** Docker 镜像构建（`./configure && make -j "$(nproc)" && make install`）和推送均成功完成：
+- `#8 DONE 268.4s` — Postgres 源码编译安装全部通过
+- `#10 DONE 0.1s` — entrypoint.sh 权限设置完成
+- `#11 DONE 58.0s` — 镜像导出和推送成功
+- `[Build] finished` / `[Push] finished` — 构建和推送阶段均已正常结束
 
-Docker 构建日志中存在两个 BuildKit 警告（`LegacyKeyValueFormat` 针对 Dockerfile 第 26、30 行的 `ENV` 格式），但这些是 Docker 风格建议，不构成构建错误。
+失败仅发生在构建完成后的 eulerpublisher [Check] 测试阶段，该阶段调用的 `common_funs.sh` 第 13 行尝试 source `shunit2` 库失败。`shunit2` 是 CI 运行时的依赖，缺失属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-此失败为 CI 基础设施问题，**无需修改 PR 代码**。需由 CI 管理员在 runner 上安装 `shunit2`（Shell Unit Testing Framework），确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 中的 `source shunit2` 能正常加载。安装方式如：`dnf install shunit2` 或从 GitHub 下载并放入 PATH。
+在 CI Runner 节点上安装 `shunit2` Shell 测试框架。`shunit2` 是 eulerpublisher 测试编排工具的运行依赖，应在 CI 环境初始化阶段（如 Ansible/Puppet 配置或 Runner 镜像构建）安装此包。openEuler 上可通过 `yum install shunit2` 或 `pip install shunit2` 安装。
 
 ## 需要进一步确认的点
-- 确认该 CI runner 是否为临时节点（clean environment），如果是永久节点，需检查为何 `shunit2` 被移除/未安装。
-- 确认同一 CI 流水线中其他同类镜像（如 PostgreSQL 其他版本）的 Check 阶段是否也出现相同错误，判断是否是系统性基础设施缺失。
+- CI Runner 节点上 `shunit2` 的安装状态（是否从未安装、是否被意外移除、是否路径配置错误）
+- 同一 Runner 上其他镜像的 [Check] 步骤是否能正常通过（如果其他镜像也失败，说明是 Runner 环境全局问题；如果仅此 PR 失败，需进一步排查是否为环境变量冲突导致 `shunit2` 查找路径异常）
+- eulerpublisher 测试框架对 `shunit2` 的依赖路径是否在最近的版本更新中发生了变化（如 `common_funs.sh` 的 source 路径需要同步更新）
+
+## 修复验证要求
+无需验证（本次失败为 infra-error，非代码修复类问题）。
