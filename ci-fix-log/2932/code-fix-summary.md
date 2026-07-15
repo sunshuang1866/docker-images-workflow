@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障（BuildKit 容器启动失败），无需代码修改。
+无需代码修复。CI 失败为基础设施问题（BuildKit 容器启动失败），与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，不涉及代码变更）
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-CI 失败发生在 `[internal] booting buildkit` 阶段，错误为 `Error response from daemon: Could not find the file / in container`。这是 Docker daemon 在启动 BuildKit builder 容器时无法找到容器根文件系统所致，属于 CI runner `ecs-build-docker-x86-hk` 上的 Docker daemon / containerd / storage driver 状态异常。
+CI 在 `[internal] booting buildkit` 阶段失败，错误为 `Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_*`。这是 Docker daemon / containerd / storage driver 层面的故障，发生在 Dockerfile 构建上下文被处理之前。PR 仅新增了一个 glibc 2.42 的 Dockerfile 和相关元数据条目，结构与该目录下已有的同类 Dockerfile 完全一致，不存在代码层面的问题。
 
-CI image specification check 已通过，证明 PR 新增的 Dockerfile 及元数据文件（README.md、image-info.yml、meta.yml）格式均正确无误。该新增 Dockerfile 结构与同目录下已有的 `24.03-lts-sp1`、`24.03-lts-sp2` 版本一致，代码无问题。
-
-应执行 CI 侧操作（清理 BuildKit 残留容器/镜像、检查 Docker daemon 状态、重启后重新触发 CI），而非修改任何代码。
+CI 侧需要：检查 Runner `ecs-build-docker-x86-hk` 上 Docker daemon / containerd 状态，清理可能的残留 BuildKit 容器/镜像（`docker buildx rm euler_builder_*`），重启 Docker daemon 后重新触发构建。
 
 ## 潜在风险
 无
