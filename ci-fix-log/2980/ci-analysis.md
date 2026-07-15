@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: HTTP/2 镜像站流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, dnf install, No more mirrors to try
+- 新模式标题: HTTP/2 Repo镜像流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf, repo.***.org
 
 ## 根因分析
 
@@ -22,20 +22,16 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`RUN dnf install -y ...` 步骤）
-- 失败原因: CI 构建环境中 openEuler 24.03-LTS-SP4 的 RPM 仓库镜像站（`repo.****.org`）在 HTTP/2 传输层存在不稳定问题，多个 RPM 包（cmake-data、git-core、gcc-c++）下载过程中出现 `Curl error (92): Stream error in the HTTP/2 framing layer`，且 gcc-c++ 包在两次重试后仍然失败，最终因所有镜像源均不可用而构建失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
+- 失败原因: CI 构建环境中 dnf 从 `repo.****.org` (openEuler 仓库镜像) 下载 RPM 包时遭遇 HTTP/2 stream 错误 (`Curl error (92)`)，多个包（cmake-data、git-core、gcc-c++）下载失败，其中 gcc-c++ 在所有镜像重试后仍不可达，导致整个 `dnf install` 命令退出码为 1，Docker 构建中断。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 仅新增了一个包含 `dnf install` 命令的 Dockerfile，命令语法和包名均正确无误（日志中 DNF 已成功解析依赖关系并开始下载 258 个包，合计 914MB）。失败纯粹是 CI 基础设施层面 openEuler 24.03-LTS-SP4 仓库镜像站的 HTTP/2 传输不稳定导致的网络错误，非 PR 代码问题。
+**与 PR 无关。** 此次 PR 新增的 Dockerfile 中 `dnf install` 命令语法正确、包名列表完整，且未涉及任何仓库源配置修改。失败完全由 `repo.****.org` 镜像站在构建时的 HTTP/2 传输层临时故障引起（多个不同包的 HTTP/2 stream 均报告 `INTERNAL_ERROR`）。这是 CI 基础设施侧的瞬态网络问题，同类镜像在正常时段构建即可通过。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试触发 CI 流水线。** 该失败是 openEuler 镜像站 HTTP/2 协议的临时性不稳定问题，重试构建大概率可以成功。无需修改任何代码或 Dockerfile。
-
-### 方向 2（置信度: 中）
-**在 Dockerfile 中显式禁用 HTTP/2 或切换到 HTTP/1.1。** 如果该镜像站的 HTTP/2 问题长期存在，可考虑在 dnf 配置中禁用 HTTP/2（如设置 `http2=false` 或通过 `--setopt` 调整 curl 选项），但这需要确认 CI 构建环境中的 curl/dnf 支持该配置。
+**重试 CI。** 该失败为 openEuler 仓库镜像 HTTP/2 传输层临时故障导致的 `infra-error`，与 PR 代码变更无关。Code Fixer 无需对 Dockerfile 做任何修改，直接触发一次 CI 重新构建即可。若再次失败且错误不同，再另行分析。
 
 ## 需要进一步确认的点
-1. 如果多次重试后仍然出现该 HTTP/2 错误，需要联系 openEuler 24.03-LTS-SP4 镜像站运维排查 HTTP/2 协议在 CDN/反向代理层的配置问题。
-2. 确认同一时间段内其他使用 openEuler 24.03-lts-sp4 基础镜像的 Dockerfile 构建是否也出现类似错误，以判断是全局基础设施问题还是特定于该 CI runner 的网络问题。
+- 无需进一步确认。日志中 HTTP/2 流错误（err 2: INTERNAL_ERROR）和 `No more mirrors to try` 均指向 repo 镜像服务端瞬时问题，证据明确且与 PR diff 无关联。
