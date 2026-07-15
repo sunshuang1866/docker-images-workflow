@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 测试脚本换行符错误
-- 新模式症状关键词: `^M`, `bad interpreter`, `_test.sh`, `bwa`
+- 新模式标题: 测试脚本CRLF换行
+- 新模式症状关键词: /bin/sh^M, bad interpreter, CRLF, bwa_test.sh
 
 ## 根因分析
 
@@ -17,20 +17,22 @@
 ```
 
 ### 根因定位
-- 失败位置: `/usr/etc/eulerpublisher/tests/container/app/bwa_test.sh`（eulerpublisher CI 工具包自带的测试脚本）
-- 失败原因: `bwa_test.sh` 文件存在 Windows 风格换行符（CRLF），导致 shebang 行 `#!/bin/sh\r` 包含回车符 `\r`（显示为 `^M`），内核无法找到 `/bin/sh\r` 作为解释器，脚本执行失败。
+- 失败位置: CI 编排工具 `eulerpublisher` 安装目录下的测试脚本 `/etc/eulerpublisher/tests/container/app/bwa_test.sh`
+- 失败原因: `bwa_test.sh` 脚本文件的换行符为 Windows 风格（CRLF `\r\n`）而非 Unix 风格（LF `\n`），导致 shebang 行 `#!/bin/sh` 实际被解析为 `#!/bin/sh\r`。内核尝试查找名为 `/bin/sh\r` 的解释器，因该路径不存在而报 `bad interpreter: No such file or directory`。
 
 ### 与 PR 变更的关联
-- **与 PR 变更无关**。PR 仅新增了 `HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile` 以及配套的 README、image-info.yml、meta.yml 文件。
-- **Docker 镜像构建成功**：日志中 `#7 DONE 199.0s` 表明 Dockerfile 中所有步骤（yum 安装依赖、curl 下载源码、make 编译、镜像导出推送）均全部通过，镜像已成功推送到 `docker.io/****test/bwa:0.7.18-oe2403sp4-x86_64`。
-- **失败发生在 CI 基础设施层**：`[Build] finished` 和 `[Push] finished` 之后，CI 进入 `[Check]` 阶段，调用 eulerpublisher 工具包内的 `bwa_test.sh` 对镜像做功能验证，但因该脚本文件换行符问题导致解释器无法识别而失败。
+**与 PR 无关。** PR 仅新增了 `HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile` 及配套元数据文件（README.md、image-info.yml、meta.yml），Docker 镜像构建和推送均已成功完成（日志中 `[Build] finished`、`[Push] finished`）。失败发生在 CI 工具链的 `[Check]` 阶段，由 `eulerpublisher` 包内置的 `bwa_test.sh` 测试脚本自身格式问题导致，属于 CI 基础设施缺陷。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-这是 CI 基础设施问题，**Code Fixer 无需处理本仓库代码**。需由 CI 平台维护方修复 eulerpublisher 包中的 `bwa_test.sh` 文件，将其换行符从 CRLF 转换为 LF（使用 `dos2unix` 或 `sed -i 's/\r$//'`），确保 shebang 行不含回车符。
+`eulerpublisher` 仓库中的 `tests/container/app/bwa_test.sh` 文件需要将换行符从 CRLF 转换为 LF。在 `eulerpublisher` 仓库根目录执行 `dos2unix tests/container/app/bwa_test.sh` 或通过 `sed -i 's/\r$//' tests/container/app/bwa_test.sh` 转换后重新发布 `eulerpublisher` 包。
+
+### 方向 2（置信度: 低）
+如果 `eulerpublisher` 仓库中根本不存在 `bwa_test.sh` 文件，则说明 CI 在运行时从其他源动态生成了该脚本，且生成过程未正确处理换行符。需要排查 `eulerpublisher` 中生成/复制测试脚本的逻辑。
 
 ## 需要进一步确认的点
-1. 确认 `bwa_test.sh` 在当前 CI 节点上实际换行符格式（`file /etc/eulerpublisher/tests/container/app/bwa_test.sh` 或 `xxd` 查看前 10 字节）。
-2. 确认 eulerpublisher 包是从哪个源安装的（Git 仓库 clone 还是 pip 安装），该源中 `bwa_test.sh` 是否以 CRLF 提交。
-3. 排查同一 eulerpublisher 包中其他 `*_test.sh` 脚本是否也存在相同的 CRLF 问题，以避免后续其他镜像的 [Check] 阶段同样失败。
+
+1. 确认 `eulerpublisher` 仓库中是否确实存在 `tests/container/app/bwa_test.sh` 文件，以及其当前换行符格式。
+2. 确认该脚本是何时被添加到 `eulerpublisher` 仓库的——如果是在本 PR 之前不久才添加的，则可能是添加时引入的格式问题。
+3. 排除一种边缘情况：确认 CI 的 `[Check]` 步骤是否有从 PR 分支动态拉取测试脚本的机制。若测试脚本实际来源于 PR 分支目录（而非 `eulerpublisher` 包），则需要修复的是 PR 分支中的对应文件路径。
