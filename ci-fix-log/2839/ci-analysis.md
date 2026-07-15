@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 测试框架缺失
-- 新模式症状关键词: shunit2, No such file or directory, eulerpublisher, test failed
+- 新模式标题: CI测试框架缺失shunit2
+- 新模式症状关键词: shunit2: No such file or directory, common_funs.sh, [Check] test failed
 
 ## 根因分析
 
@@ -19,26 +19,23 @@
 | Check Items | Description | Check Result |
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
+Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI 运行器环境 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 检查阶段需要的 Shell 单元测试框架 `shunit2` 在运行器上未安装或不可用，导致整个 `[Check]` 阶段因测试框架加载失败而终止。
+- 失败位置: CI Runner 环境 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI 的 [Check] 测试阶段依赖 `shunit2` Shell 单元测试框架，但该工具未安装在 CI runner 上，导致 `common_funs.sh` 在 source `shunit2` 时报 "No such file or directory"。Docker 镜像的构建（`make -j "$(nproc)" && make install`）和推送均已成功完成。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 新增的 Dockerfile（PostgreSQL 17.6 源码编译）和 entrypoint.sh 均构建成功：
-- Docker 构建阶段全部完成（`#8 DONE 268.4s`）
-- 镜像推送成功（`[Push] finished`）
-- 镜像导出和 attestation 均正常（`#11 DONE 58.0s`）
-
-失败仅发生在构建、推送完成后的 `[Check]` 阶段，`shunit2` 测试框架在 CI runner 上缺失导致无法执行镜像检查测试用例。
+**无关**。PR 此次变更仅添加了 postgres 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、entrypoint.sh，以及更新 meta.yml 和 README.md。Docker 构建阶段全部成功（步骤 #8 在 268.4 秒内完成编译安装，#9/#10 完成 COPY 和 chmod，#11 完成镜像导出和推送），说明 PR 代码本身没有任何问题。失败发生在 CI 工具链的容器验证（Check）阶段，属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**CI 基础设施修复**：在 CI runner 环境（负责镜像构建后检查的节点）上安装 `shunit2` Shell 单元测试框架。此问题需由 CI 管理员处理，Code Fixer 不需要对 PR 代码做任何修改。
+在 CI runner 环境中安装 `shunit2` 工具。`shunit2` 是一个独立的 Shell 单元测试框架，通常可通过包管理器安装（如 `apt install shunit2` 或 `dnf install shunit2`），也可从 GitHub Releases 下载。这是 CI 平台维护者的职责，**Code Fixer 无需处理此 PR 的任何文件**。
 
 ## 需要进一步确认的点
-- CI runner 节点上 `shunit2` 的安装路径是否符合 `common_funs.sh` 的 source 路径预期
-- 同批次其他 PR 的 CI 检查阶段是否也出现同样的 `shunit2` 缺失错误（确认是否为偶发的基础设施问题）
-- 检查 openEuler 24.03-LTS-SP4 的 CI runner 节点配置是否与已有的 22.03-LTS-SP4 / 24.03-LTS-SP2 节点一致
+- `shunit2` 是否在 CI runner 的预装软件列表中，以及是否因 runner 镜像更新而导致该包被意外移除。
+- 该 runner 上其他 PR 的 [Check] 阶段是否也因同样的原因失败（如果是，说明是全局性问题，非本 PR 独有）。
