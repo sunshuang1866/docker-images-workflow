@@ -4,15 +4,19 @@
 - PR: #3153 — docs: update available base image tags in README
 - 失败类型: infra-error
 - 置信度: 中
-- 知识库匹配: 新模式
-- 新模式标题: 根级README路径误报
-- 新模式症状关键词: Path Error, expected path should be, README.md, appstore release specification, update.py
+- 知识库匹配: 模式11
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:28:17,839-/home/jenkins/agent-working-dir/workspace/multiarch/****/x86-64/****-docker-images/eulerpublisher/update/container/app/update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:27:51,489-.../update.py[line:356]-INFO: Difference: [
+    "README.md"
+]
+...
+2026-07-14 11:28:17,839-.../update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
@@ -23,26 +27,24 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`（CI 工具 appstore 发布规范预检阶段）
-- 失败原因: CI 工具在 appstore 发布规范预检中对仓库根级 `README.md` 报 `[Path Error]`，声称"期望路径应为 /README.md"。但 PR diff 明确显示 `README.md` 的 `new_path` 就是仓库根级路径 `README.md`（即 `/README.md`），该文件实际已存在于正确位置。此错误属于 CI 校验工具逻辑问题或路径比较实现缺陷，非 PR 代码变更本身导致。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`
+- 失败原因: CI 的 appstore 发布规范预检（`update.py`）对仓库根目录的 `README.md` 文件执行了应用镜像发布规格校验。`README.md` 是仓库的主文档文件（非应用镜像入口），不在 appstore 的 `{category}/{image}/{version}/{os-version}/` 目录规范内，校验工具因此报告 `[Path Error]`。
 
 ### 与 PR 变更的关联
-**与 PR 改动无直接关联。** PR #3153 仅修改了两个根级文件 `README.md` 和 `README.en.md`，更新了基础镜像可用 Tags 列表（将 latest 从 `24.03-lts-sp2` 改为 `24.03-lts-sp4`，新增 `24.03-lts-sp3`、`25.09`、`24.03-lts-sp2` 独立条目，并修正了旧 `sp2` 条目 URL 中的 `SP1` 拼写错误）。文件路径本身未改变，均为仓库根级。CI 失败发生在 eulerpublisher 工具的 appstore 发布规范预检阶段，该工具对仓库根级路径的校验逻辑存在误报。
+**PR 变更不直接触发该失败。** PR 仅修改了 `README.md` 和 `README.en.md` 中的可用基础镜像 tags 表格（更新 latest 指向、补充遗漏版本条目），属于纯文档修正。CI 流水线中的 appstore 发布规范校验逻辑未将根目录文档文件排除在校验范围外，导致文档变更被当作应用镜像条目进行路径格式检查，产生误报。该失败与 PR 代码变更的正确性无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 低 — 证据不足，需进一步确认）
-CI 工具 `eulerpublisher/update/container/app/update.py:273` 的路径校验逻辑可能存在缺陷——当 PR 源仓库（fork `sunshuang1866/...`）的目录结构与 CI 工具预期的规范路径不一致时（例如克隆深度、分支引用等差异），工具内部对根级文件路径的判断产生偏差。需由 CI 平台维护者检查该工具对 fork PR 的路径处理逻辑。
+### 方向 1（置信度: 中）
+CI 流水线的 appstore 校验工具（`eulerpublisher/update/container/app/update.py`）应在运行规范检查前过滤掉仓库根目录的非应用镜像文件（如 `README.md`、`README.en.md`）。具体来说，在 `_parse_image_info` 或 diff 文件遍历阶段增加路径前缀过滤逻辑，只对位于 `Bigdata/`、`AI/`、`Storage/`、`Database/`、`Cloud/`、`HPC/`、`Distroless/`、`Others/` 等应用场景目录下的文件执行 appstore 路径格式校验。
 
 ### 方向 2（置信度: 低）
-PR 分支名 `fix/3153` 或 fork 仓库 URL（`gitcode.com/sunshuang1866/...`）的解析方式导致 CI 工具在克隆后未能正确识别根级文件路径。但这与 PR 自身内容无关，属于 CI 编排/工具链问题。
+若上述方向 1 不可行（CI 工具改动受限），可考虑在 `image-list.yml` 或 CI 配置中将 `README.md`、`README.en.md` 等根目录文档文件显式列入排除清单（whitelist/ignorelist），使校验阶段跳过这些文件。
 
 ## 需要进一步确认的点
-1. CI 工具 `update.py:273` 的路径校验逻辑：它是否遍历整个仓库中的所有 README.md 并逐一检查路径？是否存在某个非根级的 README.md 文件（如某个镜像目录下的 README.md）触发了此校验？
-2. 该 CI job 是 x86-64 下游构建 job（日志中出现 `x86-64/****-docker-images`），但 CI 失败并非发生在 Docker 构建阶段，而是在 appstore 发布规范预检阶段（update.py）。需确认：当前 CI 流水线是否在文档类 PR（仅改 README）上仍会触发此预检，而预检对纯文档变更是否本应跳过？
-3. 需查阅 `eulerpublisher` 仓库中 `update.py` 第 273 行附近的源码，理解 `[Path Error]` 的触发条件和期望路径 `/README.md` 的匹配规则，以判断是工具 Bug 还是 PR 分支确实存在某种路径偏差。
+1. 需确认 `update.py` 中 diff 文件列表的来源——是直接比较 branch diff，还是经过某种过滤规则。日志仅显示 `Difference: ["README.md"]`，未揭示为何该文件被纳入 appstore 校验范围。
+2. 需确认是否存在同一 CI 流水线的其他下游 job（如 aarch64 架构构建 job）也有额外失败，当前提供的日志仅覆盖 x86-64 job 的 appstore 预检阶段。
+3. 需在 `eulerpublisher` 代码库中查看 `update.py:273` 附近的校验逻辑以及 `format.py` 中的 `_parse_image_info` 函数（参考模式11 中 PR #2751 的案例），确认路径校验的触发条件。
 
 ## 修复验证要求
-本失败为 CI 工具预检阶段的路径校验误报，与 PR 代码变更无关。code-fixer 无需修改 Dockerfile 或 README 内容。若修复方向涉及修改 CI 工具（eulerpublisher/update.py），需：
-- 在 CI 平台的测试环境中复现该 PR 分支的路径校验流程；
-- 确认 `update.py:273` 中的路径匹配规则后，由 CI 平台维护者提交工具修复。code-fixer 对此类 CI 工具 Bug 不承担修复职责。
+（本次分析未涉及对第三方/上游源文件的正则 patch，无需额外验证步骤。）
