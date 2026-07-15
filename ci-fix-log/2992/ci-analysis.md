@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2992 — chore(multiwfn): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, dnf install, repo mirror
+- 新模式标题: 软件源HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -20,31 +20,25 @@
 #8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 27 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #8 1830.2 [FAILED] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #8 1830.2 Error: Error downloading packages:
+#8 1830.2   gcc-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
 #8 ERROR: process "/bin/sh -c dnf install -y       git gcc gcc-c++ gcc-gfortran make       openblas-devel lapack-devel &&     dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（builder 阶段 dnf install 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库镜像在下载多个包（gcc-gfortran、glibc-devel、guile、gcc 等）时持续触发 HTTP/2 流帧层错误（`Curl error (92): INTERNAL_ERROR`），dnf 耗尽所有镜像重试后仍无法完成下载，导致 builder 阶段构建失败，stage-1 阶段随即被 CANCELED。
+- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7`（`dnf install` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的软件源镜像 `repo.****.org` 在通过 HTTP/2 协议下载大型 RPM 包（gcc 34MB、gcc-gfortran 13MB、guile 6.3MB、glibc-devel 2MB）时反复出现 HTTP/2 流错误（`Curl error (92)`），在多次重试耗尽所有镜像后，dnf 安装失败。
 
 ### 与 PR 变更的关联
-PR 变更与本次失败无关。PR 仅新增了 `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile` 及其配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 的 dnf install 命令语法和包名均正确。失败完全由 openEuler 24.03-LTS-SP4 仓库服务器端 HTTP/2 协议异常导致，属于 CI 基础设施/上游仓库问题。
+与 PR 变更**无关**。PR 仅新增了 multiwfn 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及元数据文件，Dockerfile 本身的 `dnf install` 命令语法正确、包名有效。多个 RPM 包均出现相同的 HTTP/2 流错误说明这是 openEuler 24.03-LTS-SP4 软件仓库镜像的网络服务端问题，而非构建逻辑或代码错误。
 
-关键观察：
-- dnf 仓库元数据（repomd）下载阶段全部成功（OS、everything、EPOL、debuginfo、source、update、update-source 均正常完成）
-- 实际 RPM 包下载阶段出现间歇性 HTTP/2 流错误，且发生在多个不同包上
-- builder 阶段（需下载 157 个包）和 stage-1 阶段（需下载 32 个包）并行执行时均受影响，但 stage-1 完成了 23/32 个包的下载后才被 CANCELED，说明错误是非确定性的
+值得注意的是，stage-1（运行时阶段 #7）也遇到了相同的 HTTP/2 流错误（`glibc-devel`、`gcc-gfortran` 等包），但通过 dnf 自动重试成功恢复了。builder 阶段（#8）因 `gcc` 包（34MB，最大的单个包）反复失败最终耗尽所有镜像导致构建中断。stage-1 随后被标记为 `CANCELED`（因 builder 阶段失败）。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-这是 CI 基础设施问题，与 PR 代码无关。建议重新触发 CI 构建（retry），等待上游 openEuler 24.03-LTS-SP4 仓库恢复稳定。若多次重试仍失败，需联系 openEuler 基础设施团队排查仓库镜像的 HTTP/2 服务器配置。
-
-### 方向 2（置信度: 低）
-如果仓库持续不稳定，可考虑在 Dockerfile 的 dnf install 命令前添加 `dnf config-manager` 回退到 HTTP/1.1（`--setopt=http2=false`），绕过 HTTP/2 帧层问题。但此方案是临时绕过，非根本修复，不建议作为正式方案提交。
+### 方向 1（置信度: 高）
+**重试触发 CI**。这是 `infra-error`，根源是 openEuler 24.03-LTS-SP4 的软件源镜像在 CI 构建时段出现 HTTP/2 服务端异常，与 PR 代码无关。等待镜像站恢复稳定后重新触发 CI 流水线即可。
 
 ## 需要进一步确认的点
-1. openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）在 CI 构建时段是否存在已知的服务中断或降级
-2. 重试构建后是否仍然失败——若仍失败则需排查仓库侧问题，若成功则证实为间歇性网络故障
-3. 同一仓库的其他 24.03-lts-sp4 Dockerfile（如 PR 中其他 image）在此时间段是否也遇到相同问题——若是则确认系共因仓库故障
-4. CI 构建环境是否使用了自定义 dnf 代理或镜像配置，是否存在代理层导致的 HTTP/2 兼容性问题
+- openEuler 24.03-LTS-SP4 的 `repo.****.org` 镜像站在 CI 构建时段（2026-07-09 14:47 左右）是否存在已知的 HTTP/2 服务中断或性能问题
+- 该镜像是否已恢复正常；若未恢复，可考虑在 Dockerfile 中为 dnf 添加 `--setopt=timeout=300` 等超时/重试参数以增强容错
+- `#7`（stage-1）中 `glibc-devel` 也出现了相同错误但最终重试成功，说明该问题是间歇性的，进一步佐证为基础设施问题
