@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 软件仓库网络不稳定
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, Curl error (56), Failure when receiving data, No more mirrors to try, repo.openeuler.org, yum install, aarch64
+- 新模式标题: yum 仓库下载失败
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, SSL_ERROR_SYSCALL, No more mirrors to try, repo.openeuler.org, aarch64
 
 ## 根因分析
 
@@ -18,25 +18,21 @@
 #7 1310.2 [MIRROR] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm [HTTP/2 stream 125 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1310.2 [FAILED] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1310.3 Error: Error downloading packages:
-#7 1310.3   vim-common-2:9.0.2092-36.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
 #7 ERROR: process "/bin/sh -c yum install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install` 步骤）
-- 失败原因: CI aarch64 runner (`ecs-build-docker-aarch64-04-sp`) 在 `yum install` 阶段从 `repo.openeuler.org` 下载 RPM 包时，遭遇多次 HTTP/2 帧层错误（Curl error 92: INTERNAL_ERROR）和 SSL 连接中断（Curl error 56: SSL_ERROR_SYSCALL）。`yum` 的重试机制用尽了所有可用镜像站，最终在下载 `vim-common` 时报 `No more mirrors to try` 而失败。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11`（`yum install` 步骤）
+- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上执行 `yum install` 时，从 `repo.openeuler.org` 下载 aarch64 架构 RPM 包（gcc、kernel-headers、perl-MIME-Base64、vim-common）连续遭遇 HTTP/2 传输层错误（`INTERNAL_ERROR`、`SSL_ERROR_SYSCALL`），其中 `vim-common` 耗尽了所有重试镜像后安装失败，导致整个 `yum install` 命令退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 此 PR 的改动为纯增量内容——新增一个 Dockerfile 及配套的 README.md、image-info.yml、meta.yml 条目，用于在 openEuler 24.03-LTS-SP4 上构建 brpc 1.16.0 镜像。Dockerfile 中使用的 `yum install` 命令与同级目录下 SP3 版本及其他镜像 Dockerfile 的模式完全一致。错误直接来自 `repo.openeuler.org` 软件仓库的网络传输层，属于 CI 基础设施的临时性网络问题。
+**与 PR 改动无关。** PR 新增的 Dockerfile 内容本身正确——`yum install` 依赖包列表语法无误，基础镜像 `openeuler/openeuler:24.03-lts-sp4` 拉取成功（`#6 DONE 10.1s`），包依赖解析也正常（173 个包, Transaction Summary 正常）。失败纯粹是因为 `repo.openeuler.org` 仓库对 aarch64 架构包在构建时段（2026-07-09 13:44-14:06 UTC）存在 HTTP/2 传输稳定性问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复，触发 CI 重试。** 这是 `repo.openeuler.org` 软件仓库在本次构建时段的临时网络不稳定，表现为 HTTP/2 流异常中断和 SSL 连接丢失。Code Fixer 无需对任何文件做修改，直接重新触发 CI 运行（或等待镜像站恢复后自动重试）即可。
+**无需代码修复。** 这是 CI 基础设施网络问题——`repo.openeuler.org` 仓库在构建时段对 aarch64 包的 HTTP/2 传输不稳定。直接重新触发 CI 构建（rerun），待仓库服务恢复后构建大概率会通过。已有多个包（gcc、kernel-headers）在重试后成功下载，仅 vim-common 在耗尽所有重试后仍失败，说明问题是间歇性的而非持续不可达。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 在当前时段对 aarch64 runner 的网络连通性是否已恢复（可查看该时段的镜像站状态页面或运维公告）。
-- 如果重试后仍出现相同错误，建议排查 CI runner 节点的网络出口是否对 `repo.openeuler.org` 存在间歇性丢包或 HTTP/2 协议兼容性问题。
-
-## 修复验证要求
-不适用——此失败为 infra-error，无需修改任何正则或代码。
+- 确认 `repo.openeuler.org` 在构建时段（2026-07-09 UTC 13:44-14:06）是否存在已知的服务降级或网络故障。
+- 确认该镜像的其他架构（x86-64/amd64）构建是否也遇到同样问题，以判断是仓库整体故障还是仅 aarch64 仓库分区异常。
