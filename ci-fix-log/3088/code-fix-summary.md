@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-Druid 35.0.0 构建时 wget 下载返回 HTTP 404，因为 `dlcdn.apache.org` 是 Apache CDN 分发节点，只托管最新版本，35.0.0 已从 CDN 下架。
+Apache Druid 35.0.0 从 `dlcdn.apache.org` CDN 下载返回 HTTP 404，因 Apache CDN 不保留历史版本制品。
 
 ## 修改的文件
-- `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`: 将第 9 行 wget 下载源从 `https://dlcdn.apache.org/druid/${VERSION}/` 替换为 `https://archive.apache.org/dist/druid/${VERSION}/`
+- `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`: 第9行下载源从 `dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` 更换为 `https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`
 
 ## 修复逻辑
-Apache Archive (`archive.apache.org`) 会永久保留所有历史版本的二进制制品，路径结构与原 CDN 一致，只需将域名和路径前缀从 `dlcdn.apache.org/druid/` 改为 `archive.apache.org/dist/druid/`。已通过 `curl -sI` 验证新 URL `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 返回 HTTP 200。
+Apache CDN (`dlcdn.apache.org`) 通常只保留最新版本制品，Druid 35.0.0 的历史版本已被下架，导致 `wget` 返回 404。`archive.apache.org` 是 Apache 官方归档站，长期保留所有历史发行版。此修复与 CI 分析报告中模式01/模式38 的解决思路一致。已用 `curl -I` 验证目标 URL 返回 HTTP 200，确认归档站确实托管了该版本二进制包。
 
 ## 潜在风险
-无。Archive 是 Apache 官方长期归档站点，永久保留历史版本，稳定性高于 CDN。
+无。`archive.apache.org` 是 Apache 官方归档基础设施，稳定性有保障。URL 格式与 CDN 格式仅域名部分不同，路径结构一致。
