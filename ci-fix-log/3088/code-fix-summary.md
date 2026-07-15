@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-Apache Druid 35.0.0 下载 URL 从 `dlcdn.apache.org`（CDN，404）更换为 `archive.apache.org`（归档站，可用）。
+Druid 35.0.0 下载 URL `dlcdn.apache.org` CDN 返回 HTTP 404，将下载源更换为 Apache 归档站。
 
 ## 修改的文件
-- `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`: 将第 9 行 `wget` 的下载源从 `https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` 改为 `https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`
+- `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`: 第9行，将下载 URL 从 `https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` 改为 `https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`
 
 ## 修复逻辑
-Apache CDN (`dlcdn.apache.org`) 仅保留最新版本，Druid 35.0.0 已被下架导致 404。Apache 归档站 (`archive.apache.org`) 保留所有历史版本，不受 CDN 清理策略影响。
-
-验证结果：已从 Apache 归档站获取 `https://archive.apache.org/dist/druid/35.0.0/` 目录列表，确认 `apache-druid-35.0.0-bin.tar.gz`（610M）存在，URL 格式与 Dockerfile 中 `${VERSION}` 展开后的文件名一致。
+CI 分析报告指出 `dlcdn.apache.org` 是 Apache CDN 分发节点，不保证历史版本的长期可用性，Druid 35.0.0 的二进制包已在该 CDN 上被移除。修复方向是将下载源切换至 Apache 归档站 `archive.apache.org`，该站点会长期保留历史版本。已验证新 URL `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 返回 HTTP 200，归档站上存在该版本包。
 
 ## 潜在风险
-无
+无。`archive.apache.org` 是 Apache 官方归档站，长期保留所有历史发布版本，不会像 CDN 一样移除旧版本。
