@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler仓库下载失败
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, repo.openeuler.org, yum install, vim-common, Cannot download, No more mirrors to try, Curl error (56), SSL_ERROR_SYSCALL
+- 新模式标题: yum 仓库下载网络故障
+- 新模式症状关键词: Curl error, HTTP/2 framing layer, No more mirrors to try, yum install, repo.openeuler.org, aarch64
 
 ## 根因分析
 
@@ -23,20 +23,17 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install ...` 步骤）
-- 失败原因: CI 在 aarch64 runner 上执行 `yum install` 时，`repo.openeuler.org` 持续出现 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR）和 SSL 读取失败（Curl error 56），导致 `vim-common` RPM 包下载失败（所有镜像源重试耗尽），构建在依赖安装阶段即终止，未进入 brpc 编译步骤。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install -y ...` 步骤）
+- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上执行 `yum install` 时，`repo.openeuler.org` 源多次出现 HTTP/2 流层中断（Curl error 92）和 SSL 读取失败（Curl error 56），`vim-common` 包在所有镜像重试耗尽后仍无法下载，导致构建失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 只新增了一个标准 Dockerfile 及配套的 README、image-info.yml、meta.yml 元数据文件，Dockerfile 中的 `yum install` 命令语法正确，包列表均属于 openEuler 24.03-LTS-SP4 仓库中的合法包。失败完全由 `repo.openeuler.org` 的 aarch64 软件源在构建期间的网络/HTTP/2 稳定性问题导致。
+**与 PR 无关。** PR 新增的 Dockerfile 内容（包列表、构建命令）本身语法正确、逻辑合理。失败是 CI 构建环境从 `repo.openeuler.org` 下载 RPM 包时遇到的**临时性网络故障**，属于基础设施问题。日志中多次出现的 `[MIRROR]` 标签表明 yum 尝试了多个镜像源重试但仍失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，重试 CI 构建。** 这是 CI 基础设施层面的网络问题（`repo.openeuler.org` HTTP/2 流异常），PR 代码本身没有问题。等待仓库网络恢复后重新触发构建即可通过。
-
-### 方向 2（置信度: 低）
-如果 `repo.openeuler.org` 的 aarch64 仓库持续出现此类问题，可考虑在 Dockerfile 的 `yum install` 命令中添加 `--retries 10` 或 `--setopt=retries=10` 参数提高重试次数，但这属于临时规避方案，不应在正常情况下使用。
+**无需修改代码，重试 CI 即可。** 该失败是 aarch64 构建节点与 `repo.openeuler.org` 之间的临时性网络波动（HTTP/2 流异常断开）。多次 Curl error (92) "HTTP/2 stream was not closed cleanly: INTERNAL_ERROR" 是典型的服务端或中间网络设备主动断开连接的信号。等网络恢复后重新触发 CI 构建，大概率可以通过。
 
 ## 需要进一步确认的点
-- `repo.openeuler.org` 的 aarch64 软件源在当前时间段是否有已知的网络故障或维护窗口。
-- 其他 openEuler 24.03-LTS-SP4 的 PR 构建是否在同一时间段也出现了类似的 `yum install` 下载失败（若有多个案则进一步确认是仓库侧问题）。
+- 确认 `repo.openeuler.org` 在当时是否经历了服务端故障或维护（HTTP/2 INTERNAL_ERROR 可能是服务端问题）。
+- 确认 CI aarch64 runner（`ecs-build-docker-aarch64-04-sp`）到 `repo.openeuler.org` 的网络链路是否稳定。如果此类问题频繁出现，可考虑在 Dockerfile 中添加 `--retries 5` 或配置备用 yum 镜像源（如 `mirrors.huaweicloud.com` 或 `mirrors.tuna.tsinghua.edu.cn`）以提高容错性。
