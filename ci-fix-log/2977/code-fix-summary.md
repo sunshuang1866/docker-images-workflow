@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误（`infra-error`）：`repo.openeuler.org` YUM 仓库网络波动导致 `vim-common` RPM 包下载失败，与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施问题（infra-error），由 `repo.openeuler.org` 的 HTTP/2 流异常和 SSL 读取错误导致 RPM 包下载失败，与 PR 代码无关。
 
 ## 修改的文件
-无。此失败为 `repo.openeuler.org` 上游镜像仓库的网络瞬态故障，分析报告确认与 PR 代码变更无关，无需修改任何源代码。
+无。
 
 ## 修复逻辑
-CI 构建日志显示 172/173 个 RPM 包下载成功，仅有 `vim-common`（7.8MB）因 HTTP/2 流错误（Curl error 92）和 SSL 读取失败（Curl error 56）下载失败。`vim-common` 并非 Dockerfile 显式指定的包，而是通过传递依赖链（git → perl-Git → perl → vim-enhanced → vim-common）间接引入。Dockerfile 中 `yum install` 命令语法正确，所有显式声明的包在仓库中均真实存在。此失败属于 CI 基础设施问题，重新触发 CI 构建即可。根据分析报告判断，此失败为 `infra-error`，不需要代码修改。
+CI 分析报告明确判定失败类型为 `infra-error`（置信度：高）。根因是 `repo.openeuler.org` 在 aarch64 runner 上执行 `yum install` 时持续出现 Curl error 92（HTTP/2 INTERNAL_ERROR）和 Curl error 56（SSL_ERROR_SYSCALL），导致 `vim-common` 等 RPM 包下载失败。
+
+PR 仅新增了一个标准 Dockerfile 及配套元数据文件，`yum install` 命令语法正确，包列表均为 openEuler 24.03-LTS-SP4 仓库合法包。失败与代码变更无关，属于 CI 构建期间上游软件源的网络/HTTP/2 稳定性问题。
+
+**直接重试 CI 构建即可。**
 
 ## 潜在风险
-无。
+无。未修改任何代码。
