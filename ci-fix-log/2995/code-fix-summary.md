@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error），与 PR #2995 的代码变更无关。
+无需代码修改。CI 失败属于 `infra-error`，根因是 eulerpublisher pip 包内的 `bwa_test.sh` 测试脚本使用 CRLF 行尾，导致 shebang 被误解析为 `#!/bin/sh\r` 而无法执行。Docker 镜像的构建和推送均已成功完成。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认此失败为 **infra-error**：
-- Docker 镜像的构建（`#7 DONE 199.0s`）和推送（`[Build] finished`, `[Push] finished`）全部成功。
-- 失败仅发生在 CI 后置测试阶段 `[Check]`，根因是 `eulerpublisher` 包中自带的 `bwa_test.sh` 脚本使用 Windows CRLF 换行符，导致 shebang `#!/bin/sh` 被解析为 `#!/bin/sh\r`，内核找不到 `/bin/sh\r` 解释器。
-- 该脚本位于 CI 工具链的 pip 安装路径下（`/usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh`），不在 PR 仓库中，不由任何 PR diff 引入。
-- 根据规则：infra-error 无需修改源代码，不应强行改代码。
-
-需联系 CI 平台维护者修复 `eulerpublisher` 包中 `bwa_test.sh` 的 CRLF 行尾问题，或检查 CI runner 的 Git `core.autocrlf` 配置。
+分析报告明确指出：此失败与 PR 代码变更无关。镜像构建全流程（yum 安装依赖 → 下载 bwa 源码 → 编译 → 安装二进制 → 清理 → 推送镜像）在日志中全部成功。失败仅在 CI 的 `[Check]` 后置测试阶段，由 eulerpublisher 工具包的测试脚本 CRLF 问题触发，该脚本位于 CI runner 的 pip 安装路径下，不在 PR 仓库中，也不由 PR 的 diff 引入。这是一个 CI 基础设施问题，需要由 CI 平台维护者修复 eulerpublisher 包中的测试脚本行尾格式，或检查 Git 的 `core.autocrlf` 配置。
 
 ## 潜在风险
-无（无需代码修改）
+无。未修改任何源代码。
