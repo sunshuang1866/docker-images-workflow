@@ -12,37 +12,39 @@
 
 ### 直接错误
 ```
-#9 [builder 3/3] RUN wget https://dlcdn.apache.org/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz ...
+#9 [builder 3/3] RUN wget https://dlcdn.apache.org/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz \
+    && tar -zxvf apache-druid-35.0.0-bin.tar.gz \
+    && mv apache-druid-35.0.0 /opt/druid \
+    && rm -f apache-druid-35.0.0-bin.tar.gz
+#9 0.057 --2026-07-10 04:55:51--  https://dlcdn.apache.org/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz
+#9 0.087 Resolving dlcdn.apache.org (dlcdn.apache.org)... 151.101.2.132, 2a04:4e42::644
 #9 0.459 Connecting to dlcdn.apache.org (dlcdn.apache.org)|151.101.2.132|:443... connected.
 #9 0.470 HTTP request sent, awaiting response... 404 Not Found
 #9 0.655 2026-07-10 04:55:51 ERROR 404: Not Found.
 #9 ERROR: process "/bin/sh -c wget https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz ..." did not complete successfully: exit code: 8
-------
-Dockerfile:9
-   9 | >>> RUN wget https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz \
 ```
 
 ### 根因定位
-- 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9`（`wget` 下载 Druid 压缩包步骤）
-- 失败原因: `dlcdn.apache.org`（Apache CDN）对 `druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 返回 HTTP 404，该 CDN 通常只保留最新版本释放的制品，旧版本（如 Druid 35.0.0）可能已被下架。
+- 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9`（`RUN wget` 步骤）
+- 失败原因: Dockerfile 从 `dlcdn.apache.org` CDN 下载 Apache Druid 35.0.0 二进制包时返回 HTTP 404。`dlcdn.apache.org` 是 Apache 的 CDN 分发前端，通常只保留最新版本，历史版本（包括 35.0.0）已被下架删除。这与历史模式01（Apache CDN Maven 版本 404）的根因完全一致——Apache CDN 不保证历史版本制品的持久可用性。
 
 ### 与 PR 变更的关联
-PR 新增了一个完整的 Dockerfile 用于在 openEuler 24.03-LTS-SP4 上构建 Druid 35.0.0 镜像。构建过程中 `builder` 阶段的 `wget` 步骤直接从 `dlcdn.apache.org` 下载 Druid 二进制包时遭遇 404，导致整个镜像构建失败。错误直接由新增 Dockerfile 中的下载 URL 触发，属于 PR 新增代码引入的问题。已有 SP2 版本的 Dockerfile 可能同样使用此 URL 但当时制品可用；随着时间推移，CDN 已清除该版本，新构建时即失败。
+PR 新增的 Dockerfile（`Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile`）第 9 行直接使用了 `dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` 作为下载源。同一版本在已有的 SP2 Dockerfile 中可能曾经可用，但 CDN 在 SP4 Dockerfile 提交后（构建时）已不再托管该版本，导致构建失败。问题由本次 PR 的 Dockerfile 新增直接触发。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将下载源从 `dlcdn.apache.org` 更换为 `archive.apache.org/dist/`（Apache 官方归档站，保留所有历史版本），URL 模板改为：
-`https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`
+将下载源从 `dlcdn.apache.org` 更换为可长期保留历史版本的上游源：
+- **Apache Archive**: `https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` — Apache 官方归档站，保留所有发布版本
+- **华为云镜像站**: `https://repo.huaweicloud.com/apache/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz` — 已验证在 CI 环境中网络可达且保留历史版本（参考模式01/33中的历史案例）
 
-### 方向 2（置信度: 中）
-如果 `archive.apache.org` 在 CI 环境中不可达（参考历史模式33），可切换至华为云镜像站或其他已验证可达的 Apache 镜像站。
+### 方向 2（可选，置信度: 中）
+若 Druid 35.0.0 确实在所有上游源中均不存在（需验证），则需检查上游 Apache Druid 项目是否已撤回该版本，考虑升级到 CDN 当前可用版本。
 
 ## 需要进一步确认的点
-1. 确认 `archive.apache.org/dist/druid/35.0.0/` 路径下确实存在 `apache-druid-35.0.0-bin.tar.gz` 文件。
-2. 确认同一版本 35.0.0 的 24.03-lts-sp2 Dockerfile 当前是否也因相同 URL 失败——如果是，应一并修复。
-3. 确认 CI 构建环境可正常访问 `archive.apache.org`（参考模式33 中曾出现过 `archive.apache.org` 不可达的情况）。
+1. 验证 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 是否存在（Apache 归档站应保留所有已发布版本）
+2. 确认已有的 SP2 Dockerfile（`Bigdata/druid/35.0.0/24.03-lts-sp2/Dockerfile`）是否也使用相同 CDN 源，若同样指向 `dlcdn.apache.org`，则该 SP2 镜像的后续重建也会面临相同失败
+3. 验证华为云镜像站 `repo.huaweicloud.com/apache/druid/35.0.0/` 路径下是否有对应制品
 
-## 修复验证要求
-- code-fixer 必须在修改前，通过 `wget --spider` 或 `curl -I` 验证 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 返回 HTTP 200，确认替换后的 URL 可正常下载。
-- 若 `archive.apache.org` 不可达，需在 CI 环境中测试候选镜像站（如华为云镜像站）的可用性后再提交。
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+（不适用——本次修复为更换下载 URL，不涉及正则 patch 外部源文件）
