@@ -6,7 +6,7 @@
 - 置信度: 中
 - 知识库匹配: 新模式
 - 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), HTTP/2 stream, INTERNAL_ERROR, No more mirrors to try, dnf install, repo.openeuler.org
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, dnf install
 
 ## 根因分析
 
@@ -22,23 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
-- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上构建时，`dnf install` 从 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 仓库下载 RPM 包（特别是 `guile`、`gcc-c++`、`git-core`）时遭遇间歇性 HTTP/2 流错误（Curl error 92），其中 `guile-2.2.7-6.oe2403sp4.aarch64.rpm` 在耗尽所有镜像重试后仍下载失败，导致整个 `dnf install` 命令以 exit code 1 退出。需要安装的 156 个包中大部分（包括大型包如 gcc 30MB、cmake 13MB）下载成功，`git-core` 最终重试成功，但 `gcc-c++`（重试 2 次）和 `guile` 持续失败，表现为间歇性网络基础设施问题。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: aarch64 构建节点在执行 `dnf install` 时，从 `repo.openeuler.org` 下载 RPM 包过程中遭遇 HTTP/2 流错误（Curl error 92），4 个包（`git-core`、`gcc-c++` x2、`guile`）均出现 `INTERNAL_ERROR (err 2)`，其中 `guile` 在耗尽所有镜像重试后最终失败，导致整个 dnf 事务中断。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 新增的 Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`）语法正确，`dnf install` 命令格式与其他同类 Dockerfile 一致。失败原因是 openEuler 24.03-LTS-SP4 的 aarch64 软件仓库在通过网络下载 `guile` 等 RPM 包时发生 HTTP/2 协议层面的传输错误，属于 CI 构建环境到上游软件仓库间的网络基础设施问题。PR 本身未引入任何可能导致此类网络错误的代码变更。
+**无关。** PR 仅新增了 vvenc 1.14.0 的 Dockerfile（标准 `dnf install` + `cmake` 构建）及配套元数据文件。`dnf install -y git gcc gcc-c++ make cmake` 命令本身正确，失败完全源于构建节点与 `repo.openeuler.org` 之间的网络传输层问题，属于 CI 基础设施故障。同一 Dockerfile 在 x86_64 runner 上很可能构建成功（但该 runner 的日志未提供）。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**直接重试 CI 构建。** HTTP/2 流错误表现为间歇性（`git-core` 重试后成功，其他包多次重试失败），很可能是 `repo.openeuler.org` 在特定时段对 aarch64 架构请求的 HTTP/2 连接处理不稳定所致。重新触发 CI 构建大概率能绕过该网络波动。
+### 方向 1（置信度: 中）
+**无需修改代码，触发 CI 重试即可。** 该失败为 `repo.openeuler.org` 镜像站 HTTP/2 服务的间歇性故障，多个包（`git-core`、`gcc-c++`、`guile`）均在同一构建过程中出现流错误，表明问题在服务器端或中间网络层。重新触发 CI 构建大概率会成功。
 
 ### 方向 2（置信度: 低）
-**若多次重试仍持续失败**，在 Dockerfile 的 `dnf install` 前增加重试/回退逻辑：
-- 为 `dnf` 配置额外的备用镜像（在 `/etc/yum.repos.d/` 中添加华为云镜像等替代源）
-- 或使用 `dnf install ... --setopt=retries=10` 增加 dnf 内部重试次数
+若多次重试均失败，可考虑在 Dockerfile 的 `dnf install` 命令中添加 `--setopt=retries=10` 增加重试次数，以应对 `repo.openeuler.org` 的 HTTP/2 不稳定性。但更建议从 CI 基础设施侧排查 aarch64 构建节点到 `repo.openeuler.org` 的网络连通性。
 
 ## 需要进一步确认的点
-1. 该 aarch64 SP4 构建节点（`ecs-build-docker-aarch64-04-sp`）是否能稳定访问 `repo.openeuler.org` 的 SP4 仓库——建议在同一节点上手动执行 `dnf install -y guile` 测试连通性。
-2. 确认 openEuler 24.03-LTS-SP4 的 aarch64 仓库是否存在已知的 CDN/镜像稳定问题，以及该时段是否有其他 SP4 aarch64 构建任务也遭遇类似 HTTP/2 流错误。
-3. 如果其他 SP4 PR 也遭遇相同错误，说明这是仓库侧系统性问题而非偶发网络抖动，需联系 openEuler 基础设施团队排查 `repo.openeuler.org` 的 HTTP/2 配置。
+1. 同一 PR 的 x86_64 架构构建 job 是否成功（当前仅提供了 aarch64 job 日志）。
+2. `repo.openeuler.org` 在该时间段是否有已知的 HTTP/2 服务抖动或 CDN 节点异常。
+3. aarch64 构建节点 `ecs-build-docker-aarch64-04-sp` 的历史构建成功率，是否存在类似网络问题的复发模式。
