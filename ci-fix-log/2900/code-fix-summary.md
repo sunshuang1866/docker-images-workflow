@@ -1,21 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 此为 CI 基础设施问题（infra-error）。
+CI 基础设施错误：`eulerpublisher` 测试框架 Check 阶段因缺少 `shunit2` shell 单元测试框架而失败，与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无代码修改。该失败为 `infra-error`，CI 分析报告确认与 PR 变更无关，无需修改任何 PR 文件。
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`（置信度: 低）：
-
-- 失败发生在 CI 的 `[Check]` 阶段，`eulerpublisher` 测试框架的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 尝试 source `shunit2`，但 `shunit2` 未安装在 CI Runner 上。
-- Docker 镜像的 `[Build]` 和 `[Push]` 阶段均成功完成，PR 新增的 Dockerfile 和启动脚本无任何问题。
-- 失败点与 PR 代码变更完全无关。
-
-**应在 CI 基础设施层面修复**：
-1. 在 CI Runner 上安装 `shunit2`（如 `dnf install shunit2` 或从源码部署）
-2. 或检查 `eulerpublisher` 的 `common_funs.sh` 中 `shunit2` 查找路径配置是否正确
+CI 分析报告指出：Docker 镜像构建、配置、推送三个阶段均完全成功，失败仅发生在 `eulerpublisher` 的 Check 后置测试阶段。`common_funs.sh` 第 13 行尝试 `source shunit2` 时失败，导致测试框架无法初始化。根因是 CI 测试运行环境缺少 `shunit2` 依赖，需由 CI 基础设施运维团队在测试节点上安装 `shunit2`。这不是代码层面的问题，Code Fixer 不需要修改任何文件。
 
 ## 潜在风险
-无 — 未对代码做任何修改。
+无（未修改代码）。
