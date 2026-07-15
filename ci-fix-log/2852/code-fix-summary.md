@@ -1,26 +1,23 @@
 # 修复摘要
 
 ## 修复的问题
-Milvus 2.6.0 C++ 构建时 Conan 包管理器下载 bzip2/1.0.8 源码返回 403 Forbidden，导致 `make build-cpp` 失败。
+移除 `./scripts/install_deps.sh` 调用，改为在 Dockerfile 中直接安装 openEuler 可用的等效构建依赖包，解决上游脚本对 CentOS/RHEL 专有包的依赖导致的构建失败。
 
 ## 修改的文件
-- `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile`: 在 `make build-cpp` 之前新增 Conan 下载缓存配置和 bzip2 源码预下载步骤
+- `Database/milvus/2.6.0/24.03-lts-sp4/Dockerfile`: 
+  1. 第 12 行在 `yum install` 中新增 `automake autoconf libtool m4 python3-devel curl` 六个包
+  2. 第 24 行移除 `./scripts/install_deps.sh &&` 调用
 
 ## 修复逻辑
-根因：Conan 的 `tools.get()` 使用 Python `requests` 库从 sourceware.org 等镜像下载 bzip2-1.0.8 源码时，CI 环境被上游服务器返回 403（User-Agent 或 IP 风控），而 `wget`（已在 Dockerfile 中安装）使用不同的 HTTP 头可以正常下载。
+CI 失败的直接原因是上游 Milvus `install_deps.sh`（v2.6.0 版本）被设计为 CentOS/RHEL 专用，内部通过 yum 安装 `epel-release`、`centos-release-scl-rh`、`devtoolset-11-*`、`llvm-toolset-11.0-*`、`lcov` 等 CentOS SCL 仓库中的包，并通过 `scl_source` 配置环境，这些在 openEuler 24.03-LTS-SP4 上均不可用，导致 yum 返回非零退出码，RUN 指令的 `&&` 链中断。
 
-修复方式（对应分析报告方向 1）：
-1. 通过 `conan config set tools.files.download:download_cache=/root/.conan/download_cache` 启用 Conan 下载缓存——该功能在 Conan 1.61.0 中存在，`tools.get()` 内部调用 `tools.download()`，当提供了 SHA256 校验值时（bzip2 的 conandata.yml 已提供）会检查下载缓存
-2. 使用 `wget` 从 sourceware.org 下载 bzip2-1.0.8.tar.gz（已验证该 URL 返回 200 OK）
-3. 将下载的文件以 Conan 下载缓存要求的哈希文件名（`sha256(url + sha256_checksum)`）复制到缓存目录，覆盖 bzip2 conandata.yml 中所有的 3 个镜像 URL：
-   - `https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz`
-   - `https://mirrors.kernel.org/sourceware/bzip2/bzip2-1.0.8.tar.gz`
-   - `https://www.mirrorservice.org/sites/sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz`
-
-当 Conan 的 `tools.download()` 执行时，在发起 HTTP 请求之前会先查询下载缓存，命中缓存后直接复制文件到目标路径，完全绕过 HTTP 下载。
-
-**验证**：已从上游 `conan-io/conan` release/1.61 获取 `conan/tools/files/files.py` 和 `conans/client/downloaders/cached_file_downloader.py` 源码，确认 `tools.files.download:download_cache` 配置项和缓存键计算逻辑（`sha256(url + checksum)`）在 Conan 1.61.0 中可用。已用 Python 计算三个 URL 对应的正确缓存键。
+修复方案采用分析报告的"方向 1"（高置信度）：跳过不兼容的上游脚本，将其中必要的构建工具（`automake`、`autoconf`、`libtool`、`m4`、`python3-devel`、`curl`）添加到 Dockerfile 已有的 `yum install` 阶段。以下依赖已由原 Dockerfile 覆盖，无需额外处理：
+- gcc/g++/gfortran（系统版本，无需求助于 devtoolset SCL）
+- cmake、make、git、wget、ninja 等基础构建工具
+- openblas-devel、libaio、libuuid-devel 等运行时/编译库
+- Go、Rust、conan 已在前序 RUN 层单独安装
 
 ## 潜在风险
-- **低风险**：如果 CI 环境的 `wget` 也无法访问 sourceware.org，则缓存不会被预填充，构建将回退到原始行为（Conan 直接下载，可能仍然 403）。这不会引入新的错误，只是原问题未被修复。
-- **无风险**：该修改仅新增预下载缓存步骤，不改变原有的 `make build-cpp` 和 `make build-go` 流程，不影响其他依赖或构建产物。
+1. `install_deps.sh` 中安装的 `ccache`、`lcov`、`clang`/`clang-tools-extra` 在本次修复中未添加，这些属于编译器缓存/代码覆盖率/代码格式化工具，预计不影响 `make build-cpp` 和 `make build-go` 的成功执行。若后续构建因此失败，可按需补充对应包名。
+2. `install_deps.sh` 中的 cmake 版本检查（要求 >= 3.26）未保留。openEuler 24.03-LTS-SP4 预期已包含 cmake >= 3.26，若实际版本偏低，需在各 RUN 层之间插入 cmake 升级步骤。
+3. `install_deps.sh` 会升级 Rust 到 1.83 并重装 conan==1.64.1，Dockerfile 使用 Rust 1.73 和 conan==1.61.0，版本差异可能影响编译兼容性。
