@@ -1,16 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。该 CI 失败为 `infra-error`——openEuler 官方镜像仓库 `repo.openeuler.org` 在 aarch64 构建节点上出现 HTTP/2 协议层面的间歇性流重置（Curl error 92），导致 `guile` 等多个 RPM 包下载中断，与 PR 的 Dockerfile 代码变更无关。
+无需代码修复。CI 失败为 `repo.openeuler.org` 镜像站在 aarch64 架构上的 HTTP/2 协议瞬时异常（Curl error 92: INTERNAL_ERROR），属于 CI 基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。所有 PR 变更文件（Dockerfile、README.md、image-info.yml、meta.yml）均已确认无误，无需修改。
 
 ## 修复逻辑
-CI 分析报告明确判定失败类型为 `infra-error`（置信度: 高），根因为 openEuler 镜像站 HTTP/2 服务瞬时不稳定。Dockerfile 中 `dnf install -y git gcc gcc-c++ make cmake` 命令语法正确，构建逻辑与同项目已有的 vvenc 24.03-lts-sp3 Dockerfile 结构一致，无需代码层面的修改。
-
-## 建议操作
-重新触发 CI 构建。多次重试中 git-core 和 gcc-c++ 均已下载成功，说明镜像站可访问，只是间歇性故障。若多次重试仍失败，可考虑在 Dockerfile 的 dnf install 命令中添加 `--setopt=retries=10` 参数增加重试次数。
+CI 在 aarch64 runner 上执行 `dnf install -y git gcc gcc-c++ make cmake` 时，镜像站 `repo.openeuler.org` 返回 HTTP/2 流错误（INTERNAL_ERROR），导致多个 RPM 包（git-core、gcc-c++、guile）下载失败。该 Dockerfile 为全新文件，`dnf install` 命令正确，包名有效，dnf 已成功解析 156 个依赖包并开始下载。根因是上游镜像站服务不稳定，重新触发 CI 构建即可。
 
 ## 潜在风险
-无
+无。此问题与代码无关，不需要也不应修改任何源文件。
