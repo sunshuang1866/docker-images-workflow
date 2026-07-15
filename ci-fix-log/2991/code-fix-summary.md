@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施错误（infra-error），由 `repo.openeuler.org` 开放欧拉 24.03-LTS-SP4 aarch64 软件源的 HTTP/2 协议层临时故障导致，与 PR 代码变更无关。
+无需代码修改。CI 失败原因为 openEuler 24.03-LTS-SP4 aarch64 仓库（`repo.openeuler.org`）的 HTTP/2 协议层临时基础设施问题，与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。该失败为 `infra-error`，不需要修改任何源代码文件。
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`。Dockerfile 第 6 行的 `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 语法正确无误。失败原因是 `repo.openeuler.org` 服务器端的 HTTP/2 流未正常关闭（`INTERNAL_ERROR (err 2)`），导致多个 RPM 包下载失败，其中 `guile` 包耗尽所有镜像重试后最终失败。这是外部依赖的临时性问题，应通过重新触发 CI 构建（rerequest review 或关闭重开 PR）验证软件源服务是否已恢复。
+CI 构建在 `aarch64` runner 上执行 `dnf install -y git gcc gcc-c++ make cmake` 时，多个 RPM 包（`git-core`、`gcc-c++`、`guile`）在下载过程中遇到 HTTP/2 帧层流错误（Curl error 92: INTERNAL_ERROR），最终 `guile` 包耗尽所有镜像源导致安装失败。Dockerfile 中的 `dnf install` 命令语法正确，所列包名均为 openEuler 仓库中存在的标准包。此为仓库服务端的临时性网络问题，触发 CI 重试即可通过。
 
 ## 潜在风险
 无
