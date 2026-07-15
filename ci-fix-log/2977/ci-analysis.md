@@ -3,9 +3,9 @@
 ## 基本信息
 - PR: #2977 — chore(brpc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像网络波动
+- 新模式标题: YUM仓库下载网络波动
 - 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, repo.openeuler.org, yum install
 
 ## 根因分析
@@ -26,20 +26,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install -y ...` 步骤）
-- 失败原因: CI aarch64 构建节点在通过 yum 从 `repo.openeuler.org` 下载 RPM 包时，`repo.openeuler.org` 多次出现 HTTP/2 流传输错误（Curl error 92: HTTP/2 stream INTERNAL_ERROR）和 SSL 连接中断（Curl error 56: SSL_ERROR_SYSCALL），173 个依赖包中的 `vim-common` 因镜像重试次数耗尽而最终下载失败，导致整个 `yum install` 步骤退出码为 1。
+- 失败位置: `Dockerfile:4`（`RUN yum install -y ...` 步骤，aarch64 架构）
+- 失败原因: CI 构建节点从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 流错误（Curl error 92）和 SSL 读取失败（Curl error 56），共 4 个包（gcc、kernel-headers、perl-MIME-Base64、vim-common）出现下载异常。前 3 个在 yum 自动重试后成功下载，但 `vim-common` 在耗尽所有镜像重试后仍下载失败，导致整个 yum install 步骤退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 仅新增了一个 Dockerfile、更新了 README.md、image-info.yml 和 meta.yml，所有变更均为正确的配置/文档类修改。Dockerfile 中 `yum install` 的包名列表正确，172/173 个包均已成功下载安装，仅 `vim-common` 因 openEuler 官方仓库的网络瞬时故障而下载失败。日志中多个包（gcc、kernel-headers、perl-MIME-Base64）也遇到了同样的 HTTP/2 流错误和 SSL 错误，但通过 yum 内置重试机制最终成功下载，说明 `repo.openeuler.org` 在该构建时段存在间歇性网络问题。
+**与 PR 代码变更无关**。PR 仅新增了 brpc 1.16.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和配套元数据文件。Dockerfile 中 `yum install` 的命令语法正确，所有声明的包在仓库中均真实存在（yum 已成功解析依赖关系，列出 173 个待安装包）。`vim-common` 并非 Dockerfile 显式指定的包，而是作为传递依赖（被 git 的弱依赖链引入，路径为 `git → perl-Git → perl → vim-enhanced → vim-common`）。失败是上游镜像仓库 `repo.openeuler.org` 在该时段网络不稳定的瞬态问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修改代码，重新触发 CI 构建即可。** 这是 openEuler 官方仓库 `repo.openeuler.org` 的临时网络波动（HTTP/2 流中断 + SSL 连接异常），与 PR 中的 Dockerfile、README.md、image-info.yml、meta.yml 均无关。在仓库服务恢复正常后重跑 CI，yum install 步骤应能顺利完成。
+### 方向 1（置信度: 中）
+**重新触发 CI 构建**。这是网络瞬态故障，`repo.openeuler.org` 在该时间窗口内 HTTP/2 连接不稳定。172/173 个包下载成功，仅有 1 个失败，且失败的都是大文件包（gcc 30MB、kernel-headers 1.7MB、vim-common 7.8MB），呈现典型的网络波动特征。直接重试大概率可以成功，无需修改任何代码。
 
-### 方向 2（置信度: 中）
-若该问题持续出现（说明 `repo.openeuler.org` 与 aarch64 构建节点之间存在持续性的网络连通性问题），可考虑在 `yum install` 命令前添加重试逻辑，例如 `yum install -y ... || yum install -y ...`，或配置 yum 的 `retries` 和 `timeout` 参数以增强网络容错能力。但这属于 CI 基础设施层面的优化，不属于本次 PR 的修复范围。
+### 方向 2（置信度: 低）
+如果多次重试后 `vim-common` 依然失败，可能是 `repo.openeuler.org` 上该特定架构的 `vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm` 文件本身损坏。此时需要在 Dockerfile 中绕过 vim 依赖链，例如安装 `git-core` 而非 `git`（避免引入 vim-enhanced），或在 yum install 中显式排除 vim 相关包：`yum install -y --setopt=install_weak_deps=False ...`。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 在构建时段（2026-07-09 13:44 UTC 左右）是否存在已知的服务中断或网络波动。
-- 如果重试后仍然失败，需确认 aarch64 构建节点到 `repo.openeuler.org` 的网络路由是否稳定，是否存在防火墙/代理配置导致的 HTTP/2 连接异常断开问题。
+1. `repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm` 文件是否在仓库中完整可用（非瞬态网络问题时可手动 wget 校验）。
+2. 当前 CI 的 aarch64 构建节点 `ecs-build-docker-aarch64-04-sp` 到 `repo.openeuler.org` 的网络链路是否存在持续性问题。
+3. 如果重试后仍然失败，需要确认是否需要在 Dockerfile 中显式添加 `vim-common` 到 install 列表中以触发提前下载，或通过 `--setopt=install_weak_deps=False` 减少传递依赖的安装量。
