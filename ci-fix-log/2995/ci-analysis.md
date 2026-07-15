@@ -5,39 +5,30 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: CI测试脚本CRLF行尾
-- 新模式症状关键词: `/bin/sh^M`, `bad interpreter`, `No such file or directory`, `carriage return`, `eulerpublisher`, `test.sh`
+- 新模式标题: 测试脚本CRLF行尾
+- 新模式症状关键词: bad interpreter, ^M, No such file or directory, bwa_test.sh
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-10 11:58:06,454 - INFO - [Check] checking ****test/bwa:0.7.18-oe2403sp4-x86_64 ...
 /bin/sh: /usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh: /bin/sh^M: bad interpreter: No such file or directory
-2026-07-10 11:58:06,457 - CRITICAL - [Check] test failed
+2026-07-10 11:58:06,457-/usr/local/lib/python3.9/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 ```
 
 ### 根因定位
-- 失败位置: eulerpublisher 工具内置测试脚本 `/usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh`（即 `/usr/local/etc/eulerpublisher/tests/container/app/bwa_test.sh`）
-- 失败原因: CI 工具 `eulerpublisher` 中的 `bwa_test.sh` 测试脚本包含 Windows 风格换行符（CRLF），shebang 行 `#!/bin/sh` 末尾带有回车符 `\r`（日志中显示为 `^M`），导致系统尝试将 `/bin/sh\r` 作为解释器执行，报 `bad interpreter: No such file or directory`。
+- 失败位置: `/usr/etc/eulerpublisher/tests/container/app/bwa_test.sh`（CI 工具 eulerpublisher 自带测试脚本）
+- 失败原因: CI 编排工具 eulerpublisher 内置的 bwa 镜像测试脚本 `bwa_test.sh` 含有 Windows 风格 CRLF 行尾（`\r\n`），其 shebang 行 `#!/bin/sh\r` 被系统解析为查找名为 `/bin/sh\r` 的解释器（含回车符），导致 `bad interpreter: No such file or directory` 错误。Docker 镜像的构建、导出和推送均已成功完成（日志中 `[Build] finished`、`[Push] finished`），失败仅发生在 eulerpublisher 的 `[Check]` 测试执行阶段。
 
 ### 与 PR 变更的关联
-
-**PR 变更与失败无关。** 证据如下：
-
-1. **Docker 构建完全成功**：日志显示 BWA 编译通过（所有 `.c` 文件编译成功，`bwa` 二进制正常链接），镜像构建成功（`#7 DONE 199.0s`），镜像导出并推送成功（`#8 DONE 8.4s`），`[Build] finished` 和 `[Push] finished` 均在 INFO 级别盖章。
-2. **失败发生在 CI 自身的后置检查阶段**：`[Check]` 阶段调用的是 eulerpublisher 包自带的测试脚本，该脚本不在 PR diff 的任何文件中，不由本次 PR 管理或控制。
-3. **PR diff 仅涉及 4 个文件**：新增 Dockerfile（纯 LF 格式）、修改 README.md、image-info.yml、meta.yml，均不涉及任何测试脚本或 CI 配置。
+**与 PR 变更无关**。此次 PR 仅新增了 `HPC/bwa/0.7.18/24.03-lts-sp4/Dockerfile`（19 行全新 Dockerfile）、更新了 README.md、image-info.yml 和 meta.yml，均为纯文本文件，不涉及任何测试脚本。Dockerfile 中的 `make -j "$(nproc)"` 使用了正确的 `$()` 命令替换语法，实际构建日志显示 bwa 编译完全成功（所有 36 个 `.c` 文件编译通过，`ar` 和 `gcc` 链接均成功）。失败根因是 CI 编排工具 eulerpublisher 安装包中 `bwa_test.sh` 的 CRLF 行尾问题，属于 CI 基础设施缺陷，Code Fixer 无需处理。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-这是 eulerpublisher CI 工具包中 `bwa_test.sh` 文件的 CRLF 行尾问题，与 PR 代码无关。需要 eulerpublisher 仓库的维护者将 `bwa_test.sh`（以及可能同批次引入的其他测试脚本）的行尾格式从 CRLF 转换为 LF，可通过 `dos2unix` 或 `sed -i 's/\r$//'` 完成。
-
-### 方向 2（可选）
-如果 `bwa_test.sh` 是 eulerpublisher 为了支持 bwa 镜像检查而**新创建的**测试脚本，并且创建方式导致其继承了 CRLF 行尾（例如在 Windows 环境编辑或通过特定 git 配置克隆），则需要在 eulerpublisher 仓库中修复该文件后，重新部署到 CI runner。
+CI 运维侧修复：在 CI 节点的 eulerpublisher 安装过程中，对 `bwa_test.sh` 执行 `dos2unix` 或 `sed -i 's/\r$//'` 转换行尾，确保 shebang 行不含回车符。此为 CI 基础设施问题，不涉及 Dockerfile 或任何 PR 代码的修改。
 
 ## 需要进一步确认的点
-1. 确认 `bwa_test.sh` 在 eulerpublisher 仓库中的行尾格式，以及该文件是否为近期新增。
-2. 排查 eulerpublisher 仓库中是否还有其他测试脚本（`*_test.sh`）存在同样的 CRLF 行尾问题。
-3. 确认 CI 环境中 eulerpublisher 的部署/更新流程，确保修复后的脚本能及时同步到所有 runner 节点。
+- 确认 eulerpublisher 测试脚本 `bwa_test.sh` 的来源（是否从 Git 仓库检出时因 `core.autocrlf` 配置引入了 CRLF 转换）
+- 排查同批其他镜像（如本次 CI run 中同时构建的其他 HPC 镜像）是否也因同一 `bwa_test.sh` 脚本触发相同的 Check 阶段失败
+- 若 CI 平台支持，可考虑在 eulerpublisher 测试脚本调用前统一做 `dos2unix` 预处理，从根本上杜绝 CRLF 引发的 shebang 问题
