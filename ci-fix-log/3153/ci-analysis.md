@@ -3,35 +3,47 @@
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
 - 失败类型: infra-error
-- 置信度: 中
-- 知识库匹配: 新模式
-- 新模式标题: 根级文件路径校验不匹配
-- 新模式症状关键词: Path Error, expected path should be, eulerpublisher, appstore
+- 置信度: 低
+- 知识库匹配: 模式11（CI appstore 发布规范预检路径错误）
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:28:17,839 - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:28:17,839 - update.py[line:273] - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
++-------------+-----------------------------------------------------+--------------+
+| Check Items |                     Description                     | Check Result |
++-------------+-----------------------------------------------------+--------------+
 |  README.md  | [Path Error] The expected path should be /README.md |   FAILURE    |
++-------------+-----------------------------------------------------+--------------+
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: CI appstore 发布规范预检工具（`eulerpublisher`）对 PR 中变更的文件 `README.md` 执行路径校验时，工具获取到的路径为 `README.md`（无前导 `/`），但其内部校验逻辑期望的格式为 `/README.md`（带根路径前导 `/`），路径字符串格式化不匹配导致 FAILURE。`README.md` 实际位于仓库根目录，文件路径本身正确，这是一个 CI 工具链的路径标准化缺陷。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`（CI 发布规范预检步骤）
+- 失败原因: CI 发布规范预检工具 `update.py` 对 `README.md` 执行路径校验时失败，报告"期望路径应为 /README.md"。然而该文件确实位于仓库根目录 `/README.md`，错误与文件实际位置矛盾，可能为 CI 工具的路径解析 bug 或 fork 分支克隆环境差异导致。
 
 ### 与 PR 变更的关联
-PR 仅修改了两个根级文档文件——`README.md` 和 `README.en.md`，内容为更新基础镜像可用 Tags 列表（新增 24.03-lts-sp4 / sp3 / sp2、25.09 条目，修正错误 URL）。变更内容本身正确、合法，不涉及任何 Dockerfile、元数据文件或构建逻辑。CI 失败**与 PR 内容质量无关**，是 `eulerpublisher` 工具在解析 git diff 输出的文件路径时缺少前导 `/` 标准化步骤所致。任何修改根级 README 文件的 PR 在当前 CI 环境下均可能触发相同校验失败。
+**与 PR 内容完全无关**。本次 PR 仅修改了 `README.en.md` 和 `README.md` 中"可用镜像的 Tags"段落，更新了基础镜像版本标签的描述信息（`24.03-lts-sp2` → `24.03-lts-sp4`，并补充 `24.03-lts-sp3`、`25.09`、`24.03-lts-sp2` 条目）。没有任何 Dockerfile、构建脚本或元数据文件的变更。PR 修改的文件内容不会触发 CI 路径校验失败。
+
+由于失败日志来自 `x86-64` 下游架构构建 job，且 `Finished: FAILURE` 明确表明失败，因此排除触发层 job 日志混淆的情况。但错误本身是 CI 工具在校验仓库根目录下的 `README.md` 时产生的路径判断异常，属于 CI 工具行为问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-CI 工具 `eulerpublisher/update/container/app/update.py` 中路径校验逻辑在比较实际路径与期望路径时未统一添加 `/` 前缀。需在 `update.py` 的路径检查代码中，对从 git diff 提取的文件路径统一添加前导 `/`（或将期望路径去掉前导 `/`），使其与实际文件路径格式一致。这属于 CI 基础设施侧修复，应由 CI 工具维护者处理，Code Fixer 无需修改 Dockerfile 或仓库文件。
+### 方向 1（置信度: 低）
+CI 工具 `update.py` 的路径校验逻辑可能存在 bug：对 fork 分支克隆后的 `README.md` 路径判断异常。可尝试在 CI 工具中确认其路径比对逻辑是否正确处理了 fork 分支与主仓库的路径一致性。若为工具 bug，需由 CI 平台团队修复 `eulerpublisher` 校验逻辑。
 
 ### 方向 2（置信度: 低）
-若 CI 工具路径校验逻辑本身不可修改，可以考虑在 PR 分支中将 README 更新内容放置到符合 CI 校验预期的路径结构下（但这与文件实际位置矛盾，不具有可操作性）。更合理的方向是等待 CI 工具修复后重建触发。
+PR 源分支（`sunshuang1866:fix/3153`）的仓库结构可能与主仓库存在细微差异（如多了一层目录包装），导致 CI 工具在 clone 后计算的 `README.md` 相对路径与主仓库不一致。可检查 fork 仓库的实际目录结构是否与主仓库完全一致。
 
 ## 需要进一步确认的点
-1. `eulerpublisher/update/container/app/update.py` 第 273 行附近的路径比较逻辑具体实现，确认路径格式差异的精确位置。
-2. 该 CI 检查是否设计上允许对根级 README 文件的修改——若策略上不允许直接修改根级 README，则需了解正确的 README 更新流程。
-3. 同类 PR（仅修改根级文档文件）的历史 CI 运行结果，以确认这是新引入的 CI 工具缺陷还是长期存在的已知限制。
+1. 检查 PR 源分支 `sunshuang1866/docker-images` fork 仓库的实际目录结构，确认 `README.md` 是否直接位于仓库根目录
+2. 查阅 `eulerpublisher/update/container/app/update.py:273` 处的路径校验逻辑，理解其为何对 `/README.md` 判定为路径错误
+3. 确认 `update.py:222` 处 clone 操作的 `--depth` 和分支参数是否正确，是否引入了额外目录层级
+4. 与 CI 平台团队确认此路径校验是否为近期引入的新规则，以及是否有其他同类 PR 遇到相同问题
+
+## 修复验证要求
+无需填写——本报告未提出需修改代码的修复方向，且问题本质为 CI 工具行为异常，不属于正则 patch 外部源文件场景。
