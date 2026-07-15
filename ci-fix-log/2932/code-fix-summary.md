@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。此 CI 失败为基础设施错误（infra-error），与 PR 代码变更无关。
+CI 基础设施故障（infra-error）：Docker BuildKit builder 容器启动失败，与 PR 代码无关，无需修改代码。
 
 ## 修改的文件
-无。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
+CI 分析报告确认为基础设施瞬时故障 — Docker daemon 在启动 BuildKit builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 时，无法找到容器的根文件系统 `/`，导致构建尚未开始即失败。该错误发生在构建初始化阶段（`[internal] booting buildkit`），远在 Dockerfile 构建步骤之前，且 PR 仅新增了 glibc 镜像构建文件及对应的 README/image-info.yml/meta.yml 条目更新，与失败原因完全无关。
 
-1. 失败类型为 **infra-error**，发生在 Docker buildx 构建器初始化阶段（`[internal] booting buildkit`），错误信息为 `Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`。
-2. 构建在 Dockerfile 的 FROM / RUN / COPY 等指令被评估之前即已失败，PR 新增的 Dockerfile 及元数据文件未被解析或执行。
-3. 根因是 Docker daemon 层面的容器存储/文件系统异常（overlay2 存储驱动的 lower 层可能损坏或磁盘空间不足），属于 CI runner `ecs-build-docker-x86-hk` 节点上的基础设施问题。
-
-**结论**：此失败与 PR #2932 的代码变更完全无关，不应对任何源代码文件进行修改。建议重新触发 CI 构建以排除偶发故障；若持续复现，则需排查该 runner 节点的 Docker daemon 状态、磁盘空间及 buildkit 镜像完整性。
+**建议操作**：重新触发 x86-64 架构的 CI job。若多次重试仍失败，需排查 runner 节点 `ecs-build-docker-x86-hk` 的 Docker storage driver 状态及磁盘空间。
 
 ## 潜在风险
-无。未修改任何代码，不会引入新问题。
+无
