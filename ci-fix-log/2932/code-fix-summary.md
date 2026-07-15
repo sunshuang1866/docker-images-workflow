@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败为 Docker BuildKit 基础设施瞬时故障（`infra-error`），无需对 PR 代码做任何修改。
+无需代码修复。CI 失败为 `infra-error`，BuildKit builder 容器在初始化阶段崩溃（`Could not find the file / in container`），与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认失败发生在 `[internal] booting buildkit` 阶段——Docker daemon 在创建 BuildKit builder 容器后无法访问其根文件系统（`Could not find the file /`）。此时 Dockerfile 构建步骤尚未执行，与 PR 新增的 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及其他元数据文件（README.md、image-info.yml、meta.yml）无关。该错误属于基础设施层面的瞬时故障，推荐直接重新触发 CI 流水线。
+CI 失败分析报告明确指出这是一个基础设施层面的瞬时故障（infra-error），发生在 `[internal] booting buildkit` 阶段，早于任何 Dockerfile 指令（包括 `FROM`、`RUN`）的执行。PR 仅新增了 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及元数据文件，不可能触发 BuildKit 启动失败。修复方向是在 CI 平台重新触发该 job（retry），大概率可恢复正常。
 
 ## 潜在风险
 无
