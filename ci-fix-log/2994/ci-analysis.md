@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 构建器意外终止
-- 新模式症状关键词: `failed to receive status`, `rpc error`, `Unavailable`, `closing transport`, `error reading from server: EOF`, `graceful_stop`, `no builder`
+- 新模式标题: BuildKit builder终止
+- 新模式症状关键词: graceful_stop, no builder, closing transport, buildx, rpc error, Unavailable
 
 ## 根因分析
 
@@ -19,26 +19,22 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 #7（`dnf install` 阶段），日志未指示 Dockerfile 内代码行号错误
-- 失败原因: CI 的 BuildKit 构建器实例 `euler_builder_20260709_224657` 在构建中途被**外部原因**强制优雅关闭（gRPC GOAWAY 信号 + graceful_stop 调试数据），与 PR 的 Dockerfile 内容无关
+- 失败位置: Docker buildx 步骤 #7 `[2/4] RUN dnf install ...`（Dockerfile 第 12-15 行对应的第一个 `RUN` 指令）
+- 失败原因: Docker buildx builder 容器 `euler_builder_20260709_224657` 在 `dnf install` 下载 OS 元数据期间被终止。gRPC 层收到 `NO_ERROR` GOAWAY 帧携 `graceful_stop` 调试数据，表明 builder 被主动/优雅停止；停止后客户端无法再找到该 builder。构建实际未完成，未发生任何编译或代码层面的错误。
 
-## 与 PR 变更的关联
-
-该失败**与 PR 变更无关**。PR 仅新增了一个标准的 Dockerfile（安装编译依赖 → 编译 Python 3.9.19 → pip 安装 scann）和配套元数据文件，所有变更在语法和逻辑上均无错误。
-
-具体分析如下：
-
-1. **构建卡在 dnf 元数据下载阶段**：step #7 正在从 openEuler 仓库拉取 2.8 MB 的 yum/dnf 元数据，耗时约 38 秒（速度 77 kB/s），尚未进入实际包安装环节，Dockerfile 中指定的包列表（`gcc`, `gcc-c++`, `make`, `wget`, `openssl-devel`, `bzip2-devel`, `zlib-devel`）尚未被解析和校验。
-2. **错误来自 BuildKit 基础设施层**：`graceful_stop` 是 BuildKit server 发出的 HTTP/2 GOAWAY 信号，表示构建器实例被外部系统（如 CI 资源调度器、节点回收脚本、容器编排超时）主动终止，并非由 Docker 构建进程内部错误触发。
-3. **"no builder found" 是级联错误**：因构建器实例已不存在，后续任何构建操作自然无法找到该 builder。
+### 与 PR 变更的关联
+**与 PR 变更无关**。PR 仅新增了一个标准结构的新平台 Dockerfile（安装 gcc/gcc-c++/make/wget/openssl-devel/bzip2-devel/zlib-devel，编译 Python 3.9.19，然后 pip 安装 scann 1.4.2）及配套的 README、image-info.yml、meta.yml 更新。所安装的系统包均为 openEuler 仓库标准包，Dockerfile 内容与同项目其他 scann 版本 Dockerfile 结构一致。失败发生在首个 `RUN` 指令中下载 dnf 元数据阶段，远在任何 PR 特有逻辑执行之前，属于 CI 构建基础设施层面的中断。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**重试构建**。这是 CI 基础设施的偶发性故障，BuildKit 构建器实例被意外终止。直接重新触发 CI workflow（retry）即可，无需修改任何代码。
+### 方向 1（置信度: 中）
+**重新触发 CI 运行**。此为构建基础设施层面的瞬时故障（builder 容器被终止），PR 代码本身无误。重新触发相同的 CI job 大概率可以正常通过。建议在重试前检查 CI runner 节点的磁盘空间和内存资源是否充足，以及 buildx builder 是否有显式的生命周期限制（如空闲超时）。
+
+### 方向 2（置信度: 低）
+**检查 dnf 元数据下载速度慢是否导致超时**。日志显示 dnf 下载 `OS` 仓库元数据时速度仅 77 kB/s（2.8 MB 耗时 37 秒），若 CI 平台对单一 Docker 构建步骤设有严格的超时限制，缓慢的 dnf 下载可能触发超时进而导致 builder 被终止。可考虑在 Dockerfile 的 `dnf install` 前添加 `dnf makecache` 预热本地缓存，或在 dnf 配置中启用 `fastestmirror` 和 `max_parallel_downloads` 加速下载。
 
 ## 需要进一步确认的点
-
-1. CI 平台侧该 runner（`ecs-build-docker-x86-hk` / `docker-build-x86-01`）在对应时间段是否存在节点回收、资源超限或维护操作记录。
-2. BuildKit 构建器实例 `euler_builder_20260709_224657` 的终止原因（容器 OOM、宿主机调度驱逐、CI job 超时等）需从 CI 平台基础设施日志中确认——但与本 PR 代码无关。
-3. **额外注意（非本次失败原因）**：Dockerfile 中 pip 安装使用了镜像地址参数 `-i https://pypi.tuna.tsinghua.edu.cn/sync`，路径 `/sync` 与清华 PyPI 镜像的标准路径 `/simple` 不一致。当前构建未到达该步骤故而未被触发，但若此路径为笔误，后续构建在通过 dnf 阶段后可能因该 URL 不可达而失败。建议在 CI 重试成功后确认该 pip 命令是否执行正常。
+- CI runner 节点 `ecs-build-docker-x86-hk` 在构建当时是否存在资源不足（磁盘/内存/进程数）的情况
+- buildx builder `euler_builder_20260709_224657` 的生命周期管理策略：是否存在显式的空闲超时、最大构建时长限制，或是否有其他并发 job 对其执行了清理操作
+- dnf 元数据下载耗时 37 秒是否触发了某个 CI 层面的超时阈值
+- 同一时间段内，其他 PR 的 x86-64 构建 job 是否也出现类似失败（以判断是全局基础设施问题还是单次偶发故障）
