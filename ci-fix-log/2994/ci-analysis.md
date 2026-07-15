@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 失联
-- 新模式症状关键词: failed to receive status, no builder found, graceful_stop, closing transport, EOF, buildx_buildkit
+- 新模式标题: 构建器异常终止
+- 新模式症状关键词: graceful_stop, rpc error: code = Unavailable, closing transport, no builder found
 
 ## 根因分析
 
@@ -19,18 +19,20 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建的 `[2/4] RUN dnf install` 步骤（Dockerfile 行 `RUN dnf install -y ...`）
-- 失败原因: Docker BuildKit builder 实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被意外终止（`graceful_stop`），导致 API 连接断开（EOF），构建进程无法继续。此为非代码层面的 CI 基础设施问题。
+- 失败位置: `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`，第一个 `RUN dnf install ...` 步骤（Docker BuildKit step #7 [2/4]）
+- 失败原因: Docker BuildKit 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据期间被异常终止（收到 `graceful_stop` 信号后连接断开，随后构建器实例不可用）。该错误与 PR 代码无关，属于 CI 基础设施层面的 BuildKit 构建器运行时故障。
 
 ### 与 PR 变更的关联
-与 PR 变更**无关**。PR 新增的 Dockerfile 内容（安装编译工具链 → 编译 Python 3.9.19 → pip 安装 scann）逻辑正确，参考了同类镜像（scann 1.4.2 on 24.03-lts-sp3）的构建方式。构建在早期 `dnf install` 阶段因 BuildKit builder 容器异常终止而失败，并非 Dockerfile 指令错误导致。
+**无关。** PR 新增的 Dockerfile 中 `dnf install` 命令语法正确、包名有效，属于标准构建流程。BuildKit 构建器在 DNF 下载元数据约 38 秒时被外部原因终止，并非由此 Dockerfile 的内容触发。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-重新触发 CI 构建。Builder 实例被 `graceful_stop` 终止通常由 CI 基础设施侧的资源回收、节点调度异常或 builder 空闲超时引起，重试大概率可恢复。若重试后仍失败，需检查 CI runner 节点的 BuildKit daemon 运行状态和资源配额。
+### 方向 1（置信度: 高）
+**重新触发 CI 构建。** 这是 CI 基础设施的 BuildKit 构建器运行时故障（构建器实例在构建过程中被异常关闭），属于瞬态问题，大概率重新运行即可通过。若反复出现同类错误，需由 CI 平台运维排查 BuildKit 构建器节点（`ecs-build-docker-x86-hk`）的健康状态和资源使用情况。
 
 ## 需要进一步确认的点
-- BuildKit builder `euler_builder_20260709_224657` 被终止的具体原因：查看 CI runner（`ecs-build-docker-x86-hk`）节点的系统日志，确认是否为 OOM Killer、磁盘满、或 Docker daemon 重启导致。
-- 该 runner 节点上同时运行的其他构建任务是否存在资源争抢。
-- 若重试多次均在同一位置（`dnf install`）失败，需排查该 `dnf` 仓库源在该节点的网络可达性和稳定性。
+- BuildKit 构建器 `euler_builder_20260709_224657` 被 `graceful_stop` 终止的具体原因（如节点资源耗尽、OOM、人工干预、调度策略等），需 CI 平台运维从构建器节点日志中确认。
+- DNF 下载速度仅 77 kB/s（下载 2.8 MB 元数据耗时 37+ 秒），若为网络拥塞继发超时导致构建器被回收，建议检查 CI 节点与 openEuler 镜像仓库之间的网络状况。
+
+## 修复验证要求
+无需验证——此错误为 infra-error，与代码无关，无需 code-fixer 修改任何文件。重新触发 CI 构建即可。
