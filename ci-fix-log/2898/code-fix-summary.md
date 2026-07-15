@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施错误（infra-error）：CI Runner 节点缺少 `shunit2` 测试框架依赖，导致容器镜像的 `[Check]` 功能测试阶段脚本加载失败（`common_funs.sh:13: shunit2: No such file or directory`）。Docker 镜像的构建和推送阶段均已完成成功。
+无需代码修改 — CI 失败为基础设施问题（infra-error），CI runner 缺少 `shunit2` shell 测试框架。
 
 ## 修改的文件
-无代码修改（PR 中的所有文件 — Dockerfile、README.md、image-info.yml、meta.yml — 内容正确，无需变更）。
+无。PR 相关文件无需任何修改。
 
 ## 修复逻辑
-根据 CI 失败分析报告，失败根因为 CI 运行环境的测试框架依赖 `shunit2` 未安装，与 PR 代码变更无关。Docker 构建（`[Build]`）和推送（`[Push]`）阶段均已成功完成，失败仅发生在 CI Runner 自身的测试执行框架中。属于基础设施层面的问题，需由 CI 运维团队在 Runner 节点上安装 `shunit2`（如 `dnf install shunit2`）解决。
+CI 分析报告已明确诊断：Docker 镜像的 `[Build]` 和 `[Push]` 阶段均成功完成，失败仅发生在 `[Check]` 验证阶段，原因是 CI runner 文件系统 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 缺少 `shunit2` 这个 shell 测试框架。
+
+该失败与 PR #2898 的代码变更（新增 Go 1.25.6 Dockerfile 及更新 README/meta/image-info 条目）完全无关。`shunit2` 是 CI runner 操作系统级别的测试依赖，属于 CI 基础设施配置问题，不应通过修改 Dockerfile 或元数据文件来"修复"。
 
 ## 潜在风险
-无
+无。本次未对任何源文件做修改。
