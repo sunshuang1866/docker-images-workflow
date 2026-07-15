@@ -23,22 +23,23 @@ Dockerfile:99
   98 |     
   99 | >>> COPY entrypoint.sh tap2json.py /
  100 |     
- 101 |     ENTRYPOINT [\"/entrypoint.sh\"]
+ 101 |     ENTRYPOINT ["/entrypoint.sh"]
 --------------------
-ERROR: failed to solve: failed to compute cache key: failed to calculate checksum of ref ... "/entrypoint.sh": not found
+ERROR: failed to solve: failed to compute cache key: failed to calculate checksum of ref ...: "/entrypoint.sh": not found
 ```
 
 ### 根因定位
 - 失败位置: `Others/kselftests-virtme/1.27/24.03-lts-sp4/Dockerfile:99`
-- 失败原因: Dockerfile 中 `COPY entrypoint.sh tap2json.py /` 引用的两个辅助文件 `entrypoint.sh` 和 `tap2json.py` 未随该 PR 提交到仓库。BuildKit 在构建上下文中找不到这些文件，无法计算文件校验和，导致构建直接失败。
+- 失败原因: 新增的 Dockerfile 通过 `COPY entrypoint.sh tap2json.py /` 引用了两个辅助脚本，但这两个文件未随 Dockerfile 一起提交到仓库目录 `Others/kselftests-virtme/1.27/24.03-lts-sp4/` 中，BuildKit 在构建上下文中找不到 `entrypoint.sh`，构建失败。
 
 ### 与 PR 变更的关联
-该 PR 新增了 `24.03-lts-sp4` 版镜像的 Dockerfile，但仅提交了 Dockerfile 本身以及 README、image-info.yml、meta.yml 的条目更新。Dockerfile 第 99 行需要 COPY `entrypoint.sh` 和 `tap2json.py` 这两个脚本到镜像内，但这些文件未包含在 PR 的 diff 变更中。已有的 `22.03-lts-sp4` 版本目录中应该有同名文件，需要将它们复制/提交到新版本目录下。
+PR 直接导致了此失败。本次 PR 新增了 `Others/kselftests-virtme/1.27/24.03-lts-sp4/Dockerfile`（101 行新增），但遗漏了同一目录下 Dockerfile 所依赖的 `entrypoint.sh` 和 `tap2json.py` 两个文件。现有的 `1.27/22.03-lts-sp4/` 目录中已存在这两个文件，新目录需要同样的副本。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将 `entrypoint.sh` 和 `tap2json.py` 两个脚本文件提交到 `Others/kselftests-virtme/1.27/24.03-lts-sp4/` 目录下。直接从已有的 `22.03-lts-sp4` 版本目录复制即可，这两个文件在所有 kselftests-virtme 版本之间应当是通用的。
+将 `Others/kselftests-virtme/1.27/22.03-lts-sp4/entrypoint.sh` 和 `Others/kselftests-virtme/1.27/22.03-lts-sp4/tap2json.py` 复制到新目录 `Others/kselftests-virtme/1.27/24.03-lts-sp4/` 中，与新增的 Dockerfile 一起提交。
 
 ## 需要进一步确认的点
-- 确认 `Others/kselftests-virtme/1.27/22.03-lts-sp4/` 目录下是否存在 `entrypoint.sh` 和 `tap2json.py`，如存在则直接复制到新目录提交。
+- 确认 `1.27/22.03-lts-sp4/` 目录下是否存在 `entrypoint.sh` 和 `tap2json.py`（根据现有模式推断应该存在，但仍需验证）。
+- 确认 `entrypoint.sh` 和 `tap2json.py` 的内容是否在两个 openEuler 版本（22.03-lts-sp4 和 24.03-lts-sp4）之间完全兼容，无需版本差异化修改。
