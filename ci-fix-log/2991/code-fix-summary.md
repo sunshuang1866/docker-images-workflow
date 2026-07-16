@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。本次 CI 失败为 `infra-error`，根因是 `repo.openeuler.org` 的 openEuler-24.03-LTS-SP4 aarch64 OS 仓库在 HTTP/2 协议层面存在服务端内部错误（`INTERNAL_ERROR` err 2），导致 dnf 下载多个包（`git-core`、`gcc-c++`、`guile`）失败。
+无需代码修复。本次 CI 失败为 infra-error，根因是 `repo.openeuler.org` 仓库在 aarch64 节点上出现 HTTP/2 协议层流错误（Curl error 92），导致 `dnf install` 下载 RPM 包失败。
 
 ## 修改的文件
-无。原始 PR 代码（Dockerfile、README.md、image-info.yml、meta.yml）与本次失败无关，无需改动。
+无。PR 所有文件（Dockerfile、README.md、image-info.yml、meta.yml）内容均正确，无需修改。
 
 ## 修复逻辑
-CI 失败分析报告判定失败类型为 `infra-error`，置信度高。失败根因是 `repo.openeuler.org` 的 aarch64 OS 仓库（HTTP/2）在构建时间段内存在服务端瞬时故障，与 PR 引入的代码变更完全无关。根据任务指令要求，`infra-error` 类型的问题不做代码修改，仅记录分析结论。
+CI 失败分析报告已明确判断：此次失败与 PR 变更无关。Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 是标准依赖安装命令，语法无误。失败根因是 `repo.openeuler.org` 远端服务器在 aarch64 请求上出现 HTTP/2 流中断（INTERNAL_ERROR），属于 CI 基础设施层面的瞬时网络故障。该 Dockerfile 在其他时间段或重试后完全可能正常通过。建议直接 re-run CI job 即可。
 
 ## 潜在风险
-无。建议重试构建或等待基础设施团队修复 `repo.openeuler.org` 的 aarch64 仓库 HTTP/2 服务端问题后重新触发 CI。
+无。未对任何文件做修改。
