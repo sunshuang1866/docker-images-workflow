@@ -1,15 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败为 openEuler 官方 yum 源（`repo.openeuler.org`）在 aarch64 架构上的 HTTP/2 传输层瞬时故障，非代码问题。无需代码修复。
+无需代码修复。失败为 CI 基础设施（infra-error）问题。
 
 ## 修改的文件
-无 — 本失败为 infra-error，不涉及代码修改。
+无
 
 ## 修复逻辑
-分析报告明确指出：该 PR 仅新增了一个标准的 Dockerfile，`yum install` 命令语法正确、包名有效（仓库元数据加载成功、依赖解析通过）。失败纯粹发生在包下载传输阶段，多个 RPM 包（gcc、kernel-headers、perl-MIME-Base64、vim-common）遭遇 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），最终 `vim-common` 耗尽所有镜像源重试后仍无法下载。与此 PR 的代码变更无关。
+CI 失败分析报告确认此为 `infra-error`：aarch64 构建节点在通过 `yum` 从 `repo.openeuler.org` 下载 RPM 依赖包时，遭遇 `repo.openeuler.org` 服务端的 HTTP/2 帧层错误（Curl error 92: `INTERNAL_ERROR`）和 SSL 连接中断（Curl error 56: `SSL_ERROR_SYSCALL`），最终 `vim-common` 包在所有镜像源重试失败后导致 yum 事务中断。
 
-处理方式：在 Jenkins 上重新触发 aarch64 构建 job，等待镜像源恢复后重试即可。
+`Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11` 的 `RUN yum install -y ...` 步骤语法正确、依赖声明完整，与 PR 改动无关。这是一个 openEuler 官方仓库的暂时性服务端基础设施问题，不受 PR 代码控制。
+
+建议重新触发 CI 构建（retry），网络恢复后大概率可通过。
 
 ## 潜在风险
 无
