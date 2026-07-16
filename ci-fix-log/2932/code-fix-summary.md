@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error）：BuildKit builder 容器在创建阶段因 Docker daemon 存储驱动瞬时异常而启动失败（`Could not find the file / in container`），此时尚未执行任何 Dockerfile 构建步骤。
+无需代码修改。CI 失败为 Docker daemon / BuildKit 基础设施瞬时故障（`Error response from daemon: Could not find the file /`），发生在 BuildKit 内部容器创建阶段，与 PR 的 Dockerfile 及元数据变更无关。
 
 ## 修改的文件
-无（未修改任何文件）
+无（infra-error，无需修改任何代码文件）
 
 ## 修复逻辑
-CI 分析报告明确指出此失败类型为 `infra-error`，与 PR 变更无关。失败发生在 `[internal] booting buildkit` 阶段，属于 Docker daemon 与底层存储驱动（overlay2/devicemapper）之间的瞬时状态不一致导致。PR 新增的 Dockerfile 及元数据文件内容正确，无需改动。
-
-建议操作：重新触发 CI（retry/re-run）。
+失败根因是 Docker daemon 在创建 BuildKit builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 时报告 `Could not find the file /`，这通常是 overlay2 存储驱动状态不一致或容器文件系统挂载异常导致的瞬时故障。错误发生在 Dockerfile 构建步骤执行之前（`[internal] booting buildkit`），此时尚未拉取 `openeuler/openeuler:24.03-lts-sp4` 基础镜像，更未执行任何 RUN 指令。PR 新增的 Dockerfile 和元数据文件内容正常，无需修改。建议重试 CI 构建。
 
 ## 潜在风险
 无
