@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败类型为 `infra-error`，无需代码修改。PR #2790 仅更新了根级 `README.md`（文档变更），但 CI 流水线错误地将其路由到了应用市场（appstore）发布规范校验流水线，导致 `eulerpublisher` 工具报告 `[Path Error]`。
+无需代码修改 —— CI 失败为 `eulerpublisher` 工具缺陷，PR 代码本身无问题。
 
 ## 修改的文件
-无。该问题属于 CI 基础设施层面的流水线路由配置问题，不涉及源代码缺陷。
+无
 
 ## 修复逻辑
-分析报告明确指出失败类型为 `infra-error`，置信度中等。根因是 CI 流水线将纯文档类 PR 误触发至应用市场发布检查，而非 `README.md` 内容本身有错误。PR 的文档变更（更新支持的镜像 Tag 列表）是合法的维护操作。需要修复的是 CI 流水线的触发条件配置——使其仅对包含 `meta.yml`、`Dockerfile` 等构建文件的 PR 触发 appstore 检查，而非对所有 PR 触发。
+CI 的 appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py`）在检测到 PR 修改了仓库根目录的 `README.md` 后，将其纳入 appstore 镜像路径校验，但根目录 `README.md` 是仓库级文档而非 appstore 镜像文件，不符合 `{image-version}/{os-version}/Dockerfile` 的 appstore 路径规范，导致路径校验误报失败。此失败与 PR 的具体改动内容无关，属于 CI 基础设施（`eulerpublisher` 工具）的缺陷——该工具应对仓库根目录文件（如 `README.md`、`README.en.md`）排除在 appstore 镜像路径校验之外。
+
+PR 代码（`README.md`）本身正确无误，无需修改。
 
 ## 潜在风险
-无。未对任何源代码文件进行修改。
+无。此摘要不涉及任何代码修改。
