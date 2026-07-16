@@ -3,18 +3,15 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 构建器启动失败
-- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, docker-container driver
+- 新模式标题: BuildKit容器创建失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
 
 ### 直接错误
 ```
-euler_builder_20260709_205700
-#0 building with "euler_builder_20260709_205700" instance using docker-container driver
-
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -24,25 +21,27 @@ euler_builder_20260709_205700
  > [internal] booting buildkit:
 ------
 ERROR: Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000
-euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: CI 构建环境（ecs-build-docker-x86-hk），buildx 构建器初始化阶段（`[internal] booting buildkit`）
-- 失败原因: Docker 守护进程（daemon）在创建 buildx 构建器容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，尝试访问该容器的文件系统时失败，报 `Could not find the file / in container`。此错误发生在 BuildKit 启动阶段，远早于 PR Dockerfile 中任何指令的执行——Dockerfile 的 `RUN dnf update` 等步骤尚未开始。
+- 失败位置: 无（未进入构建阶段，BuildKit 容器启动阶段即失败）
+- 失败原因: Docker daemon 在启动 `docker-container` 驱动的 buildx builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 时，因 daemon 内部状态异常无法完成容器文件的查找（`Could not find the file / in container`），导致 BuildKit 引导失败，构建流程未真正启动。
 
 ### 与 PR 变更的关联
-**无关。** PR 的变更仅限于新增一个 glibc Dockerfile（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`）及三个元数据文件的条目追加（`README.md`、`image-info.yml`、`meta.yml`）。这些变更不涉及任何 CI 构建配置、构建工具链或基础设施脚本。错误发生在 buildx 构建器容器初始化的基础设施层，与 PR 代码内容无任何关联。
+与 PR 变更无关。PR 新增的 Dockerfile（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`）在 CI 的镜像规格预检阶段已通过（日志中明确记录 `The image specification check for releasing on appstore has passed`）。失败发生在 BuildKit 基础设施层面——`moby/buildkit:buildx-stable-1` 镜像拉取成功后，Docker daemon 无法为 buildx builder 创建容器。整个构建的 Dockerfile 编译步骤从未被触发（日志中无任何 `RUN`、`FROM` 构建步骤输出）。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**buildx 构建器残留/冲突**。日志中"清理缓存"步骤显示构建节点上已有 1 个运行中的容器（`Containers: 1 active`）和 14.85GB 的 Build Volume，清理完成后立即创建新构建器 `euler_builder_20260709_205700` 便报错。推测前次构建的 buildx 构建器及其关联资源未完全释放，导致 Docker daemon 在新构建器容器创建后无法正常操作其文件系统。重试 CI Job 大概率可以自动恢复。
+### 方向 1（置信度: 高）
+由 CI 运维团队处理。这是 Jenkins 构建节点 `ecs-build-docker-x86-hk` 上的 Docker daemon 或 buildx 状态异常导致的临时性基础设施故障。常见原因包括：
+- Docker daemon 进程状态不健康（需重启 daemon）
+- buildx builder 实例残留导致冲突（需 `docker buildx rm euler_builder_*` 清理后重试）
+- 节点磁盘空间或 inode 耗尽
+- Docker 版本与 `moby/buildkit:buildx-stable-1` 镜像不兼容
 
-### 方向 2（置信度: 低）
-**Docker daemon / containerd 临时异常**。构建节点（`ecs-build-docker-x86-hk`）上的 Docker 运行环境出现瞬时故障，导致对容器文件系统的操作返回异常错误。同样建议重试。
+**该问题与 PR 代码无关，Code Fixer 无需处理，建议在 CI 层面重试构建。**
 
 ## 需要进一步确认的点
-1. 登录构建节点 `ecs-build-docker-x86-hk`，检查 Docker daemon 日志（`journalctl -u docker`），确认 `buildx_buildkit_euler_builder_20260709_2057000` 容器创建后的具体错误上下文。
-2. 检查是否存在孤儿 buildx 构建器：`docker buildx ls`，确认是否需要手动清理残留构建器实例。
-3. 若重试后仍失败，需排查节点磁盘空间（14.85GB Build Volume 占用）是否导致 overlay/containerd snapshotter 异常。
+- 确认构建节点 `ecs-build-docker-x86-hk` 的 Docker daemon 日志，查看 `Could not find the file /` 的系统级根因（daemon 日志中是否有 cgroup、存储驱动或 overlayfs 相关异常）。
+- 检查是否存在残留的 buildx builder 容器 `buildx_buildkit_euler_builder_*` 占用了相同名称或资源。
+- 确认同一时间窗口内其他 PR 的 CI 构建是否也出现同类错误，以判断是单点故障还是系统性故障。
