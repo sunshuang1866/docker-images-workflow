@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 容器启动失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, Error response from daemon, container
+- 新模式标题: BuildKit启动失败
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
 
@@ -25,31 +25,27 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker buildx 基础设施（`[internal] booting buildkit` 阶段），非 PR 代码文件
-- 失败原因: Docker 守护进程在创建 buildx buildkit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法找到该容器内的 `/` 路径（容器的根文件系统异常或容器在初始化阶段即损坏），导致 buildkit 会话启动失败。此错误发生在 Dockerfile 指令执行之前的 buildkit 引导阶段，与 PR 提交的 Dockerfile 内容无关。
+- 失败位置: `/home/jenkins/agent-working-dir/workspace/multiarch/openeuler/x86-64/openeuler-docker-images`（CI runner, x86-64 架构）
+- 失败原因: Docker BuildKit builder 容器（`buildx_buildkit_euler_builder_20260709_2057000`）在 CI runner 上启动后，Docker daemon 无法访问其根文件系统 `/`，导致 buildx 实例创建失败。实际的 Dockerfile 构建过程从未开始执行。
 
 ### 与 PR 变更的关联
-无关联。PR #2932 仅新增了如下文件：
-- `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`（新增 glibc 2.42 的构建定义）
-- `Others/glibc/README.md`（新增表格行）
-- `Others/glibc/doc/image-info.yml`（新增表格行）
-- `Others/glibc/meta.yml`（新增 meta 条目）
-
-这些变更均在 CI 前置检查阶段通过了镜像规范校验（日志显示 `The image specification check for releasing on appstore has passed`），失败发生在后续的 buildx 容器创建环节，属于 Docker 引擎/CI runner 层面的故障，PR 代码变更不可能引发此类错误。
+**与 PR 代码变更无关。** 证据如下：
+1. CI 预检阶段的 `eulerpublisher` 镜像规范检查已经通过（日志：`The image specification check for releasing on appstore has passed.`），证明新增的 Dockerfile、meta.yml、image-info.yml、README.md 均通过格式校验。
+2. 错误发生在 buildx builder 实例的**内部基础设施层**（`[internal] booting buildkit`），此时 `moby/buildkit:buildx-stable-1` 镜像已拉取成功、容器已创建，但 Docker daemon 在尝试与容器交互时失败。
+3. PR 新增的 Dockerfile 内容从未被送往 BuildKit 进行解析和执行。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-这是 CI 基础设施故障，Code Fixer 无需对 PR 代码做任何修改。建议运维排查 CI runner `ecs-build-docker-x86-hk` 或该节点上的 Docker 守护进程状态，检查以下可能原因：
-- Docker 守护进程或 buildkit 版本存在 bug，导致容器根文件系统挂载异常
-- 节点磁盘空间不足或 inode 耗尽，导致容器创建时 overlayfs 挂载失败
-- Docker 数据目录（`/var/lib/docker`）存在文件系统损坏
-- buildkit 镜像 `moby/buildkit:buildx-stable-1` 拉取不完整或损坏
+### 方向 1（置信度: 低）
+CI runner（`ecs-build-docker-x86-hk`）上的 Docker daemon 状态异常或 buildx builder 实例残留。建议：
+- 重试 CI job（重新触发构建流水线），排除一次性的 Docker daemon 临时故障。
+- 若重试后仍然失败，检查 runner 的 Docker daemon 日志（`journalctl -u docker`），确认存储驱动（overlay2/devicemapper）是否正常，确认 `buildx_buildkit_*` 容器是否有残留未清理的僵尸容器。
 
-解决后重试构建即可。
+### 方向 2（可选，置信度: 低）
+若重试后 BuildKit 成功启动但构建本身失败，则可能需要检查 Dockerfile 中的构建依赖是否完整（如 glibc 编译可能需要 `texinfo`、`gawk`、`python3-devel` 等包），但当前日志不包含任何 Dockerfile 构建阶段的输出，无法判断。
 
 ## 需要进一步确认的点
-- CI runner 节点的磁盘空间和 inode 使用情况
-- `/var/lib/docker` 的文件系统健康状态
-- 该节点上同一时段其他构建任务是否也出现相同错误（可判断是否为节点级别故障）
-- Docker daemon 日志中是否有更详细的错误信息（如 overlay2 挂载失败、storage driver 报错等）
+1. **获取 CI runner 的 Docker daemon 日志**：确认 `buildx_buildkit_euler_builder_20260709_2057000` 容器为何无法使用根文件系统（可能是 overlay 挂载失败、存储驱动 bug、或容器创建后立即崩溃）。
+2. **确认 runner 磁盘空间和 inode 状态**：`docker system df` 显示存在 1 个 14.85GB 的 Local Volume，需确认磁盘是否接近满载。
+3. **检查是否有残留的 buildx builder 实例**：在 runner 上运行 `docker buildx ls`，清理旧的 builder（`docker buildx rm`）后重试。
+4. **重试构建**：若一次性故障，重新触发 CI 即可通过；若持续失败，需要 runner 管理员介入排查 Docker 环境。
