@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是 `eulerpublisher` 工具内部路径校验逻辑缺陷导致的误报（infra-error），与本 PR 的文档变更无关。
+无需代码修改 — CI 失败属于基础设施错误（infra-error），由 `eulerpublisher` 预检工具的路径归一化缺陷导致，与 PR 文档变更内容无关。
 
 ## 修改的文件
-无。PR 仅修改了 `README.md` 更新基础镜像 tags 列表，文件内容本身没有问题。
+无。`README.md` 的内容变更（更新基础镜像可用 tags 列表）是正确的，无需修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：CI 工具 `eulerpublisher` 的 `update.py` 在 appstore 路径校验时，`git diff` 输出的相对路径 `README.md`（无前导 `/`）与校验器预期的绝对路径 `/README.md`（含前导 `/`）格式不一致，导致根目录文件被误判为"路径错误"。`README.md` 实际位于仓库根目录，路径完全正确。此问题属于 CI 基础设施/工具侧缺陷，应由基础设施团队修复 `eulerpublisher` 的路径归一化逻辑，不在本 PR 范围内。
+CI 分析报告明确指出失败类型为 `infra-error`。根因是 `eulerpublisher/update/container/app/update.py` 中的路径匹配逻辑未对路径做归一化处理：CI 预检工具期望路径格式为 `/README.md`（带前导 `/`），而 git diff 输出为 `README.md`（无前导 `/`），导致路径格式匹配失败。该缺陷存在于 CI 基础设施代码中（非本仓库管辖范围），需由 CI 平台维护者在 `eulerpublisher` 仓库中修复 `update.py` 的路径比较逻辑。
 
 ## 潜在风险
-无。本摘要未对任何源码文件做修改。
+无。PR 本身的文档变更（更新镜像 tags 列表）内容有效，不会引入任何风险。
