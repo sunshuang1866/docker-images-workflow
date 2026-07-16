@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。本次 CI 失败为 infra-error，根因是 `repo.openeuler.org` 仓库在 aarch64 节点上出现 HTTP/2 协议层流错误（Curl error 92），导致 `dnf install` 下载 RPM 包失败。
+无需代码修复。CI 失败为 infra-error 类型，由 openEuler 软件源服务器 `repo.openeuler.org` 在 aarch64 架构上出现 HTTP/2 流层瞬时故障（Curl error 92: INTERNAL_ERROR）导致 `dnf install` 下载 guile 等 RPM 包失败。该失败与 PR #2991 的代码变更无关。
 
 ## 修改的文件
-无。PR 所有文件（Dockerfile、README.md、image-info.yml、meta.yml）内容均正确，无需修改。
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-CI 失败分析报告已明确判断：此次失败与 PR 变更无关。Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 是标准依赖安装命令，语法无误。失败根因是 `repo.openeuler.org` 远端服务器在 aarch64 请求上出现 HTTP/2 流中断（INTERNAL_ERROR），属于 CI 基础设施层面的瞬时网络故障。该 Dockerfile 在其他时间段或重试后完全可能正常通过。建议直接 re-run CI job 即可。
+CI 分析报告确认失败类型为 infra-error，置信度为高。PR 变更仅添加了 vvenc 1.14.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件，Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake` 命令语法正确、包名有效。失败根因是软件源服务器端的 HTTP/2 协议故障，属于 CI 基础设施/网络瞬时故障。重新触发 CI 构建即可通过。
 
 ## 潜在风险
-无。未对任何文件做修改。
+无
