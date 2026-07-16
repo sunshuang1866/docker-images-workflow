@@ -4,9 +4,9 @@
 - PR: #2900 — chore(httpd): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39（CI工具依赖缺失）
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: CI缺shunit2依赖
+- 新模式症状关键词: shunit2: file not found, common_funs.sh, eulerpublisher, Check
 
 ## 根因分析
 
@@ -20,24 +20,23 @@
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
 Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI runner 上的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 测试框架 `eulerpublisher` 在 [Check] 阶段执行 `common_funs.sh` 时，尝试 `source shunit2` 但未找到该 Shell 测试库文件。Docker 镜像构建（7 个步骤全部 DONE）和推送（[Push] finished）均已完成成功，失败仅发生在测试框架初始化阶段，与 PR 代码变更无关。
+- 失败位置: CI runner 的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`（Check 测试阶段）
+- 失败原因: CI 检查框架 `eulerpublisher` 的 `common_funs.sh` 第 13 行尝试 source `shunit2`（Shell 单元测试框架），但该依赖在 CI runner 上未安装/不在 PATH 中，导致测试框架无法初始化，所有 Check Items 均未执行，check 表为空
 
 ### 与 PR 变更的关联
-**无关。** PR 新增的 Dockerfile（httpd 2.4.66 on openEuler 24.03-LTS-SP4）、httpd-foreground 脚本及元数据文件（README.md、image-info.yml、meta.yml）均不涉及 CI 测试框架的配置或依赖。构建阶段全部成功完成，失败由 CI runner 缺少 `shunit2` 库引起，属于基础设施问题。
+**与 PR 变更无关。** Docker 构建 7 个步骤全部成功（`#10 DONE 41.6s` 编译+安装、`#11 DONE 0.1s` 配置、`#12 DONE 0.0s` COPY、`#13 DONE 0.1s` chmod），镜像也已成功构建并推送至仓库（`#14 DONE 31.3s`，`[Build] finished`，`[Push] finished`）。失败仅发生在 CI 自有的 [Check] 测试阶段，原因是 CI runner 环境缺少 `shunit2`，与 PR 新增的 httpd 2.4.66 24.03-lts-sp4 Dockerfile 无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 环境中安装 `shunit2` Shell 测试框架，或确保 `eulerpublisher` 容器测试套件的依赖路径正确配置。此修复由 CI 基础设施团队执行，Code Fixer 无需处理 PR 代码。
+CI 管理员需在 CI runner 上安装 `shunit2` 包，使其可在 `PATH` 中被 `common_funs.sh` 的 `source` 命令找到。`shunit2` 是一个 Shell 单元测试框架，通常可通过系统包管理器安装（如 `yum install shunit2` 或 `dnf install shunit2`）。安装后无需修改任何代码或 Dockerfile。
 
 ## 需要进一步确认的点
-- 确认 CI runner 上 `eulerpublisher` 测试框架的设计依赖列表中是否包含 `shunit2`，以及该 runner 节点是否遗漏了该包的安装。
-- 确认同类镜像（如 httpd 2.4.66 的 SP2 版本或其他应用的 SP4 版本）在同环境的 [Check] 步骤是否也失败，以排除 runner 特定问题。
-
-## 修复验证要求
-无需验证——此失败与 PR 代码无关，属于 CI 基础设施问题。
+- `shunit2` 在 openEuler 24.03-LTS-SP4 上的包名及可用性（是否为 `shunit2` 或 `shunit`）
+- 该 CI runner 上是否之前已安装 `shunit2` 但被误移除，或是否为新增 runner 未完成初始化
+- 其他同批次 PR 的 CI Check 是否也报同样错误（若普遍存在则进一步确认为 infra 问题）
