@@ -4,7 +4,7 @@
 - PR: #2893 — chore(bind9): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39（CI工具依赖缺失）
+- 知识库匹配: 模式39
 - 新模式标题: (不适用)
 - 新模式症状关键词: (不适用)
 
@@ -20,23 +20,31 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 容器测试框架的 Shell 脚本尝试通过 `.` (source) 命令加载 `shunit2` 测试库，但该文件在 CI worker 环境中不存在，导致 [Check] 阶段的容器验证测试无法执行。
+- 失败位置: CI 环境的 Check 阶段（`eulerpublisher` 测试框架）
+- 失败原因: CI runner 上缺少 `shunit2` shell 测试框架，导致 Check 阶段的测试脚本 `common_funs.sh` 无法执行，容器功能检查直接失败。
+
+Docker 镜像构建和推送均已成功完成：
+- `[Build] finished`（编译 422/422 目标全部通过）
+- `[Push] finished`（镜像已推送至 `openeulertest/bind9:9.21.23-oe2403sp4-aarch64`）
+- 所有 Dockerfile 层（#9 编译、#10 用户创建、#11 配置拷贝、#12 权限设置、#13 导出推送）均正常完成
+
+失败仅发生在构建/推送之后的 Check 验证阶段，且错误出现在测试框架初始化步骤（`source shunit2`），与容器镜像内容无关。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。此次 PR 仅新增了 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、named.conf 配置文件、meta.yml 条目及 README/image-info.yml 文档更新。CI 日志清楚显示：
-- Docker 镜像**构建成功**：全部 422 个 C 编译单元通过编译，所有二进制文件完成链接，`meson install` 正常完成（`#9 DONE 41.4s`）。
-- Docker 镜像**推送成功**：`[Push] finished`，镜像已推送到 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`。
-- 失败仅发生在 CI 流水线的 **[Check] 后置验证阶段**，该阶段依赖的 `shunit2` Shell 测试库在 worker 环境中缺失，属于 CI 基础设施问题。
+**与 PR 无关。** PR 变更仅限于新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、配置文件、以及配套的元数据更新（README.md、image-info.yml、meta.yml）。Docker 构建完全成功，失败点在 CI 测试基础设施层。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-该失败为 CI 基础设施问题（`shunit2` 缺失），与 PR 代码变更无关，无需修改任何 Dockerfile 或构建逻辑。应由 CI 运维团队确认 aarch64 worker 节点上 `shunit2` 测试框架是否已正确安装，或检查 `eulerpublisher` 工具是否正确部署了其运行时依赖。
+CI 基础设施问题，需在 CI runner 环境中安装 `shunit2` 包。此问题与 PR 代码变更完全无关，Code Fixer 无需对 Dockerfile 或任何仓库文件做任何修改。
+
+### 方向 2（置信度: 低）
+如果 `shunit2` 已安装但路径配置不正确，需检查 CI runner 上 `PATH` 环境变量或 `SHUNIT2_HOME` 配置，确保 `common_funs.sh` 能正确 source 到 `shunit2`。
 
 ## 需要进一步确认的点
-- 确认 aarch64 CI worker 节点上 `shunit2` 的预期安装路径，以及该依赖是否在最近的 CI 环境更新中被遗漏。
-- 确认 [Check] 阶段是否为可跳过的非强制门禁——若构建和推送均已成功，该基础设施错误不应阻塞 PR 合并。
+1. 确认 CI runner 上 `shunit2` 是否已安装（`rpm -qa | grep shunit2` 或 `which shunit2`）
+2. 确认 `shunit2` 的安装路径是否在 shell 的 source 搜索路径中
+3. 确认该 Check 阶段是否在所有同类型 PR 上都失败（如果是，则为 CI 环境全局问题，需 CI 管理员修复）
 
 ## 修复验证要求
-（不适用——该失败为 infra-error，无需 code-fixer 介入）
+不适用。此失败为 `infra-error`（CI 基础设施问题），不涉及对 PR 代码或 Dockerfile 的修改，Code Fixer 无需处理。
