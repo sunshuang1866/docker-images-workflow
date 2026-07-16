@@ -1,13 +1,21 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施故障（infra-error）：Docker BuildKit 构建容器在 CI 节点 `ecs-build-docker-x86-hk` 上引导失败（`Could not find the file / in container`），PR 中 `docker build` 过程尚未开始。
+无需代码修改 — CI 失败为基础设施问题（infra-error），非 PR 代码缺陷。
 
 ## 修改的文件
-无。所有 PR 变更文件（Dockerfile、README.md、image-info.yml、meta.yml）均无需修改。
+无
 
 ## 修复逻辑
-CI 分析报告置信度为"高"，判断此失败与 PR 代码变更无关。失败发生在 `[internal] booting buildkit` 阶段，属于 Docker 守护进程/运行环境异常。建议由 CI 运维人员检查节点 `ecs-build-docker-x86-hk` 的 Docker 守护进程状态、存储驱动、残留容器等，或重试 CI / 切换构建节点。
+CI 分析报告确认：失败发生在 Docker BuildKit 启动阶段（`Could not find the file / in container`），在 PR 代码所涉及的 Docker 镜像构建步骤**之前**就已中断。该错误属于 CI 基础设施层面（Docker daemon / buildx builder 实例 / 存储驱动异常），与 PR 的 4 个文件变更无任何因果关系。
+
+PR 的所有变更文件经检查均正确、一致：
+- `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` — 格式与其他版本 Dockerfile 一致，语法正确
+- `Others/glibc/README.md` — 新增条目与其他行格式一致
+- `Others/glibc/doc/image-info.yml` — 新增条目与其他行格式一致
+- `Others/glibc/meta.yml` — 新增映射结构正确
+
+建议的修复方式是重新触发 CI 构建（或在 CI runner 上清理残留的 buildx builder 实例后重试），无需修改任何代码。
 
 ## 潜在风险
-无。未对代码做任何修改。
+无
