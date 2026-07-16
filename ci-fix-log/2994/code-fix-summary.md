@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败为基础设施故障（infra-error），无需代码修改。直接重试构建即可。
+无需代码修复。此 CI 失败是基础设施问题（infra-error），BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 构建执行 `dnf install` 约 38 秒时被优雅关闭（`graceful_stop`），导致构建连接断开（EOF），与 PR 代码变更无关。
 
 ## 修改的文件
-无。本次 CI 失败由 BuildKit 构建器 `euler_builder_20260709_224657` 被外部 `graceful_stop` 终止导致，属于 Jenkins 构建节点 `ecs-build-docker-x86-hk` 上的瞬态基础设施问题，与 PR 变更（新增 openEuler 24.03-LTS-SP4 的 Dockerfile）无关。
+无（未修改任何文件）
 
 ## 修复逻辑
-分析报告置信度高，根因定位为 BuildKit 守护进程被外部终止（`closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"`）。PR 仅新增了一个标准结构的 Dockerfile，未引入任何可能导致构建器崩溃的代码。无需修改任何源码文件，对该 PR 重新触发 CI 即可。
+分析报告明确指出失败类型为 `infra-error`，根因是 CI 基础设施层面的 BuildKit 构建器生命周期管理问题（构建器在构建进行中被意外终止），而非 PR 代码问题。PR 仅新增了 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套元数据，Dockerfile 语法和逻辑均正常。应重新触发 CI 流水线（re-run）重试构建。
 
 ## 潜在风险
-无。本次未修改任何代码。
+无。如果该问题持续复现，需排查 BuildKit builder（`docker-container` driver）的运行环境稳定性（如 runner 节点资源耗尽、OOM、构建器超时回收策略等）。
