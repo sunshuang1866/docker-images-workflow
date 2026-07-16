@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是由 CI appstore 路径校验工具（`eulerpublisher/update/container/app/update.py`）的 bug 导致的 infrastructure error，而非 `README.md` 内容有问题。
+CI 基础设施缺陷（infra-error），无需代码修改。
 
 ## 修改的文件
-无。`README.md` 内容正确，无需修改。
+无
 
 ## 修复逻辑
-CI 失败的直接原因是 appstore 路径校验工具将 git diff 输出的相对路径 `README.md` 与内部约定的绝对路径格式 `/README.md` 做精确字符串比较导致不匹配。根目录 `README.md` 不属于应用镜像发布路径范畴（应用镜像在 `Bigdata/`、`AI/` 等子目录下），不应被 appstore 路径规范检查覆盖。
+CI 分析报告指出失败原因是 `eulerpublisher/update/container/app/update.py`（CI 编排工具）在路径比对时存在前导 `/` 归一化缺陷：从 `git diff` 提取的根目录文件路径为 `README.md`（无前导 `/`），而 appstore 校验规则期望 `/README.md`（带前导 `/`），字符串不匹配导致误报 `FAILURE`。
 
-该 bug 位于 `eulerpublisher/update/container/app/update.py` 第 273 行附近，不在本 PR 修改范围（`README.md`）内。需要由 CI 工具维护者在 `update.py` 中修复路径比较逻辑：
-- 在路径比较前统一规范化路径格式（统一添加或移除前导 `/`）
-- 或增加对仓库根目录级别非镜像文件的跳过过滤逻辑
+该问题发生在实际构建之前的预检阶段，PR 仅修改了 `README.md`（纯文档变更），不涉及任何 Dockerfile 或镜像构建文件。失败与 PR 的代码改动无关，属于 CI 基础设施工具的 bug，应在 `eulerpublisher` 仓库中修复，不在本仓库范围内。本仓库无需任何代码修改。
 
 ## 潜在风险
-无。`README.md` 未做任何修改，不影响任何功能。
+无
