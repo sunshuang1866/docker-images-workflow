@@ -6,7 +6,7 @@
 - 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
 
 ## 根因分析
 
@@ -22,17 +22,19 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: 在 `dnf install` 下载 258 个 RPM 包（总计 914 MB）的过程中，openEuler 24.03-LTS-SP4 仓库镜像站多次出现 HTTP/2 流错误（Curl error 92），导致 `gcc-c++` 包（13 MB）在所有已配置的镜像源上均下载失败，最终 `dnf` 因无可用镜像而报错退出。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-15`（`dnf install` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库镜像（`repo.****.org`）在 CI 构建期间出现 HTTP/2 协议层错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），导致多个 RPM 包（`cmake-data`、`git-core`、`gcc-c++`）下载均出现连接异常。其中 `gcc-c++` 包经历两次镜像重试均失败，最终 `dnf install` 报错退出。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** 该 PR 仅新增了 `grADS 2.2.3` 在 `openEuler 24.03-LTS-SP4` 上的 Dockerfile（含 `dnf install` 构建依赖 30 行）及配套的 README、image-info.yml、meta.yml 元数据更新。Dockerfile 内容语法正确、依赖声明完整。构建失败的原因是 CI 运行环境中 openEuler 24.03-LTS-SP4 的 RPM 仓库镜像站发生了间歇性 HTTP/2 传输错误，属于 CI 基础设施层面的瞬时网络故障。日志中可见 `cmake-data` 和 `git-core` 两个包在初始下载失败后通过镜像重试成功下载，仅 `gcc-c++` 因反复失败而最终耗尽所有镜像。
+**与 PR 代码变更无关。** PR 仅新增了一个 GrADS Dockerfile 及配套的 README、meta.yml、image-info.yml 元数据文件。Dockerfile 中的 `dnf install` 命令语法正确，依赖包列表完整。失败纯粹由 openEuler 24.03-LTS-SP4 仓库镜像的临时网络故障（HTTP/2 流错误）导致，属于 CI 基础设施问题。
+
+值得注意的是，其他 RPM 包（如 `gcc` 34MB、`git-core` 11MB、`cmake` 16MB）均下载成功，仅有少部分包受 HTTP/2 流错误影响，说明故障是间歇性的而非仓库完全不可用。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，触发 CI 重试即可。** 该失败属于 openEuler 24.03-LTS-SP4 仓库镜像站的瞬时 HTTP/2 传输故障（Curl error 92），非 PR 代码问题。在 PR 中评论触发 CI 重新构建（recheck / retest），仓库镜像站在网络稳定时通常可正常提供服务。
+**重新触发 CI 构建。** 这是典型的镜像仓库临时网络波动导致的 infra-error，Code Fixer 无需做任何代码修改。在 CI 中 re-run 该 job，大概率能成功。（如多次重试仍失败，则需要排查 openEuler 24.03-LTS-SP4 仓库镜像的 HTTP/2 配置或换用其他镜像源。）
 
 ## 需要进一步确认的点
-- 如果多次重试后仍持续失败，需要排查 openEuler 24.03-LTS-SP4 仓库镜像站的 HTTP/2 配置稳定性，或考虑在 CI 构建环境中对 `dnf` 配置添加 `retries` 及 `timeout` 参数以增强对瞬时网络波动的容忍度。
-- 确认 CI 构建节点到 `repo.****.org` 的网络链路是否稳定（是否存在代理或中间层导致 HTTP/2 流被异常关闭）。
+- 确认 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）在构建时段是否存在已知的 HTTP/2 服务端异常
+- 如多次重试仍失败，需确认是否为该仓库镜像对特定 RPM 文件（`gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm`）的 HTTP/2 服务存在持久性问题
