@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障（BuildKit 容器引导失败），无需代码修改。
+CI 基础设施故障，无需代码修改。
 
 ## 修改的文件
-无（infra-error，与 PR 代码变更无关）
+无。
 
 ## 修复逻辑
-CI 分析报告明确指出失败发生在 Docker BuildKit 引导阶段（`[internal] booting buildkit`），报错 `Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`。此时构建流程尚未进入任何 Dockerfile 指令执行环节，PR 新增/修改的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）不会触发或影响 Docker BuildKit 容器运行时层面的错误。
-
-建议操作：在 CI 系统中对该 job 执行 **Rebuild（重跑）**。若连续多次重跑均复现相同错误，则需检查 CI runner 节点（`ecs-build-docker-x86-hk`）上的 Docker 版本、BuildKit 版本、存储驱动状态或磁盘可用空间。
+CI 失败为 `infra-error`，错误发生在 BuildKit builder 容器启动阶段（`moby/buildkit:buildx-stable-1` 容器创建时 containerd 报错 `Could not find the file / in container`），早于 Dockerfile 被解析或执行的任何步骤。该错误与 PR #2932 的代码变更无关（PR 仅新增 glibc 2.42 的 Dockerfile 及更新元数据文件）。此类问题为 Docker daemon / containerd 在 CI runner 节点 `ecs-build-docker-x86-hk` 上的瞬时异常，可通过 CI 重试恢复。
 
 ## 潜在风险
-无（未修改任何代码）
+无。
