@@ -4,9 +4,9 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: CI测试框架缺失
-- 新模式症状关键词: shunit2, No such file or directory, eulerpublisher, Check test failed, common_funs.sh
+- 知识库匹配: 模式39（CI工具依赖缺失，症状有别但根因同类）
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
@@ -20,22 +20,26 @@
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
 Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher` CI 测试框架的 `common_funs.sh:13`（Check 阶段）
-- 失败原因: CI runner 环境中缺少 `shunit2` 单元测试框架，导致 `eulerpublisher` 在镜像检查（[Check]）阶段无法执行测试校验脚本。Docker 镜像的构建和推送均已成功完成（`[Build] finished`、`[Push] finished`），仅 Check 步骤因 CI 基础设施问题而失败。
+- 失败位置: CI [Check] 阶段，`eulerpublisher` 测试框架文件 `common_funs.sh:13`
+- 失败原因: CI runner 上缺少 `shunit2` shell 测试框架，`common_funs.sh` 在第13行尝试加载 `shunit2` 时失败，导致整个 [Check] 阶段崩溃，所有检查项均未实际执行（检查结果表为空）
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 新增了 PostgreSQL 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和 entrypoint.sh，Docker 构建阶段（#8）全部编译链接步骤均正常通过，镜像导出和推送（#11）也成功完成。失败完全发生在 `eulerpublisher` 测试框架执行 `common_funs.sh` 时，因 CI runner 未安装 `shunit2` 而中断。
+**与 PR 完全无关。** PR 变更仅新增了 PostgreSQL 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和 entrypoint.sh，以及更新 README.md 和 meta.yml。Docker 镜像构建和推送均已成功完成（日志中可见 `[Build] finished`、`[Push] finished` 以及 `#11 DONE 58.0s` 推送完成）。编译阶段（`make`、`make install`）无任何错误。失败仅发生在构建后的 CI 测试验证阶段，原因是 CI 运行环境中缺少 `shunit2` 测试框架。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI runner 环境缺少 `shunit2` 包。需要在 CI runner 上安装 `shunit2`（openEuler 上可通过 `dnf install shunit2` 安装），或确保 `eulerpublisher` 的依赖项在 CI 环境中完整。此问题属于 CI 基础设施配置问题，Code Fixer 无需对 PR 代码做任何修改。
+CI 管理员需在 `ecs-build-docker-x86_64` runner 上安装 `shunit2` 测试框架。`shunit2` 是 `eulerpublisher` 容器测试依赖，用于执行镜像的功能验证。安装后重新触发 CI 即可通过。
+
+### 方向 2（置信度: 低）
+若 `shunit2` 仅在部分 runner 上缺失，CI 调度配置可能需要调整，确保 postgres 镜像的 Check 阶段被调度到已安装 `shunit2` 的 runner 上。
 
 ## 需要进一步确认的点
-- 该 Check 阶段的失败是否在所有 openEuler 24.03-LTS-SP4 CI runner 上都复现（即 `shunit2` 是否普遍缺失），还是仅限当前 runner（如 `ecs-build-docker-x86-64-01-sp` 等特定节点）
-- `shunit2` 在 openEuler 24.03-LTS-SP4 仓库中的确切包名（可能为 `shunit2` 或 `shUnit2`）
-- 是否需要同时检查同批次其他镜像的 Check 阶段是否也受此影响（排除单点问题）
+- 确认 `shunit2` 是否是 CI runner 标准镜像的预装组件，还是需要单独安装
+- 确认同一 CI 流水线中其他镜像（如已有的 postgres 17.6 on 24.03-LTS-SP2）的 Check 阶段是否同样失败，以判断这是新 runner 的普遍问题还是仅影响特定 job
+- 确认 openEuler 24.03-LTS-SP4 的 CI runner 镜像是否缺少 `shunit2` 包（与旧版 runner 相比是否有包列表变化）
