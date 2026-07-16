@@ -3,15 +3,18 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 低
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 启动失败
-- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, Error response from daemon
+- 新模式标题: BuildKit 容器启动失败
+- 新模式症状关键词: Error response from daemon, Could not find the file /, buildx_buildkit, booting buildkit, docker-container driver
 
 ## 根因分析
 
 ### 直接错误
 ```
+euler_builder_20260709_205700
+#0 building with "euler_builder_20260709_205700" instance using docker-container driver
+
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -25,24 +28,18 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: CI 基础设施层 — Docker BuildKit builder 容器创建阶段（`[internal] booting buildkit`）
-- 失败原因: Docker daemon 在创建 BuildKit 构建容器 `buildx_buildkit_euler_builder_20260709_2057000` 时，报 `Could not find the file / in container`，容器未能正常启动。该错误发生在 builder 启动后的文件系统检查阶段（docker daemon 尝试在刚创建的容器中查找根文件系统路径 `/`），属于 Docker daemon 或存储驱动的运行时异常，而非代码问题。实际 Dockerfile 构建步骤从未执行。
+- 失败位置: BuildKit 启动阶段（`[internal] booting buildkit`），在 Dockerfile 构建步骤执行之前
+- 失败原因: Docker daemon 在创建 BuildKit 内部容器 `buildx_buildkit_euler_builder_20260709_2057000` 后立即报告 `Could not find the file / in container`，导致 BuildKit builder 实例无法启动，整个构建流程中止。此为 Docker daemon / 容器运行时层面的基础设施故障，与 PR 的 Dockerfile 内容无关。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增了一个 glibc 2.42 Dockerfile 及对应的 README/doc/meta 元数据更新。CI 在检测到变更、克隆仓库、通过镜像规范检查后，在启动 BuildKit builder 容器阶段即失败——此时尚未执行任何 Dockerfile 构建指令（如 `RUN dnf install`、`wget`、`./configure` 等）。日志中无任何构建步骤输出（无 `#2`、`#3` 等后续步骤编号），证实失败发生在构建启动前的基础设施层。
+**无关。** PR 仅新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`、更新 README、image-info.yml 和 meta.yml，均为正常的镜像元数据和 Dockerfile 变更。错误发生在 BuildKit 内部容器的创建阶段——此时尚未拉取 `openeuler/openeuler:24.03-lts-sp4` 基础镜像，更未执行 Dockerfile 中的任何 RUN 指令。该失败属于 CI runner 节点上的 Docker 运行时异常。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-重新触发 CI（retry/re-run）。BuildKit builder 容器 "Could not find the file /" 通常是 Docker daemon 与底层存储驱动（overlay2/devicemapper）之间的瞬时状态不一致导致，重试时大概率不再复现。此为典型临时性 infra 故障，无需修改任何代码。
-
-### 方向 2（置信度: 低）
-如反复复现，需检查 CI 节点的 Docker daemon 状态（`systemctl status docker`）和磁盘空间/存储驱动健康度。`euler_builder_*` builder 实例可能因残留的脏状态导致新容器创建异常，可尝试在该节点上执行 `docker buildx rm euler_builder_*` 清理遗留 builder 后重试。
+### 方向 1（置信度: 高）
+**重试 CI 构建即可。** 这是 Docker daemon 的瞬时故障（`Could not find the file /` 通常与容器文件系统挂载异常或 overlay2 存储驱动状态不一致相关）。Code Fixer 无需对 PR 代码做任何修改。
 
 ## 需要进一步确认的点
-- 同一 CI runner（`ecs-build-docker-x86-hk`）上的其他并发或近期 PR 是否也出现相同的 BuildKit 启动失败，以判断是节点级问题还是系统性故障
-- Docker daemon 日志中是否有 overlay2/storage 相关的 I/O 错误或 corruption 日志
-- 该 runner 的磁盘空间是否充足（BuildKit 容器创建需要临时文件系统空间）
-
-## 修复验证要求
-无需验证（infra-error，非代码问题，与 Dockerfile 内容无关）。重试 CI 即可。
+- 确认 CI runner（`ecs-build-docker-x86-hk`）上的 Docker daemon 和 BuildKit 版本是否稳定，该节点近期是否频繁出现同类 `Could not find the file /` 容器创建失败。
+- 检查 runner 上的 overlay2 存储状态是否正常（`docker system prune -f` 可能有助于释放异常状态）。
+- 确认 `euler_builder_*` builder 实例在并发构建中是否存在命名冲突或残留实例未清理的问题。
