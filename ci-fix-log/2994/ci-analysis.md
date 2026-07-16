@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器连接中断
-- 新模式症状关键词: rpc error, Unavailable, closing transport, EOF, graceful_stop, no builder
+- 新模式标题: BuildKit构建器被终止
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, Unavailable
 
 ## 根因分析
 
@@ -19,17 +19,23 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `[2/4]`（`dnf install` 下载 OS 元数据阶段）
-- 失败原因: CI 的 BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 镜像构建过程中被服务端主动关闭（GOAWAY frame，debug data 为 `graceful_stop`），导致 BuildKit 客户端 RPC 连接中断，后续检查 builder 实例时已不可用。这是一个 CI 基础设施层面的问题，与 PR 的代码变更无关。
+- 失败位置: Docker 构建步骤 #7（`RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载系统包过程中被外部组件主动终止（`graceful_stop`），导致与构建器的 gRPC 连接断开，Docker 构建中断。
 
 ### 与 PR 变更的关联
-PR #2994 的变更（新增 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`、更新 README.md、image-info.yml、meta.yml）均为常规的 openEuler 镜像支持追加操作。Dockerfile 中的 `dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel` 命令语法正确，构建在下载 OS 包元数据阶段（38.59 秒，下载 2.8 MB）因 BuildKit 构建器被基础设施层回收而中断，与 PR 代码无关。
+**与 PR 变更无关。** PR 仅新增了一个标准的 openEuler 24.03-LTS-SP4 Dockerfile（21 行，包含 `dnf install` 构建依赖 + Python 3.9.19 编译安装 + pip 安装 scann）及相关元数据文件和 README 条目。日志显示 Docker 构建在正常执行 `dnf install` 阶段（下载系统软件包）时，BuildKit 构建器被外部原因终止。构建本身尚未到达任何与 PR 代码逻辑相关的阶段，Dockerfile 语法也无错误（`load build definition from Dockerfile` 成功）。根据构建日志显示，操作系统包下载进行到 38 秒时 BuildKit 节点被外部组件执行了优雅停机（graceful_stop），之后客户端无法再找到该构建器。此模式常见于 CI 基础设施资源回收、节点下线维护或构建时间超限被强制终止。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。这是 BuildKit 构建器实例被服务端 `graceful_stop` 回收导致的偶发性基础设施故障，通常在资源调度、超时回收或构建节点维护期间发生。重新触发流水线（retry）大概率可以成功通过。
+**无需修改 PR 代码。** 这是一个 CI 基础设施问题，应由 CI 运维团队排查。可能的原因包括：
+- 构建节点资源不足（内存/磁盘）导致 Docker BuildKit daemon OOM 被 kill
+- 构建节点在构建过程中被调度系统回收或下线维护
+- `docker-container` driver 的 BuildKit 实例超出了资源配额被清理
+
+建议：重新触发 CI 构建（retry），观察是否复现。若反复在同一步骤失败，则需排查构建节点的资源配额。
 
 ## 需要进一步确认的点
-- 若重新触发后仍然失败在同一位置（`dnf install` 阶段），需检查 CI 构建节点的资源配额（内存/磁盘）、dnf 仓库网络可达性及构建超时配置。
-- 该构建运行在 `ecs-build-docker-x86-hk` 节点上，若该节点存在稳定性问题，可考虑切换构建节点重试。
+- 构建节点 `ecs-build-docker-x86-hk` 的资源状态（内存、磁盘、CPU）在构建失败时刻是否正常
+- BuildKit daemon 日志中 `graceful_stop` 的触发源头（是手动下线、自动弹性伸缩，还是资源限制触发）
+- 该 PR 是否可以单独重试成功，以排除是一次性的基础设施波动
