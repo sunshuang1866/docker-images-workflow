@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：CI 运行器缺少 `shunit2` shell 单元测试框架，导致 `eulerpublisher` 的 `[Check]` 阶段无法执行容器检查测试。PR 代码本身无问题，无需修改源代码。
+此 CI 失败为 **infra-error**，无需代码修改。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- Docker 镜像构建（`[Build]`）和推送（`[Push]`）均已成功完成
-- 失败发生在构建后的检查阶段，根因是 CI 运行器上 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 找不到 `shunit2` 命令
-- 本次 PR 的 4 个文件变更（新增 PostgreSQL 17.6 openEuler 24.03-LTS-SP4 的 Dockerfile 和 entrypoint.sh，更新 README.md 和 meta.yml）与失败无关
+CI 失败分析报告明确指出失败类型为 `infra-error`，根因是 CI 测试节点缺少 `shunit2`（Shell 单元测试框架），导致 `eulerpublisher` 的 `[Check]` 阶段无法执行。PR 的 Docker 构建和镜像推送均已成功（`[Build]` 和 `[Push]` 阶段正常完成），失败发生在 CI 基础设施层面，与 PR #2839 的代码变更无关。
 
-此问题需由运维在 CI 节点上安装 `shunit2` 或修复 `eulerpublisher` 检查脚本中的 `shunit2` 引用路径来解决，不属于此 PR 的代码修复范畴。
+该问题需要在 CI runner 的测试节点上安装 `shunit2` 包（如通过 `yum install shunit2`），属于 CI 运维团队负责的基础设施问题，Code Fixer 不应修改任何 PR 代码。
 
 ## 潜在风险
 无
