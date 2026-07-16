@@ -1,19 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error），根因是 CI 编排脚本 `update.py` 对纯文档类 PR 未做豁免，导致不相关的 appstore 发布规范校验被错误触发。
+无需代码修改。CI 失败属于基础设施错误（infra-error），由 appstore 发布规范检查错误地对纯文档 PR 触发所致，与 PR 修改的 README.md 文件内容无关。
 
 ## 修改的文件
-无（PR 变更的 `README.md` 内容本身正确，无需修改）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 失败类型为 `infra-error`，置信度高
-- PR #2790 仅修改了仓库根目录下的 `README.md` 和 `README.en.md`，更新可用镜像 Tags 列表，属于正确的文档维护操作
-- "本次 PR 变更与 CI 失败无关" — 失败原因是 CI 流水线配置问题，应在 `eulerpublisher/update/container/app/update.py` 的触发条件中增加文档变更豁免逻辑
-- "PR 代码本身无需任何修改"
-
-根据修复原则，infra-error 类型不应强行修改代码，本 PR 的 `README.md` 内容无需任何改动。
+分析报告明确指出：
+- PR #2790 仅修改了 `README.md` 和 `README.en.md` 两个根级文档文件，不涉及任何 Dockerfile、meta.yml、image-list.yml 或其他镜像构建文件
+- CI appstore 发布规范检查对根级 `README.md` 进行了路径校验并判定为 FAILURE，但该检查不应在纯文档 PR 上运行
+- 根因在于 CI 管道配置未区分"仅包含文档变更的 PR"和"涉及镜像发布的 PR"，以及/或 `eulerpublisher/update/container/app/update.py` 中路径判定逻辑存在 bug
+- 此为 CI 基础设施问题，应由 CI 维护人员在 CI 层面调整触发条件或修复校验工具逻辑，不由源码修改解决
 
 ## 潜在风险
-无 — 本次未修改任何代码文件。CI 基础设施层面的问题需要由运维/CI 团队在流水线配置中修复。
+无
