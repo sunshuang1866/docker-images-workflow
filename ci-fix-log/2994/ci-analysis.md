@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 构建器异常停止
-- 新模式症状关键词: graceful_stop, no builder found, rpc error, Unavailable, closing transport, error reading from server: EOF
+- 新模式标题: BuildKit构建器断开
+- 新模式症状关键词: failed to receive status, closing transport, graceful_stop, no builder found, euler_builder
 
 ## 根因分析
 
@@ -17,26 +17,20 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: BuildKit 构建器 `euler_builder_20260709_224657`（Docker 构建守护进程）
-- 失败原因: Docker 构建进行到第 7 步（`RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）时，BuildKit 构建器实例 `euler_builder_20260709_224657` 收到 `graceful_stop` 信号后主动关闭了连接，导致 RPC 传输中断、构建失败。`graceful_stop` 为 GOAWAY 帧中携带的调试信息，表示服务端主动发起了优雅关停，与 PR 代码变更无关。
+- 失败位置: 构建阶段 Step #7（`RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`），由 BuildKit 守护进程 `euler_builder_20260709_224657` 执行
+- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 被外部终止（`graceful_stop`），导致正在执行的 dnf install 指令连接断开，属于 CI 基础设施级别的异常
 
 ### 与 PR 变更的关联
-**无关**。该 PR 仅做了以下纯新增/文档修改：
-1. 新增 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`（21 行新文件）
-2. 更新 `Others/scann/README.md`（添加新版本表格行）
-3. 更新 `Others/scann/doc/image-info.yml`（添加新版本条目）
-4. 更新 `Others/scann/meta.yml`（添加新版本路径映射）
-
-Dockerfile 内容正确无语法错误，构建在前 6 步均正常完成（加载基础镜像、拉取层），在第 7 步执行 `dnf install` 中途被 BuildKit 构建器异常关停。失败原因是 CI 基础设施层面的问题（构建器被关闭），不是 Dockerfile 代码问题。
+与 PR 变更**无关**。本次 PR 仅新增了一个标准结构的 Dockerfile（安装系统包 → 编译 Python → pip 安装 scann），未引入任何可能导致构建器崩溃或异常退出的代码。dns install 指令本身是正确且常规的操作。失败发生在 Jenkins 构建节点（`ecs-build-docker-x86-hk`）上 BuildKit 守护进程被外部因素终止，属于基础设施故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。失败原因是 CI 基础设施中 BuildKit 构建器实例在构建中途被优雅关停（可能由于宿主机资源调度、构建器池回收、超时策略等），属于临时性基础设施故障。重新触发 CI pipeline，构建器大概率正常工作。
+直接重试构建。BuildKit 构建器被 `graceful_stop` 终止是瞬态基础设施问题（可能由节点资源压力、网络抖动超时或宿主机运维操作触发），与本次 PR 的 Dockerfile 内容无关。对该 PR 重新触发 CI 即可，无需修改任何代码。
 
 ### 方向 2（置信度: 低）
-若重试后仍反复出现相同错误，需检查 CI 构建平台中 `euler_builder_*` 实例的生命周期策略（是否设置了过短的 TTL），或检查 `ecs-build-docker-x86-hk` 节点的资源状态。
+如果重试后仍反复出现相同错误，则需检查 Jenkins 构建节点 `ecs-build-docker-x86-hk` 的资源状态（内存、磁盘）以及 BuildKit 配置（`--oci-worker-gc`、`--keep` 等参数），排查是否存在因 `dnf` 下载速度过慢（本次日志为 77 kB/s）触发 BuildKit inactivity 超时的可能。
 
 ## 需要进一步确认的点
-1. 构建器 `euler_builder_20260709_224657` 被 graceful_stop 的具体原因（CPU/内存超限、节点调度驱逐、构建器池超时回收等），需查阅 CI 编排平台的构建器管理日志。
-2. 是否同时间段其他 PR 的 x86-64 构建也出现相同错误，以判断是单点故障还是平台级问题。
+- 日志中 `euler_builder_20260709_224657` 被 `graceful_stop` 的具体原因未在提供的日志中记录——需要查看 BuildKit 守护进程自身的日志（journalctl 或容器日志）来确认终止的直接触发条件
+- 若重试后仍失败，需确认构建节点的网络状况（dnf 元数据下载仅 77 kB/s 是否属于节点常态）、内存配额以及同节点上其他构建任务是否存在资源竞争
