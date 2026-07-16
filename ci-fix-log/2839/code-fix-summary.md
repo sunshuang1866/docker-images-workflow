@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error）：CI runner 缺少 `shunit2`（Bash 单元测试库），导致 `[Check]` 阶段在运行任何容器测试前崩溃。
+无代码修复。CI 失败为基础设施问题（infra-error）：CI runner 环境缺少 `shunit2` 库，导致 `[Check]` 阶段在运行任何容器测试前崩溃。
 
 ## 修改的文件
-无（未修改任何文件）
+无（无需修改任何代码文件）
 
 ## 修复逻辑
-CI 分析报告根因：`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 尝试引入 `shunit2` 但该库未安装在 CI runner 上。PR 的代码变更（Dockerfile、entrypoint.sh、README.md、meta.yml）均已成功构建和推送，此失败与 PR 变更完全无关。
+CI 分析报告明确指出：PR 的 Docker 构建和镜像推送阶段均成功完成（`[Build] finished`、`[Push] finished`），失败仅发生在构建完成后的 `[Check]` 阶段。失败原因是 CI 测试框架脚本 `common_funs.sh` 第 13 行尝试引入 `shunit2`（Bash 单元测试库），但该库未安装在此 CI runner 上。此问题与 PR 的代码变更完全无关。
 
-应由 CI 运维人员在 runner 环境中执行 `yum install shunit2` 安装该库后重新触发构建即可。
+建议由 CI 运维人员在 runner 环境中安装 `shunit2`（如 `yum install shunit2`）后重新触发构建即可。
 
 ## 潜在风险
 无
