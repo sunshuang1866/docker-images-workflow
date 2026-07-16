@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于 infra-error，根因是 openEuler 24.03-LTS-SP4 官方仓库镜像站在构建时段出现 HTTP/2 协议层通信故障（Curl error 92），导致 `dnf install` 下载 RPM 包失败。
+无需代码修改：CI 失败为基础设施问题（infra-error），由 openEuler 24.03-LTS-SP4 RPM 仓库镜像的 HTTP/2 协议层间歇性流错误导致。
 
 ## 修改的文件
-无。PR 代码本身没有问题，Dockerfile 中 `dnf install` 命令语法和包名均正确。
+无
 
 ## 修复逻辑
-分析报告明确判定为 `infra-error`（置信度：高），失败与 PR 变更无关，纯粹是 openEuler 仓库镜像站的 HTTP/2 协议稳定性问题。根据修复原则，不应对 infra-error 强行修改代码。应重新触发 CI 流水线，等待仓库侧恢复即可。
+CI 失败分析报告明确指出该失败与 PR 变更无关，属于 `infra-error` 类型。Dockerfile 中的 `RUN dnf install` 命令本身无语法或逻辑错误，失败完全由外部仓库镜像（`repo.****.org`）的 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR）引起，属于临时性网络层问题。推荐方案是 re-run CI job 重试构建，无需修改任何代码。
 
 ## 潜在风险
-无。未对代码做任何修改。
+无
