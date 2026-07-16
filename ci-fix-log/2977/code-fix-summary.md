@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error）：`repo.openeuler.org` 镜像站在 aarch64 runner 上出现 HTTP/2 流错误和 SSL 连接中断，导致 `vim-common` 等 RPM 包下载失败。
+CI 失败由 `repo.openeuler.org` 软件源临时网络波动导致，属于基础设施问题（infra-error），无需修改代码。
 
 ## 修改的文件
-无（infra-error，无需修改任何代码）
+无。本次 CI 失败与 PR 代码变更无关，所有文件无需修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出本次失败属于 infra-error，失败原因为 `repo.openeuler.org` 镜像站的临时网络不稳定，与 PR #2977 的代码变更无关。Dockerfile 中 `yum install` 命令语法正确，所有软件包名均有效（yum 已成功解析完整依赖树并开始下载）。3 个包（gcc、kernel-headers、perl-MIME-Base64）在遇到网络错误后通过 yum 重试机制成功下载，仅 `vim-common` 重试耗尽后最终失败。
-
-根据工作流程约束，infra-error 不应对代码进行修改。建议重新触发 CI 构建，有较大概率通过。
+构建过程中多个 RPM 包下载遭遇 HTTP/2 流错误（curl error 92）和 SSL 连接断开（curl error 56），大部分包通过 yum 重试机制成功下载，但 `vim-common` 耗尽所有镜像后仍失败。这是 openEuler 官方软件源在构建窗口期内的临时性网络问题。分析报告置信度为"高"，修复方向明确为"无需修改代码"，建议直接触发 CI 重试（retry）即可通过。
 
 ## 潜在风险
-无（未修改任何代码）
+无。当前 Dockerfile 格式正确，软件包列表均为 openEuler 24.03-LTS-SP4 仓库标准包名。若后续多日重试仍持续失败，可考虑添加 yum 镜像源 fallback（如华为云镜像站），但当前证据表明无需立即处理。
