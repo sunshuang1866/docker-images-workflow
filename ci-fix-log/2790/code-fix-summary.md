@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。本次 CI 失败属于 CI 基础设施问题（infra-error），非 README.md 内容缺陷导致。
+无需代码修改。CI 失败属于 infra-error：`eulerpublisher` 路径校验工具对根目录文档文件（`README.md`）的路径格式校验过严，误将相对路径 `README.md` 与绝对路径格式 `/README.md` 比对后判定失败。
 
 ## 修改的文件
-无。
+无。PR #2790 仅修改了 `README.md` 中的可用镜像 Tags 列表内容，该文档变更是合法且正确的，不存在代码缺陷。
 
 ## 修复逻辑
-CI 失败分析报告指向的是 eulerpublisher appstore 发布规范预检工具中的路径校验逻辑问题。该工具检测到 `README.md` 变更后，报告 `[Path Error] The expected path should be /README.md`，但 `README.md` 实际已位于仓库根路径 `/README.md`，路径本身并无错误。
-
-此外，分析报告中提及的 `24.03-lts-sp3` 重复条目问题已由先行自动化修复提交（eb68566a9）移除，当前 README.md 内容正确无重复。
-
-根因归结为：CI appstore 检查流水线未正确处理纯文档变更 PR（无 Dockerfile、meta.yml 等镜像构建产物），导致路径校验步骤产生误报。此问题需在 CI 工具（eulerpublisher）层面修复，不应在源代码层面强行规避。
+CI 分析报告明确归类为 `infra-error`，根因不在项目源码中，而是 CI 编排工具 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑对根级文档文件的误报。由于这是纯文档更新 PR，不涉及应用镜像 Dockerfile 或配置文件，不应被 appstore 规范校验流水线拦截。修复需要在 CI 工具侧（`eulerpublisher`）或 CI 流水线触发规则中进行，不在本次代码修复范围内。
 
 ## 潜在风险
-无。README.md 无需修改，不存在因本次修复引入新问题的风险。
+无。不涉及 PR 变更文件（`README.md`）本身的改动，不会引入任何新风险。
