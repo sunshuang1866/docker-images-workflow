@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error（上游 openEuler 24.03-LTS-SP4 aarch64 软件仓库 `repo.openeuler.org` 在构建时段出现 HTTP/2 流错误），与 PR 代码无关。
+无需代码修改。CI 失败为基础设施问题（infra-error）：`repo.openeuler.org` 在 aarch64 架构上存在 HTTP/2 传输层间歇性故障（Curl error 92: Stream error in the HTTP/2 framing layer），导致 RPM 包下载失败。
 
 ## 修改的文件
-无
+无（基础设施故障，无需代码变更）
 
 ## 修复逻辑
-CI 分析报告明确指出该失败类型为 `infra-error`。PR #2991 仅新增了 `vvenc` 镜像的 Dockerfile 及相关元数据文件，Dockerfile 中的 `dnf install` 命令内容正确。失败根因是 `repo.openeuler.org` 的 aarch64 节点在构建时段对多个 RPM 包（`git-core`、`gcc-c++`、`guile`）的 HTTP/2 下载响应出现 `INTERNAL_ERROR`（curl error 92），属于上游仓库侧的网络波动问题。
-
-建议操作：**重试 CI**（re-run failed job）。若重试多次仍失败，可在 Dockerfile 中为 dnf 配置 `--setopt=retries=10` 增加重试次数或禁用 HTTP/2 回退到 HTTP/1.1。
+CI 分析报告将该故障定性为 `infra-error`，置信度：高。失败原因是 `repo.openeuler.org` 的 openEuler-24.03-LTS-SP4 aarch64 仓库在通过 dnf 下载 RPM 包时出现 HTTP/2 流错误，其中 git-core 和 gcc-c++ 经重试后成功，但 guile 包耗尽所有重试次数导致构建失败。该问题与 PR 变更无关，Dockerfile 中的 `dnf install` 命令语法正确，与仓库中其他 openEuler 24.03-lts-sp4 Dockerfile 写法一致。按照修复规范，`infra-error` 不应强行修改代码。建议等待 `repo.openeuler.org` 基础设施恢复后重新触发 CI。
 
 ## 潜在风险
 无
