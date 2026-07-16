@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施错误（infra-error）：Docker buildx builder 实例在构建过程中被优雅终止（graceful_stop），与 PR 代码变更无关。
+CI 基础设施瞬时故障（BuildKit builder 断连），无需代码修改。
 
 ## 修改的文件
-无。未对任何文件进行修改。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 失败类型为 `infra-error`，置信度：高
-- 根因：builder 实例 `euler_builder_20260709_224657` 被 CI 调度系统/宿主机主动回收，gRPC 连接断开
-- 失败发生在 `dnf install` 基础依赖安装阶段（步骤 2/4），此时尚未执行到与 scann 直接相关的构建步骤
-- PR 变更内容（新增 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及元数据文件）与构建失败无关联
+CI 失败分析报告判定为 `infra-error`。BuildKit builder 实例 `euler_builder_20260709_224657` 在 dnf 安装依赖阶段意外断开连接（`graceful_stop`），属于 CI 节点基础设施问题，与 PR 新增的 Dockerfile 无关。PR 仅新增了标准 Dockerfile，指令语法和包名均正确，构建在 `dnf install` 步骤即因 builder 断连失败，尚未进入 Python 编译或 pip 安装阶段。
 
-修复方向：重新触发 CI 构建即可，无需代码修改。
+**修复方向**：重新触发 CI 构建即可，无需修改任何代码。
 
 ## 潜在风险
 无
