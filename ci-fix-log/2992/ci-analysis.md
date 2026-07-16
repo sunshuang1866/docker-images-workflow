@@ -3,44 +3,35 @@
 ## 基本信息
 - PR: #2992 — chore(multiwfn): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP2协议错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, dnf install, [FAILED], No more mirrors to try
+- 新模式标题: 仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try
 
 ## 根因分析
 
 ### 直接错误
 ```
-#8 1243.9 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 31 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#7 1268.5 [MIRROR] glibc-devel-2.38-107.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/glibc-devel-2.38-107.oe2403sp4.x86_64.rpm [HTTP/2 stream 17 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#8 1468.3 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...(retry failed)
-#7 1598.9 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...(retry failed)
-#8 1767.8 [MIRROR] guile-2.2.7-6.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...
-#8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...
+#8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 27 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #8 1830.2 [FAILED] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #8 1830.2 Error: Error downloading packages:
 #8 1830.2   gcc-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
-#8 ERROR: process "/bin/sh -c dnf install -y ..." did not complete successfully: exit code: 1
+#8 ERROR: process "/bin/sh -c dnf install -y       git gcc gcc-c++ gcc-gfortran make       openblas-devel lapack-devel &&     dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（`RUN dnf install` 步骤）
-- 失败原因: CI 构建环境在通过 dnf 从 openEuler 24.03-LTS-SP4 仓库镜像下载 RPM 包时，多次出现 Curl error (92) — HTTP/2 流被异常关闭（`INTERNAL_ERROR`），服务端或中间代理的非正常流终止。受影响包包括 `gcc-gfortran`、`glibc-devel`、`guile`、`gcc`。其中 `gcc`（34 MB）重试耗尽所有镜像后最终下载失败，导致整个 `dnf install` 步骤退出码 1。同时 stage-1（运行时阶段）的 `dnf install` 也遭遇同类错误（`glibc-devel`、`gcc-gfortran`），并在 builder 阶段失败后被 CANCELED。
+- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（`dnf install` 步骤，builder 阶段 #8）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库镜像在 HTTP/2 传输过程中反复出现流层错误（`Curl error (92)`），多个 RPM 包（`gcc-gfortran`、`glibc-devel`、`guile`、`gcc` 等）下载均被中断，最终 `gcc` 包因所有镜像均尝试失败而报错，导致 `dnf install` 整体失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 multiwfn 在 openEuler 24.03-lts-sp4 上的 Dockerfile（以及对应的 README、meta.yml、image-info.yml 条目），Dockerfile 本身的语法和依赖声明均正确（与已有的 sp3 版本 Dockerfile 结构一致）。失败完全由上游 openEuler 24.03-LTS-SP4 仓库镜像的网络/HTTP2 协议层问题导致，属于 CI 基础设施故障。
+**与 PR 变更无关。** 该 PR 仅新增了一个 Dockerfile 及配套的 README、meta.yml、image-info.yml 元数据文档。失败原因是 CI 构建环境的 dnf 包管理器在从 openEuler 官方仓库下载基础编译包时遭遇了 HTTP/2 协议层面的传输错误，属于仓库镜像服务端的瞬时网络故障。该 Dockerfile 中列出的所有 dnf 包（`git gcc gcc-c++ gcc-gfortran make openblas-devel lapack-devel`）均为 openEuler 24.03-LTS-SP4 的标准包，不存在包名错误或版本不存在的情况。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需代码修复。** 这是一个 CI 基础设施层面（上游仓库镜像 HTTP/2 协议层异常）的临时性故障。建议操作：
-- 重新触发 CI 构建（retry），等待上游仓库镜像恢复
-- 若多次 retry 均失败，排查 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）的 HTTP/2 前端代理或 CDN 是否存在异常
+### 方向 1（置信度: 低）
+此失败为 CI 基础设施问题（RPM 仓库镜像 HTTP/2 流传输异常），**无需修改 PR 代码**。建议触发 CI 重试（re-run），等待仓库镜像服务恢复正常后构建即可通过。
 
 ## 需要进一步确认的点
-- 确认 CI 构建时间点 `repo.****.org`（openEuler 24.03-LTS-SP4 仓库）的 CDN/代理层是否存在已知中断或维护事件
-- 建议在 CI 非高峰期重新触发构建，确认是否为临时性网络波动
-
-## 修复验证要求
-不适用（infra-error，无需代码修复）。
+1. 该 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）是否为临时性网络故障，需确认镜像站当前可用性。
+2. 对比同一时期其他 24.03-LTS-SP4 相关 PR 的 CI 构建日志，确认是否为仓库镜像的普遍性问题（系统性故障）还是仅该 runner 节点的偶发问题。
+3. 确认 x86-64 构建节点（`ecs-build-docker-x86-03-sp`）到 `repo.****.org` 的网络链路是否稳定。
