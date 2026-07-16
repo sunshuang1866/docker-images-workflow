@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。失败为 CI 基础设施（infra-error）问题。
+CI 基础设施临时故障，无需代码修复。`yum install` 从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 流中断（Curl error 92: INTERNAL_ERROR），`vim-common` 包耗尽重试次数后永久失败。
 
 ## 修改的文件
-无
+无 — 此为 infra-error，与 PR 代码变更无关。
 
 ## 修复逻辑
-CI 失败分析报告确认此为 `infra-error`：aarch64 构建节点在通过 `yum` 从 `repo.openeuler.org` 下载 RPM 依赖包时，遭遇 `repo.openeuler.org` 服务端的 HTTP/2 帧层错误（Curl error 92: `INTERNAL_ERROR`）和 SSL 连接中断（Curl error 56: `SSL_ERROR_SYSCALL`），最终 `vim-common` 包在所有镜像源重试失败后导致 yum 事务中断。
-
-`Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11` 的 `RUN yum install -y ...` 步骤语法正确、依赖声明完整，与 PR 改动无关。这是一个 openEuler 官方仓库的暂时性服务端基础设施问题，不受 PR 代码控制。
-
-建议重新触发 CI 构建（retry），网络恢复后大概率可通过。
+CI 分析报告指出，失败完全由 `repo.openeuler.org` 软件源在 CI 执行期间的网络波动引发，与 PR #2977 新增的 brpc 24.03-lts-sp4 Dockerfile 及元数据文件无关。同类错误在本次构建中已多次出现（gcc、kernel-headers、perl-MIME-Base64），前三个包经 yum 内置重试后成功恢复。建议在 openEuler 24.03-LTS-SP4 软件源网络状况良好时重新触发 CI 构建（re-run）。
 
 ## 潜在风险
-无
+无。若后续 CI 反复出现同类问题，需排查 CI aarch64 runner 到 `repo.openeuler.org` 的网络路由，或考虑为该仓库源配置 HTTP/1.1 降级。
