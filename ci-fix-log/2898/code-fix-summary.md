@@ -1,19 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误：CI runner 环境中缺少 `shunit2`（Shell 单元测试框架），导致 `[Check]` 测试阶段在 `common_funs.sh:13` 处失败。**与 PR 代码变更无关，无需代码修改。**
+无需代码修改 — 此为 CI 基础设施错误（infra-error），与 PR 变更无关。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-分析报告明确指出：
-- PR 代码变更仅涉及 Go 1.25.6 的 openEuler 24.03-LTS-SP4 支持（新增 Dockerfile、更新 README/image-info/meta 配置），均为纯配置/部署文件
-- Docker 镜像构建和推送均已成功完成（Build finished, Push finished）
-- 失败发生在 CI 平台自有的测试执行框架层面（`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`），该路径不在本仓库中
-- 失败原因是 CI build agent 缺少 `shunit2` 依赖，属于 CI 基础设施环境问题
+CI 失败分析报告确认为 infra-error：
+- Docker 镜像构建（Build）和推送（Push）阶段均成功完成，Dockerfile 5 个步骤全部正常执行。
+- 失败发生在 [Check] 阶段，`shunit2` 测试框架在 CI Runner 宿主文件系统中缺失（`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13: shunit2: No such file or directory`）。
+- 该路径属于 CI Runner 的 `eulerpublisher` 测试工具链，不是容器镜像内部文件。
+- PR 仅新增 Go 1.25.6 的 Dockerfile 及配套 README/image-info.yml/meta.yml 更新，未涉及任何可能影响 CI 测试框架的修改。
 
-**需要联系 CI 平台运维团队**，在 build agent（特别是 openEuler 24.03-LTS-SP4 aarch64 runner）上安装 `shunit2` 包（可通过 `dnf install shunit2` 或其他方式）。
+**需由 CI 基础设施管理员在 Runner 上安装/恢复 `shunit2` 工具**（如 `yum install shunit2` 或从官网下载），无需修改源代码。
 
 ## 潜在风险
-无（本摘要不涉及代码修改，无风险）
+无
