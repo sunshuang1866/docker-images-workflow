@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误（infra-error）：eulerpublisher 测试脚本 `bwa_test.sh` 包含 CRLF 行尾导致 `bad interpreter`，与 PR 代码无关，无需修改本仓库代码。
+无需代码修复——CI 失败为基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无。CI 失败属于 eulerpublisher 基础设施问题，不在本 PR 的仓库范围内。
+无（未修改任何源代码文件）
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 所有构建步骤（`make` 编译、Docker 镜像构建、Registry 推送）均成功完成。
-- 失败仅发生在 eulerpublisher CI 框架的 `[Check]` 阶段，原因是 `/etc/eulerpublisher/tests/container/app/bwa_test.sh` 的 shebang 行末尾包含 Windows 风格回车符（`\r`/`^M`），导致系统尝试将 `#!/bin/sh\r` 作为解释器路径查找而失败。
-- 该文件属于 eulerpublisher 安装包，不在本 PR 的仓库范围内，PR 作者无法修复。
+CI 失败的根因是 eulerpublisher 包自带的 `/etc/eulerpublisher/tests/container/app/bwa_test.sh` 测试脚本包含 Windows CRLF 换行符，导致 shebang 解析为 `/bin/sh^M`，内核无法找到该解释器而拒绝执行。
 
-处理方式：由 eulerpublisher CI 工具链维护者将 `tests/container/app/bwa_test.sh` 的行尾从 CRLF 转换为 LF，修复后重跑流水线即可。
+PR 的所有代码变更（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，Docker 镜像的编译、构建、推送三个阶段全部成功。失败仅发生在 CI 后处理阶段由 eulerpublisher 工具调用基础设施测试脚本时，属于 CI Runner 上 eulerpublisher 包的问题，需 CI 维护者修复，不应修改任何 PR 源码。
 
 ## 潜在风险
-无。本 PR 的代码变更（新增 openEuler 24.03-LTS-SP4 的 bwa Dockerfile 及文档）本身正确无误。
+无
