@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 这是一个 CI 基础设施故障（infra-error），非 PR 代码问题。
+CI 构建失败，属于基础设施网络问题（infra-error），无需代码修改。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败根因是 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库存在 HTTP/2 协议层错误（`Curl error (92): HTTP/2 framing layer INTERNAL_ERROR`）和 SSL 连接中断（`Curl error (56): SSL_ERROR_SYSCALL`），导致 `vim-common` 等多个包下载失败。
+CI 失败分析报告明确指出：失败类型为 `infra-error`，根因是 aarch64 构建节点从 `repo.openeuler.org` 下载 `vim-common` RPM 包时发生 HTTP/2 流错误（INTERNAL_ERROR），yum 耗尽所有镜像重试后仍下载失败。这是 openEuler 官方仓库的网络瞬时故障，与 PR 代码变更无关。
 
-该失败与 PR #2977 的代码变更完全无关。PR 仅新增了 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile` 及配套元数据文件，Dockerfile 中的 `yum install` 命令语法和包列表均正确。失败完全由 openEuler 官方仓库端的网络/服务问题导致。
+PR 新增的 Dockerfile 语法正确，`yum install` 包列表中的所有依赖均被仓库识别（日志中 173 个包的 Transaction Summary 正常）。同类包（gcc、kernel-headers、perl-MIME-Base64）在重试后均下载成功，仅 `vim-common` 碰巧在重试耗尽前未能在短暂的网络恢复窗口内完成下载。
 
-**建议操作**：等待 `repo.openeuler.org` aarch64 仓库服务恢复后，重新触发 CI 构建即可。
+**修复方向**：重新触发 CI 构建即可通过。
 
 ## 潜在风险
 无
