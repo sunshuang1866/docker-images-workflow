@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2 缺失
-- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, eulerpublisher, [Check] test failed
+- 新模式标题: shunit2测试框架缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
@@ -18,32 +18,25 @@
 | Check Items | Description | Check Result |
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
-Build step 'Execute shell' marked build as failure
-Notifying upstream projects of job completion
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 运行器上缺少 `shunit2` shell 单元测试框架，导致 `eulerpublisher` 的 `[Check]` 阶段执行测试脚本时无法找到依赖，测试项未实际运行（Check Result 表为空），CI 判定构建失败。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13
+- 失败原因: CI 测试节点缺少 `shunit2`（Shell 单元测试框架），导致 `eulerpublisher` 的 `[Check]` 阶段初始化失败，所有容器测试均未实际执行（Check 表格为空）。
 
 ### 与 PR 变更的关联
-本次 PR 的代码变更（新增 Dockerfile、entrypoint.sh，更新 README.md 和 meta.yml）**与失败无关**。Docker 镜像构建和推送均已完成：
+**与 PR 变更无关。** PR 的 Docker 构建和镜像推送均已成功完成：
+- `#8 DONE 268.4s` — Postgres 17.6 源码编译安装成功
+- `#11 DONE 58.0s` — 镜像推送成功
+- `[Build] finished` / `[Push] finished` — 构建和推送阶段均正常
 
-- `#8 DONE 268.4s` — PostgreSQL 17.6 编译安装成功
-- `#11 pushing layers ... done` — 镜像推送到 registry 成功
-- `[Build] finished` / `[Push] finished` — eulerpublisher 确认构建和推送完成
-
-失败仅发生在构建后的容器检查（`[Check]`）阶段，原因是 CI 运行器自身缺少 `shunit2` 依赖，而非容器镜像存在缺陷。
+失败发生在 `[Check]` 阶段，且根本原因是 CI 测试框架自身缺少 `shunit2` 依赖，而非容器化应用（Postgres）本身存在问题。未执行任何实际检查项（Check 结果表格为空）进一步确认了这一点。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI 运行器环境问题，需运维在 CI 节点上安装 `shunit2`（如通过 `pip install shunit2` 或从系统包管理器安装），或修正 `eulerpublisher` 检查脚本中对 `shunit2` 的引用路径。**Code Fixer 无需处理，PR 代码本身无问题。**
+在 CI runner 的测试节点上安装 `shunit2` 包。`shunit2` 是一个 Shell 单元测试框架，在 openEuler 上可通过 `yum install shunit2` 或 `pip install shunit2` 安装。此问题属于 CI 基础设施环境缺失，Code Fixer 无需处理 PR 代码。
 
 ## 需要进一步确认的点
-- CI 运行器节点上 `shunit2` 的预期安装位置和安装方式（是 pip 安装还是系统包 `shunit2` RPM）
-- 该 `[Check]` 阶段的 `shunit2` 缺失是否为该 CI 节点的已知问题（检查该 runner 上其他最近构建是否也出现了相同错误）
-
-## 修复验证要求
-不适用。本次失败为 CI 基础设施问题，PR 代码无需修改。
+- 确认同一 CI 环境下其他镜像的 `[Check]` 阶段是否也因同样原因失败——若其他镜像的 check 均失败，可确认为 runner 环境问题而非本 PR 特有问题。
+- Dockerfile 中存在两个 LegacyKeyValueFormat 警告（`ENV key value` 格式，line 26, 30），虽非本次失败的直接原因，但可作为代码规范改进项后续处理。
