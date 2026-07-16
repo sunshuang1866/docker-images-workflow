@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: dnf包源HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, repo.openeuler.org, dnf install, guile, aarch64
+- 新模式标题: openEuler仓库HTTP2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, repo.openeuler.org, dnf install, aarch64
 
 ## 根因分析
 
@@ -22,21 +22,20 @@
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:6 (`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`)
-- 失败原因: CI 在 aarch64 runner (`ecs-build-docker-aarch64-04-sp`) 上执行 `dnf install` 时，`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 仓库返回了多次 HTTP/2 流错误（Curl error 92: `INTERNAL_ERROR`），导致多个 RPM 包（`git-core`、`gcc-c++`、`guile`）下载失败。其中 `git-core` 和 `gcc-c++` 在 dnf 重试后恢复，但 `guile` 耗尽所有可用 mirror 后最终失败。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: aarch64 构建节点从 `repo.openeuler.org` 下载 RPM 包时，多个包（`git-core`、`gcc-c++`、`guile`）遭遇 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR），其中 `guile` 包重试全部镜像后仍失败，导致 `dnf install` 退出码为 1。该错误与 PR 代码变更无关，属 openEuler 软件仓库侧的网络/协议层基础设施问题。
 
 ### 与 PR 变更的关联
-**与 PR 改动无关**。本次 PR 仅新增了一个正确的 Dockerfile 及配套的元数据/文档更新。Dockerfile 中的 `dnf install` 命令语法和包名均为标准用法。失败完全由 `repo.openeuler.org` 仓库服务器的 HTTP/2 协议层临时故障引起，属于基础设施问题。该问题影响的是 openEuler 24.03-LTS-SP4 的 aarch64 架构仓库。
+**无关联。** PR 变更内容为新增 vvenc 1.14.0 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及其配套元数据文件。Dockerfile 中 `dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 命令语法完全正确，部分包（如 `cmake`、`binutils`、`glibc-devel` 等 28 个包）已成功下载完成，失败发生在后继包的下载过程中，属于 `repo.openeuler.org` 镜像站在该时间段的瞬时网络故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。该失败为 `repo.openeuler.org` 仓库服务器的临时 HTTP/2 协议故障，属于 infra-error。在仓库服务恢复后，重新触发 CI（retry）即可。Code Fixer 无需修改任何代码。
+**无需代码修复。** 此为典型的 CI 基础设施错误（`infra-error`），Code Fixer 无需对 Dockerfile 或任何 PR 文件做修改。建议直接触发 CI 重试（re-run/retry），待 `repo.openeuler.org` 镜像站恢复正常后，构建应能直接通过。
 
 ### 方向 2（置信度: 低）
-**添加 dnf 重试机制**。如果此类 HTTP/2 流错误频繁发生，可在 Dockerfile 中为 `dnf install` 添加重试逻辑（如 `dnf install -y --setopt=retries=10 git gcc gcc-c++ make cmake`）。但当前错误属于临时基础设施故障，不建议为此增加不必要的重试复杂度。
+若该问题持续复现，可考虑在 `dnf install` 前添加 `dnf makecache` 或配置额外的 fallback 镜像源（如华为云镜像站），但鉴于日志中已有镜像重试机制（`[MIRROR]`），此方向收益有限，且不属于本次 PR 应修复的范畴。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 的 openEuler-24.03-LTS-SP4 aarch64 仓库在当前时间是否可正常访问
-- 如该仓库服务已恢复，直接重新触发 CI 即可验证
-- 如相同错误在多次重试后仍出现，需排查 CI runner 到 `repo.openeuler.org` 的网络连通性
+- 确认 `repo.openeuler.org` 在失败时段是否存在已知的服务中断或降级（可联系 openEuler 基础设施团队确认该时段 `aarch64/OS` 仓库的 HTTP/2 服务状态）
+- 确认同一时段其他 openEuler 24.03-lts-sp4 aarch64 构建 job 是否也遇到相同错误（如果是，则印证了仓库侧瞬时故障的判断）
