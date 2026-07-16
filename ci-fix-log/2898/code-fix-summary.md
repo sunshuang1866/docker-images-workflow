@@ -1,18 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败原因为 CI runner 环境缺少 `shunit2`（Shell 单元测试框架），属于 **infra-error**（CI 基础设施问题），与 PR 变更无关。
+CI 失败为基础设施问题（infra-error），CI Runner 缺少 `shunit2` 工具，与 PR 代码变更无关，无需代码修改。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
 CI 分析报告明确指出：
-- Docker 镜像的构建（[Build]）和推送（[Push]）步骤均已成功完成，镜像 sha256 已生成并推送。
-- 失败发生在 [Check] 阶段，因 CI runner 上 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 执行时找不到 `shunit2` 命令。
-- 根因与 PR 提交的 Dockerfile、README.md、image-info.yml、meta.yml 均无关。
+- Docker 镜像构建和推送均已成功（步骤 #7-#11 均 DONE，日志中无任何构建错误）
+- 失败原因：CI Runner 环境的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 无法找到 `shunit2` 命令
+- PR 变更（新增 Go 1.25.6 on openEuler 24.03-LTS-SP4 的 Dockerfile，更新 README.md、doc/image-info.yml、meta.yml）与 `shunit2` 缺失完全无关
 
-此问题应由 CI 运维团队在 runner 环境中补充安装 `shunit2`，或在 `eulerpublisher` 包中将 `shunit2` 列为运行时依赖。
+此问题需要 CI 管理员在 Runner 环境上安装 `shunit2`（如 `dnf install shunit2`），然后重新触发 CI 构建即可。
 
 ## 潜在风险
 无
