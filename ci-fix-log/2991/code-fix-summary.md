@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 `repo.openeuler.org` 仓库源 HTTP/2 传输层临时故障（Curl error 92），属于基础设施问题，与 PR 代码无关。
+无需代码修复。此 CI 失败为基础设施问题（infra-error）：`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库在 HTTP/2 协议层出现 Curl error 92（Stream error: INTERNAL_ERROR），导致 `dnf install` 下载 RPM 包失败。与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，不涉及代码修改）
+无
 
 ## 修复逻辑
-CI 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 返回 HTTP/2 流错误（`Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`），导致 git-core、gcc-c++、guile 等多个 RPM 包下载失败，最终 guile 耗尽所有镜像源后安装失败。此错误发生在远端仓库服务器侧，与 Dockerfile 中 `RUN dnf install -y git gcc gcc-c++ make cmake` 命令正确性无关。所有 PR 变更文件（Dockerfile、README.md、image-info.yml、meta.yml）内容均正确无误，无需任何代码修改。建议重新触发 CI 构建（retry），待 openEuler 仓库源 HTTP/2 服务恢复后构建应能通过。
+CI 分析报告结论：失败源于 `repo.openeuler.org` 服务器端 HTTP/2 流传输异常，属于 CI 基础设施/仓库服务端问题。PR 新增的 Dockerfile 中 `dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 命令本身完全正确。应等待仓库基础设施恢复后重新触发 CI 构建，无需修改任何代码。
 
 ## 潜在风险
 无
