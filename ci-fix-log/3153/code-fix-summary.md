@@ -1,19 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），与 PR 代码变更无关。
+CI 基础设施错误（infra-error），无需修改源代码。
 
 ## 修改的文件
-无
+无（infra-error，不涉及源代码修改）
 
 ## 修复逻辑
-CI 失败分析报告明确指出：
+CI 失败分析报告确认本次失败类型为 **infra-error**。根因是 CI 工具 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑存在 bug：git diff 输出的路径为 `README.md`（不含前导 `/`），而 CI 预检工具期望 `/README.md`（含前导 `/`），导致路径格式不匹配触发 `[Path Error]` 校验失败。
 
-1. **失败类型**：`infra-error`（CI 基础设施问题）
-2. **根因**：CI appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py:273`）对仓库根目录下的 `README.md` 执行了不适用的路径校验。工具从 git diff 获取的路径为不带前导 `/` 的相对路径（`README.md`），但校验时期望的格式带前导 `/`（`/README.md`），导致字符串精确匹配失败。
-3. **与 PR 变更的关系**：PR #3153 仅更新了 `README.md` 和 `README.en.md` 中基础镜像 tags 列表的文档内容，未修改任何 Dockerfile、构建脚本、镜像目录结构或 `image-list.yml`。CI 失败是工具本身的路径归一化不一致问题，与 PR 代码变更内容无关。
+该错误与 PR #3153 的实际代码变更无关——PR 仅更新了 README.md 中的基础镜像可用 tag 列表，属于纯文档变更。PR 自身代码（README.md）不存在任何语法、格式或逻辑问题。
 
-根据约束规则"如果分析报告指出是 infra-error（CI 基础设施问题），在 output_file 中说明无需代码修改，不要强行改代码"，本次不做任何源码修改。
+根据工作流程规范，infra-error 类型不应对源代码进行强行修改。正确的修复应在 CI 工具 `eulerpublisher` 的路径比较逻辑中对根目录文件路径做归一化处理（统一添加或移除前导 `/`），或使纯文档类 PR 跳过 appstore 发布预检。这些修改不在本 PR 范围内。
 
 ## 潜在风险
-无。该问题需要由 CI 工具维护方修复 `eulerpublisher` 中的路径归一化逻辑，或对根目录文档类文件（非镜像目录下的文件）豁免 appstore 路径校验。
+无（本次未修改任何代码）
