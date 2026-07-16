@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施/网络问题（infra-error），由 `repo.openeuler.org` 仓库服务器端 HTTP/2 协议层错误导致多个 RPM 包下载失败，与 PR 代码变更无关。
+CI 基础设施故障（infra-error），非代码问题。`dnf install` 在 aarch64 runner 上从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR），导致构建失败。
 
 ## 修改的文件
-无
+无。此失败与 PR 代码变更无关，Dockerfile 内容正确无语法/逻辑错误，无需代码修改。
 
 ## 修复逻辑
-CI 分析报告确认该失败为 infra-error，Dockerfile 本身语法和内容均正确。失败原因是 aarch64 CI runner 与 `repo.openeuler.org` 之间的 HTTP/2 连接反复出现 `Stream error in the HTTP/2 framing layer: INTERNAL_ERROR (err 2)`，属于基础设施层面的偶发性问题。PR 仅新增了标准的 vvenc Dockerfile，未引入任何代码问题。建议重新触发 CI 构建。
+分析报告明确判定为 `infra-error`：`repo.openeuler.org` 镜像站在 aarch64 架构仓库的 HTTP/2 传输层存在临时性故障，属于 CI 基础设施层面的网络问题。修复方向为等待服务器端恢复后重新触发 CI 构建，不涉及代码层面的修改。
 
 ## 潜在风险
 无
