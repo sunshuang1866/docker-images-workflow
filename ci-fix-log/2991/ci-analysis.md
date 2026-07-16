@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: "仓库HTTP/2流错误"
-- 新模式症状关键词: "Curl error (92), HTTP/2 framing layer, Stream error, INTERNAL_ERROR, dnf install"
+- 新模式标题: 软件源 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 stream, INTERNAL_ERROR, dnf, repo.openeuler.org, guile, No more mirrors to try
 
 ## 根因分析
 
@@ -22,17 +22,18 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
-- 失败原因: CI aarch64 runner 上 `dnf install` 从 `repo.openeuler.org` 下载 openEuler 24.03-LTS-SP4 的 RPM 包时遭遇 HTTP/2 协议层流错误（Curl error 92），多个包（git-core、gcc-c++、guile）的下载流被远端异常关闭。其中 git-core 重试后成功、gcc-c++ 两次均失败（仍在队列中）、guile 耗尽所有镜像重试后彻底失败，导致构建终止。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
+- 失败原因: CI 构建节点（`ecs-build-docker-aarch64-04-sp`，aarch64）在通过 `dnf` 从 `repo.openeuler.org` 下载 RPM 包时，多个包（`git-core`、`gcc-c++`、`guile`）遭遇 HTTP/2 协议层流错误（Curl error 92: `HTTP/2 stream was not closed cleanly: INTERNAL_ERROR`）。`guile` 包在重试所有镜像后仍下载失败，导致 `dnf install` 以 exit code 1 结束。这是 openEuler 软件源服务器端或网络层的瞬时故障，与 PR 的代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** 此次 PR 新增的 Dockerfile 内容完全正确——`dnf install -y git gcc gcc-c++ make cmake` 是标准的依赖安装命令，语法无误。失败根因是 `repo.openeuler.org` 仓库在 aarch64 节点上存在 HTTP/2 服务端流中断问题，属于 CI 基础设施层面的瞬时网络故障，与 PR 代码变更无关。该 Dockerfile 在其他时间段或重试后可能完全正常通过。
+PR 变更仅添加了 vvenc 1.14.0 在 openEuler 24.03-LTS-SP4 上的新 Dockerfile 及配套的 README、image-info.yml、meta.yml 元数据文件。Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake` 命令语法正确，包名有效，软件源 URL 由基础镜像内置的 repo 配置决定。构建失败完全由软件源服务器端的 HTTP/2 协议故障导致，**与 PR 变更无关**。该失败在 CI 基础设施恢复后重新触发即可通过。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修复代码，重试 CI 即可。** 这是 `repo.openeuler.org` 仓库 HTTP/2 服务的瞬时故障，属 infra-error。Code Fixer 无需对 PR 内容做任何修改。建议在 CI 流水线中直接 re-run 该 job，等待仓库端恢复后重新构建。
+**无需代码修复**。此失败为 CI 基础设施/网络瞬时故障（`repo.openeuler.org` 软件源 HTTP/2 流层错误），属于 infra-error 类型。Code Fixer 不需要对 Dockerfile 或任何代码文件做修改。建议在 CI 中重新触发构建（re-trigger），网络恢复后构建应能正常通过。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 的 openEuler-24.03-LTS-SP4 仓库在 aarch64 节点的 HTTP/2 服务状态是否已恢复正常。
-- 若多次重试后该问题持续复现，需确认是否需要在 dnf 配置中禁用 HTTP/2 或切换镜像源（但当前日志仅显示单次构建失败，更倾向认定为瞬时故障）。
+- `repo.openeuler.org` 的 aarch64 软件源在构建时段是否存在已知的 HTTP/2 协议稳定性问题
+- 该 CI runner（`ecs-build-docker-aarch64-04-sp`）到 `repo.openeuler.org` 的网络链路是否稳定，是否需要配置 dnf 的 HTTP/1.1 降级回退策略或增加重试次数
+- 如果同一 job 反复出现该问题，可考虑将 dnf 配置中的 `max_parallel_downloads` 降低以减轻 HTTP/2 多路复用压力，或禁用 HTTP/2（设置 `http2=False` in dnf.conf proxy settings），但这是 CI 平台层面的调整，不涉及 PR 代码变更
