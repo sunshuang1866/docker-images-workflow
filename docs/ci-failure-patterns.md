@@ -646,6 +646,7 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 - PR #3108: `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile` — CI 构建环境无法连接 `archive.apache.org` 下载 Mesos 1.11.0 源码包，导致 Dock
 - PR #3103: `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile` — CI 构建时 `archive.apache.org` 不可达，导致 Spark 3.4.2 下载超时失败。
 - PR #2836: `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile` — Dockerfile 中 curl 下载 Cassandra 5.0.6 二进制包时，`archive.apache.o
+- PR #3088: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile` — CI 构建环境中 `archive.apache.org` 不可达，导致 Docker build 中 wget 下载 
 
 ---
 
