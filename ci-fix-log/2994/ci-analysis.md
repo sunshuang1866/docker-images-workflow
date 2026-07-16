@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 丢失
-- 新模式症状关键词: `rpc error: code = Unavailable`, `closing transport`, `graceful_stop`, `no builder`
+- 新模式标题: BuildKit构建器异常终止
+- 新模式症状关键词: closing transport, EOF, graceful_stop, no builder found, rpc error, buildkit
 
 ## 根因分析
 
@@ -16,25 +16,27 @@
 #7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
++-------------+-------------+--------------+
+| Check Items | Description | Check Result |
++-------------+-------------+--------------+
++-------------+-------------+--------------+
+Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建阶段，Run #7（`dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被提前终止。日志中 `graceful_stop` 和 `NO_ERROR` 表明 builder 收到了正常的关闭信号（非崩溃），极可能是 CI 基础设施的 timeout 或资源管理操作导致 builder 进程被回收。
+- 失败位置: Docker 构建步骤 `#7 [2/4]`（`dnf install` 下载仓库元数据阶段，已运行约 38 秒）
+- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 在 Docker 构建过程中异常终止。日志中 `graceful_stop`（goaway code: NO_ERROR）表明构建器守护进程被主动关闭（可能是 CI runner 资源回收、超时触发或节点维护），导致与构建器的 RPC 连接中断，客户端收到 EOF 后无法继续构建，后续查找该 builder 时返回 `no builder found`。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** PR 新增的 Dockerfile 内容正确，语法无误（BuildKit 成功解析 Dockerfile 并执行到第 7 步）。构建在 `dnf install` 下载 openEuler 包元数据阶段因 BuildKit builder 实例意外消失而中断，属于 CI 基础设施故障，非 Dockerfile 或代码问题。
+**无关。** PR 新增的 Dockerfile 本身没有语法错误或逻辑问题——构建在步骤 2/4（`dnf install` 系统依赖）执行到一半时，BuildKit 守护进程被外部终止。这是一个 CI 基础设施层面的故障，并非由 PR 代码变更触发。Dockerfile 中 `dnf install` 的包列表（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）均为 openEuler 仓库中的常规包，不存在导致构建器崩溃的因素。
 
 ## 修复方向
 
-### 方向 1（置信度: 低）
-**重试 CI 构建。** 这是 BuildKit builder 基础设施的一次性故障（builder 被提前回收），与 PR 代码无关。建议重新触发 CI 流水线重试，大概率会正常通过。
+### 方向 1（置信度: 高）
+**重试 CI 构建。** 这是 BuildKit 构建器被 CI 基础设施意外终止的瞬时故障。无需修改任何文件。在 CI 系统中重新触发该 workflow/job 即可，通常情况下重试后构建器资源正常分配即可通过。若重复出现，需联系 CI 运维排查 runner 节点的 BuildKit daemon 稳定性或资源限制问题。
 
 ## 需要进一步确认的点
-- CI 构建环境是否有超时限制导致 builder 在长时间 dnf 下载期间被终止（日志显示 dnf 下载约 38 秒后被 kill）
-- BuildKit builder pool 是否有最大存活时间限制
-- 本次构建是否与 CI 基础设施维护窗口冲突
-- 需确认同一 PR 在重试后的构建结果，以排除偶发性故障
-
-## 修复验证要求
-无需验证（infra-error，无代码修复）。
+- 该 job 对应的 x86-64 和 aarch64 两个架构的下游构建 job 是否均为相同失败模式，还是仅某一个架构的 builder 出现问题
+- CI runner（`ecs-build-docker-x86-hk`）在对应时间段的资源状况（内存/磁盘/并发构建数），以判断是否是资源耗尽导致的 BuildKit 被 kill
