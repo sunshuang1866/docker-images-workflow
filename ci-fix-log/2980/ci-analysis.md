@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 软件源HTTP/2传输错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 仓库镜像HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,21 +22,17 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: CI 构建环境从 openEuler 24.03-LTS-SP4 软件仓库镜像站下载 RPM 包时，HTTP/2 传输层发生流错误（`Curl error (92): INTERNAL_ERROR`），多个包（cmake-data、git-core、gcc-c++）均受波及。dnf 的重试机制成功恢复了 cmake-data 和 git-core 的下载，但 gcc-c++（13 MB）两次重试均失败，最终耗尽所有镜像重试次数，导致 `dnf install` 步骤整体失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
+- 失败原因: 在 `dnf install` 下载 258 个 RPM 包（总计 914 MB）的过程中，openEuler 24.03-LTS-SP4 仓库镜像站多次出现 HTTP/2 流错误（Curl error 92），导致 `gcc-c++` 包（13 MB）在所有已配置的镜像源上均下载失败，最终 `dnf` 因无可用镜像而报错退出。
 
 ### 与 PR 变更的关联
-**与 PR 无直接关联。** PR 的代码变更仅为新增一个合法的 Dockerfile（包含 `dnf install` 构建依赖的标准步骤）以及配套的 README/meta/image-info 元数据更新。日志显示 dnf 的依赖解析阶段已成功完成（`#7 724.4 Dependencies resolved.`），列出了全部 258 个待安装包，说明 Dockerfile 中声明的包名均有效且存在于仓库中。失败发生在下载阶段，是由 openEuler 24.03-LTS-SP4 软件仓库镜像服务器的 HTTP/2 传输层不稳定导致的，属于基础设施层面问题。
+**与 PR 无关。** 该 PR 仅新增了 `grADS 2.2.3` 在 `openEuler 24.03-LTS-SP4` 上的 Dockerfile（含 `dnf install` 构建依赖 30 行）及配套的 README、image-info.yml、meta.yml 元数据更新。Dockerfile 内容语法正确、依赖声明完整。构建失败的原因是 CI 运行环境中 openEuler 24.03-LTS-SP4 的 RPM 仓库镜像站发生了间歇性 HTTP/2 传输错误，属于 CI 基础设施层面的瞬时网络故障。日志中可见 `cmake-data` 和 `git-core` 两个包在初始下载失败后通过镜像重试成功下载，仅 `gcc-c++` 因反复失败而最终耗尽所有镜像。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建。** 该错误为 openEuler 24.03-LTS-SP4 仓库镜像服务器的瞬时性 HTTP/2 传输故障。观察日志中 cmake-data 和 git-core 均在首次出错后通过 dnf 自动重试成功下载，仅 gcc-c++ 因两次重试均失败而最终失败。在镜像服务器恢复稳定后，重新触发 CI 构建有较大概率直接通过，无需修改任何代码。
-
-### 方向 2（置信度: 中）
-**联系基础设施团队检查镜像站健康状态。** 如果多次重试均在同一仓库镜像上失败，需确认 `repo.****.org` 的 openEuler-24.03-LTS-SP4 仓库镜像是否因负载、证书或 HTTP/2 配置问题导致客户端 curl 流传输错误。考虑更换备用镜像源或降级使用 HTTP/1.1 协议（在 `dnf.conf` 中禁用 HTTP/2）。
+**无需修改代码，触发 CI 重试即可。** 该失败属于 openEuler 24.03-LTS-SP4 仓库镜像站的瞬时 HTTP/2 传输故障（Curl error 92），非 PR 代码问题。在 PR 中评论触发 CI 重新构建（recheck / retest），仓库镜像站在网络稳定时通常可正常提供服务。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 的官方仓库镜像站 `repo.****.org` 当前是否有已知的服务中断或性能降级公告。
-- 确认该失败是否在 aarch64 等其他架构的构建 job 中同样出现（本次提供的日志仅为 x86-64 架构的构建日志）。
-- 如果多次重试仍失败，确认是否有其他 openEuler 24.03-lts-sp4 镜像（如基础镜像 `openeuler/openeuler:24.03-lts-sp4` 的拉取及后续 `dnf install`）在同一时间段内也遭遇了类似问题，以确认是否为仓库侧的普遍性问题。
+- 如果多次重试后仍持续失败，需要排查 openEuler 24.03-LTS-SP4 仓库镜像站的 HTTP/2 配置稳定性，或考虑在 CI 构建环境中对 `dnf` 配置添加 `retries` 及 `timeout` 参数以增强对瞬时网络波动的容忍度。
+- 确认 CI 构建节点到 `repo.****.org` 的网络链路是否稳定（是否存在代理或中间层导致 HTTP/2 流被异常关闭）。
