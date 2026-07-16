@@ -1,18 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是基础设施问题（`infra-error`），CI Runner 节点缺少 `shunit2` Shell 测试框架，与本次 PR 的代码变更无关。
+无需代码修改。CI 失败为基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认：
-- PR 新增的 Dockerfile 及相关元数据文件（`README.md`、`image-info.yml`、`meta.yml`）均无语法或逻辑错误
-- Docker 镜像构建和推送步骤均成功完成
-- 失败发生在构建完成后的 CI 测试框架初始化阶段（`common_funs.sh` 第 13 行 `source shunit2`），属于 CI Runner 环境缺少 `shunit2` 依赖
+CI 分析报告明确指出：
+- Docker 镜像的构建 (#7-#11) 和推送已完整成功
+- 失败仅发生在构建完成后的 [Check] 容器验证阶段
+- 失败原因是 CI runner 环境中缺少 `shunit2` shell 单元测试框架（`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13: shunit2: No such file or directory`）
+- 根因与 PR #2898 的代码变更（新增 Go 1.25.6 + openEuler 24.03-LTS-SP4 的 Dockerfile 及配套元数据文件）完全无关
 
-**此问题需要在 CI 基础设施层面解决**（如在 CI Runner 节点上安装 `shunit2` 包），而非修改 PR 源代码。根据规范，`infra-error` 类型的 CI 失败不应对源代码进行修改。
+此问题需要 CI 运维团队在构建 runner 上安装 `shunit2`（例如 `dnf install shunit2`），或确保 `eulerpublisher` 测试框架依赖完整部署。源代码层面无需且不应做任何修改。
 
 ## 潜在风险
-无（无需代码修改）
+无。未修改任何源代码，不会引入新风险。
