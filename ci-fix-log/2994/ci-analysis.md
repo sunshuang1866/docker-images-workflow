@@ -5,33 +5,31 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder意外终止
-- 新模式症状关键词: no builder found, graceful_stop, closing transport, rpc error, Unavailable, buildkit
+- 新模式标题: BuildKit Builder 被终止
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, Unavailable, connection error
 
 ## 根因分析
 
 ### 直接错误
 ```
 #7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
+#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
-...
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile `RUN dnf install ...` 步骤（BuildKit 构建步骤 `#7 [2/4]`）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 执行约 38 秒后意外终止（`graceful_stop` + `NO_ERROR` goaway），导致 Docker 构建因 builder 不可用而失败。该错误与 PR 代码变更无关，属于 CI 基础设施层面的问题（builder 被系统回收或节点资源不足导致连接断开）。
+- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install -y ...`（Dockerfile 第 8-10 行的 dnf install 命令执行期间）
+- 失败原因: CI 构建所使用的 BuildKit daemon（`euler_builder_20260709_224657`）在构建过程中被外部调度系统优雅终止（`graceful_stop`），导致 Docker build 与 builder 之间的 gRPC 连接断开。该错误与 PR 代码变更无关，属于 CI 基础设施层面的瞬态故障。
 
 ### 与 PR 变更的关联
-**无关。** PR 仅新增了 scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（meta.yml、README.md、image-info.yml）。构建失败发生在 Dockerfile 第一个 `dnf install` 步骤中，且错误为 BuildKit builder 被意外终止，并非 `dnf` 命令本身的错误。Dockerfile 本身的语法和内容没有明显问题。
+**与 PR 无关**。PR 新增的 Dockerfile 仅包含标准的 `dnf install` 编译依赖和 Python 源码编译步骤，没有任何异常操作。构建在 `dnf install` 执行到 38 秒时因 BuildKit builder 被外部关闭而中断——这发生在基础镜像已成功拉取、第一个 RUN 指令执行期间，与 Dockerfile 内容无关。`graceful_stop` 标志明确说明 builder 是被人为/调度系统主动停止的，而非因构建错误崩溃。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 运行。** 这是 BuildKit builder 实例被 CI 基础设施意外回收导致的瞬态故障，通常重试即可成功。Code Fixer 无需对 PR 代码做任何修改。
+**重新触发 CI 构建**。此为 CI 基础设施瞬态故障（BuildKit daemon 被外部调度系统终止），PR 代码无需任何修改。直接 rerun failed job 即可验证。
 
 ## 需要进一步确认的点
-- BuildKit builder 终止的具体原因（资源不足、节点驱逐、超时等），需查看 CI 平台侧（Jenkins 节点管理日志 / BuildKit daemon 日志）确认。
-- 若多次重试均在相同位置失败，则需排查该 `dnf install` 命令是否触发了 OOM Killer 导致 builder 被终止。
+- 该 CI runner（`ecs-build-docker-x86-hk`）上是否有资源配额限制或并发构建数上限，导致调度系统在资源紧张时主动终止正在运行的 BuildKit builder。
+- 该时间点 CI 集群是否有其他大规模的构建任务调度或维护操作，导致 builder 被批量清理。
