@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施错误（infra-error），由 openEuler 官方仓库 `repo.openeuler.org` 的 HTTP/2 服务端间歇性协议错误（INTERNAL_ERROR）导致 aarch64 架构下部分 RPM 包下载失败。
+无需代码修改。CI 失败属于基础设施问题（infra-error），与 PR 代码无关。
 
 ## 修改的文件
-无（infra-error，无需修改任何源文件）
+无
 
 ## 修复逻辑
-根据 CI 失败分析报告，本次失败与 PR #2991 的代码变更无关。Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake` 是标准合法的命令，失败原因是 openEuler 上游仓库服务器在 aarch64 节点上反复出现 HTTP/2 流错误（`Stream error in the HTTP/2 framing layer: INTERNAL_ERROR (err 2)`），多个 RPM 包（git-core、gcc-c++、guile）均受影响。部分包经 dnf 自动重试后成功下载，guile 包耗尽了所有镜像重试后失败，最终 `dnf` 以 exit code 1 退出。
+CI 分析报告判定失败类型为 `infra-error`。根因是 `repo.openeuler.org` 在构建时段存在 HTTP/2 协议层稳定性问题（Curl error 92: Stream error in the HTTP/2 framing layer），导致 `dnf install` 在下载 aarch64 架构 RPM 包时部分包下载失败。Dockerfile 本身语法正确、逻辑合理，与本次 PR 代码变更无任何关联。
 
-**推荐操作**：重新触发 CI 构建。该问题属于临时性基础设施波动，等待上游仓库恢复后重试即可。
+建议直接重新触发 CI 运行，等待 openEuler 官方仓库 HTTP/2 服务恢复后即可通过。
 
 ## 潜在风险
 无
