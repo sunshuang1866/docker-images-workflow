@@ -4,9 +4,9 @@
 - PR: #2893 — chore(bind9): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: CI测试框架缺失
+- 新模式症状关键词: shunit2: file not found, common_funs.sh, source, eulerpublisher, Check, test failed
 
 ## 根因分析
 
@@ -20,31 +20,18 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI 环境的 Check 阶段（`eulerpublisher` 测试框架）
-- 失败原因: CI runner 上缺少 `shunit2` shell 测试框架，导致 Check 阶段的测试脚本 `common_funs.sh` 无法执行，容器功能检查直接失败。
-
-Docker 镜像构建和推送均已成功完成：
-- `[Build] finished`（编译 422/422 目标全部通过）
-- `[Push] finished`（镜像已推送至 `openeulertest/bind9:9.21.23-oe2403sp4-aarch64`）
-- 所有 Dockerfile 层（#9 编译、#10 用户创建、#11 配置拷贝、#12 权限设置、#13 导出推送）均正常完成
-
-失败仅发生在构建/推送之后的 Check 验证阶段，且错误出现在测试框架初始化步骤（`source shunit2`），与容器镜像内容无关。
+- 失败位置: CI Runner 上的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI 测试编排框架 `eulerpublisher` 的 [Check] 阶段调用 `common_funs.sh` 脚本，该脚本第 13 行尝试 `.` (source) 加载 `shunit2` 单元测试框架，但 `shunit2` 未安装或不在 `PATH` 中，导致 `[Check] test failed`。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 变更仅限于新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、配置文件、以及配套的元数据更新（README.md、image-info.yml、meta.yml）。Docker 构建完全成功，失败点在 CI 测试基础设施层。
+**无关联。** PR 仅新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、配置文件及元数据。Docker 镜像构建（所有 422 个编译目标 + 安装）和推送均成功完成（`[Build] finished`、`[Push] finished`），失败仅发生在 CI 自身的测试框架 [Check] 阶段，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI 基础设施问题，需在 CI runner 环境中安装 `shunit2` 包。此问题与 PR 代码变更完全无关，Code Fixer 无需对 Dockerfile 或任何仓库文件做任何修改。
-
-### 方向 2（置信度: 低）
-如果 `shunit2` 已安装但路径配置不正确，需检查 CI runner 上 `PATH` 环境变量或 `SHUNIT2_HOME` 配置，确保 `common_funs.sh` 能正确 source 到 `shunit2`。
+在 CI Runner 环境中安装 `shunit2` 测试框架。`shunit2` 是 shell 单元测试框架，通常在 openEuler 上可通过 `yum install shunit2` 或从 GitHub 克隆 `kward/shunit2` 仓库安装。此为 CI 基础设施问题，**Code Fixer 无需对 Dockerfile 或 PR 代码做任何修改**。
 
 ## 需要进一步确认的点
-1. 确认 CI runner 上 `shunit2` 是否已安装（`rpm -qa | grep shunit2` 或 `which shunit2`）
-2. 确认 `shunit2` 的安装路径是否在 shell 的 source 搜索路径中
-3. 确认该 Check 阶段是否在所有同类型 PR 上都失败（如果是，则为 CI 环境全局问题，需 CI 管理员修复）
-
-## 修复验证要求
-不适用。此失败为 `infra-error`（CI 基础设施问题），不涉及对 PR 代码或 Dockerfile 的修改，Code Fixer 无需处理。
+1. CI Runner 的 openEuler 版本上 `shunit2` 的包名是否确为 `shunit2`（不同发行版可能是 `shunit2`、`shUnit2` 或其他名称）。
+2. 是否同一个 Runner 上其他 PR 的 [Check] 阶段也在同一时间失败——若是，说明是 Runner 环境整体退化，非本 PR 独有。
+3. `eulerpublisher` 测试框架是否本应在本地 bundled 一个 `shunit2` 副本（而非依赖系统全局安装），若 upstream 变更导致 bundling 失效，需在 `eulerpublisher` 侧修复。
