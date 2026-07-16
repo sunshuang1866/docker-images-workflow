@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施故障（infra-error），BuildKit 构建器实例 `euler_builder_20260709_224657` 在 dnf 安装软件包过程中被主动关停（`graceful_stop`），与本次 PR 新增的 Dockerfile/配置文件无关。
+无需代码修改。此次 CI 失败为基础设施错误（infra-error），BuildKit 构建器实例在 `dnf install` 下载仓库元数据阶段崩溃（`EOF` + `graceful_stop`），与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-CI 分析报告确认：
-- 失败发生在 Docker build 步骤 #7（`RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）
-- 根因是 BuildKit builder 实例被基础设施侧意外关停，导致 gRPC 连接中断
-- Dockerfile 中的 `RUN dnf install` 指令语法和包名均正确
-- 与 PR 变更无关，属于 CI 平台调度/资源回收问题
+CI 分析报告明确判定失败类型为 `infra-error`，置信度高。构建器实例 `euler_builder_20260709_224657` 在执行 `RUN dnf install` 约 38 秒时意外终止（连接丢失、graceful_stop），此时尚未执行到任何与 PR 代码逻辑相关的步骤。PR 新增的 Dockerfile 语法正确，`dnf install` 参数合法，无需任何代码修改。
 
-**建议操作**：重试 CI job；联系 CI 平台运维排查 builder 的资源配额、空闲超时策略及节点并发竞争情况。
+**建议操作**：重新触发 CI 构建即可。若重试后仍然失败，需排查 CI 基础设施侧的 BuildKit 守护进程日志及 runner 资源配额。
 
 ## 潜在风险
 无
