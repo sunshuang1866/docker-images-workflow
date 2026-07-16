@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 infra-error，由 openEuler 24.03-LTS-SP4 官方 RPM 仓库镜像在构建时段出现 HTTP/2 协议层面的间歇性流错误（Curl error 92: INTERNAL_ERROR）导致。
+无需代码修改。CI 失败为 infra-error：openEuler 仓库镜像 HTTP/2 传输临时中断导致 `dnf install` 无法下载 RPM 包。
 
 ## 修改的文件
-无
+无（infra-error，无需代码变更）
 
 ## 修复逻辑
-根据 CI 失败分析报告，失败根因为构建环境中 `dnf install` 从 `repo.****.org` 下载 `gcc-c++`、`cmake-data`、`git-core` 等 RPM 包时遭遇 HTTP/2 流协议错误，其中 `gcc-c++` 包在所有镜像重试耗尽后失败。该错误与 PR #2980 的新增 Dockerfile 及元数据文件变更无关，Dockerfile 中 `dnf install` 命令和包名列表均合法正确。
+CI 构建在 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6` 的 `dnf install` 步骤中，从 openEuler 24.03-LTS-SP4 仓库镜像下载 `gcc-c++` 等 RPM 包时，HTTP/2 传输层多次出现 `Curl error (92): INTERNAL_ERROR` 流错误。重试耗尽所有镜像后下载失败。同类错误同时发生在 `cmake-data` 和 `git-core` 包上（`git-core` 重试后成功），表明是仓库镜像在构建时段的临时性网络问题，与 PR 代码变更完全无关。
 
-此为 CI 基础设施网络故障，应等待仓库镜像恢复后重新触发 CI 流水线。
+PR 仅新增了一个格式正确的 Dockerfile 及三个配置文件的条目，无代码逻辑错误。解决方案为在非高峰时段重新触发 CI 构建（rerun）。
 
 ## 潜在风险
 无
