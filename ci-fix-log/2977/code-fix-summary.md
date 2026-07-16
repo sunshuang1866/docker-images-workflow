@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败原因为 `repo.openeuler.org` 镜像站在 aarch64 架构上的 HTTP/2 流层传输错误（Curl error 92: INTERNAL_ERROR），属于 CI 基础设施层的临时性网络故障，与 PR 代码变更无关。
+CI 基础设施故障：openEuler 官方软件源 `repo.openeuler.org` 在 aarch64 构建节点上发生 HTTP/2 传输不稳定，导致 `yum install` 下载包失败。与 PR 代码变更无关，无需修改任何源代码。
 
 ## 修改的文件
-无
+无。此失败为 infra-error，不需要代码修改。
 
 ## 修复逻辑
-分析报告确认：
-- PR 新增的 Dockerfile 语法正确，`yum install` 依赖声明完整无缺失
-- 4 次 HTTP/2 流错误均指向 `repo.openeuler.org` 的 aarch64 仓库传输层问题
-- 前 3 个出错包（gcc、kernel-headers、perl-MIME-Base64）经 yum 重试后下载成功，第 4 个包（vim-common）耗尽所有镜像后失败
+分析报告明确指出此为 infra-error（置信度: 高）：构建日志中的 `Curl error (92): Stream error in the HTTP/2 framing layer: INTERNAL_ERROR` 和 `Curl error (56): SSL_ERROR_SYSCALL` 均由 openEuler 官方软件源在构建时段的瞬时传输不稳定导致。Dockerfile 中的 `RUN yum install -y` 命令语法正确，包名均有效。
 
-**推荐操作**：手动重试 CI Job。镜像站恢复后重新触发构建即可通过，无需对 Dockerfile 做任何修改。若多次重试仍失败，再考虑增加 `yum install --setopt=retries=10` 或切换镜像源。
+推荐操作：在 openEuler 仓库服务恢复稳定后重新触发 CI 构建（Retry）。
 
 ## 潜在风险
-无
+无。
