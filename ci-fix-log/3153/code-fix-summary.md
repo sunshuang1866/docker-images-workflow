@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施（infra-error）：CI 工具 `eulerpublisher` 对根级 `README.md` 文件错误地执行了 appstore 发布规范路径校验，期望路径 `/README.md`（带前导 `/`）与 `git diff` 输出的 `README.md`（不带前导 `/`）不匹配，导致校验失败。`README.md` 为仓库根级文档，不隶属于任何应用镜像目录，本不应纳入 appstore 镜像发布规范检查范围。
+无需代码修改。CI 失败为基础设施问题（infra-error），CI 工具 `eulerpublisher` 的 appstore 路径校验逻辑中存在路径格式不匹配：期望 `/README.md` 但 git diff 上报 `README.md`（缺少前导 `/`），与 PR #3153 的文档变更内容无关。
 
 ## 修改的文件
-无代码修改。`README.md` 的内容变更（更新可用基础镜像标签列表）是合法的纯文档变更，无需修改。
+无
 
 ## 修复逻辑
-此失败属于 CI 基础设施误报，根因在 `eulerpublisher/update/container/app/update.py` 的路径解析逻辑中缺少对根级文档文件（不隶属于任何 `{image-version}/{os-version}/Dockerfile` 结构的文件）的过滤或豁免机制，以及对路径格式前导 `/` 的统一标准化处理。修复应在 CI 工具侧进行，不在 PR 源码变更范围内。当前 PR 仅修改了 `README.md`（和 `README.en.md`），内容正确，无需代码层面改动。
+CI 分析报告确认失败类型为 `lint-error`，根因定位于 CI 工具 `eulerpublisher/update/container/app/update.py:273` 的 appstore 发布路径校验逻辑。该工具在比较文件路径时未进行路径规范化（添加前导 `/`），导致 `git diff` 上报的 `README.md` 与期望的 `/README.md` 字符串匹配失败。
+
+PR #3153 仅更新了 `README.md` 中基础镜像 tags 的文档内容，属于纯文档类变更，文件路径和内容均正确。此 CI 失败是基础设施工具缺陷，应在 eulerpublisher 仓库中修复路径比较逻辑，而非修改本仓库代码。
 
 ## 潜在风险
-无。`README.md` 内容变更仅为文档更新，不涉及任何构建逻辑、镜像配置或版本依赖。
+无（无代码变更）
