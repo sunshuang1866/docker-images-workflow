@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 `infra-error`——CI 基础设施工具 `eulerpublisher` 的 appstore 路径校验逻辑对仓库根目录的 `README.md` 产生了误报。
+无需代码修改。CI 失败属于 **infra-error**——CI 编排工具 `eulerpublisher` 的 appstore 发布规范预检工具（`update.py`）存在路径比较缺陷：git diff 输出文件路径为 `README.md`（无前导 `/`），而校验逻辑期望 `/README.md`（带前导 `/`），字符串不匹配导致纯文档 PR 被误判为 appstore 规范违规。PR #3153 仅修改 README 文档内容，代码本身正确无误。
 
 ## 修改的文件
-无（无需修改任何源码文件）
+无。本 PR 的 `README.md` 无需任何修改。
 
 ## 修复逻辑
-1. PR #3153 仅更新 `README.md` 中的基础镜像 Tags 列表（文档变更），不涉及任何 Dockerfile、应用镜像或 appstore 上架相关文件。
-2. CI 失败的直接原因是 `eulerpublisher/update/container/app/update.py` 中的 appstore 发布规范预检工具，将 git diff 中的 `README.md` 路径与 appstore 期望路径 `/README.md` 进行严格字符串比较，产生了误报。`README.md` 位于仓库根目录，不属于应用镜像文件，不应被纳入 appstore 路径校验。
-3. 该问题属于 CI 基础设施工具层面的缺陷，需在 `eulerpublisher` 仓库中修复（排除仓库根级文档文件或修正路径比较逻辑），而非在 PR 源码中修改。
+CI 失败根因位于 `eulerpublisher/update/container/app/update.py`（CI 编排工具仓库，非本仓库），是其路径比较逻辑缺少路径标准化所致。修复应提交到 `eulerpublisher` 仓库，在路径比较时对 git diff 输出和内部期望路径统一添加 `os.path.normpath` 或统一前导 `/` 标准化处理。本仓库（openEuler-docker-images）中的 `README.md` 内容无问题，无需且不应修改。
 
 ## 潜在风险
-无——当前 PR 无任何代码变更，`README.md` 文档内容更新正确无误。
+无。不对本仓库任何文件进行修改，不存在风险。
