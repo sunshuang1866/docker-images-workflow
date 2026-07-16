@@ -1,13 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施瞬态故障（infra-error），非代码问题。
+CI 构建在 BuildKit 初始化阶段失败（`Could not find the file / in container`），属于 Docker 容器运行时基础设施故障（infra-error），**无需修改任何源代码**。
 
 ## 修改的文件
-无
+无。本次 CI 失败与 PR #2932 的代码变更无关，发生在 BuildKit 启动阶段，早于任何 Dockerfile 指令的执行。
 
 ## 修复逻辑
-CI 失败发生在 buildx/buildkit 容器启动阶段（`ERROR: Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`），早于任何 Dockerfile 构建步骤的执行。PR 中新增的 Dockerfile 及元数据文件内容语法正确、逻辑无问题，且同类 glibc Dockerfile（sp2、sp1 版本）均已通过 CI。该失败为 CI runner 节点上 Docker daemon 或 buildkit 的临时性状态异常，属于 infra-error，无需对代码做任何修改。建议重新触发 CI 流水线。
+- **根因**：构建节点 `ecs-build-docker-x86-hk` 上的 Docker 守护进程或 containerd 存储驱动出现瞬态异常，导致 `docker-container` 驱动模式下 BuildKit 容器创建失败。
+- **修复方向**：重新触发 CI 构建。该故障为 Docker 容器运行时的瞬态基础设施问题，通常重试即可恢复。若重试后仍失败，需排查构建节点上的 Docker 守护进程状态及 containerd 存储驱动（overlay2）是否正常。
 
 ## 潜在风险
-无
+无（无代码修改）。
