@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 openEuler 24.03-LTS-SP4 仓库镜像（repo.openeuler.org）的临时网络波动，导致 aarch64 构建节点在执行 `yum install` 下载依赖包时遭遇 HTTP/2 流错误（Curl error 92）和 SSL 读取失败（Curl error 56），最终 `vim-common` 包因所有镜像尝试失败而下载失败。
+无需代码修改。CI 失败为基础设施问题（infra-error）：`repo.openeuler.org` 镜像站在 aarch64 runner 上出现 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），导致 `vim-common` RPM 包下载失败。172/173 个 RPM 包已成功下载，Dockerfile 中 `yum install` 命令语法正确、包名有效。
 
 ## 修改的文件
-无。该失败类型为 `infra-error`，与 PR #2977 的代码变更（新增 Dockerfile、更新 README/image-info.yml/meta.yml）完全无关。
+无。
 
 ## 修复逻辑
-分析报告明确指出：
-- 失败类型: infra-error
-- 根因: `repo.openeuler.org` 仓库镜像间歇性网络波动
-- 与 PR 变更的关联: 无关
-- 推荐方向: 重试 CI 构建
-
-Dockerfile 中 `yum install` 命令语法、包名配置均无错误（日志中 `Dependencies resolved` 阶段显示 173 个包均被正确识别）。等待 openEuler 仓库镜像恢复后重新触发 CI 构建即可通过。
+分析报告判定失败类型为 `infra-error`，失败原因与 PR 代码变更无关。`Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile` 中的 `yum install` 命令参照已有 `24.03-lts-sp3` 版本模式编写，语法和包名均正确。根据指令——"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"——本次不做代码变更。建议重新触发 CI 构建（retry），待 `repo.openeuler.org` 网络恢复后应能正常通过。
 
 ## 潜在风险
-无。不涉及任何代码修改。
+无。未修改任何代码。
