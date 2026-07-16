@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败原因为 `infra-error`（CI 基础设施问题），`repo.openeuler.org` 仓库在构建时段发生网络抖动（HTTP/2 流错误、SSL 连接中断），与 PR 代码无关。
+无需代码修改。CI 失败为基础设施网络瞬态故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无。此为 `infra-error`，无需修改任何代码。
+无
 
 ## 修复逻辑
-CI 分析报告明确判定此次失败为 `infra-error`，置信度高。`yum install` 下载 RPM 包时 `repo.openeuler.org` 仓库多次出现 `Curl error (92)`: HTTP/2 流错误和 `Curl error (56)`: SSL 连接中断，导致多个包下载失败。PR 仅新增 brpc 1.16.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据，代码本身无问题。应重新触发 CI 构建，重试极大概率通过。
+CI 构建失败由 `repo.openeuler.org` 仓库服务器在构建时段出现 HTTP/2 连接不稳定（Curl error 92: HTTP/2 framing layer INTERNAL_ERROR）和 SSL 传输中断（Curl error 56: SSL_ERROR_SYSCALL）引起。PR 仅新增了一个标准的 brpc Dockerfile，`yum install` 安装的均为 openEuler 24.03-LTS-SP4 官方仓库标准包，Dockerfile 本身无任何问题。触发重试（retrigger CI build）即可。
 
 ## 潜在风险
 无
