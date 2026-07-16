@@ -1,15 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败为基础设施问题（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败属于 infra-error（CI 基础设施问题），而非 PR 代码缺陷。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确判定失败类型为 `infra-error`。失败原因是 CI appstore 发布规范预检工具 `update.py:273` 对根级 `/README.md` 的路径校验存在逻辑误报：实际路径就是 `/README.md`，与期望路径一致，但工具仍判定 FAILURE。该 PR 仅修改了 `README.md` 的内容（更新支持的 Tags 列表），不涉及任何目录结构调整、Dockerfile 变更或新增镜像，与 CI 预检工具的校验逻辑毫无关联。
+CI 分析报告明确指出：失败原因是 appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py:273`）在路径校验时，将 git diff 产出的相对路径 `README.md` 与期望的绝对路径 `/README.md` 做字符串比对，因缺少前导 `/` 导致路径匹配失败。这是 CI 工具的路径归一化缺陷，属于 infra-error。
 
-根据任务指令中"如果分析报告指出是 `infra-error`（CI 基础设施问题），在 output_file 中说明无需代码修改，不要强行改代码"的要求，本次不做任何源代码修改。该问题应由 CI 平台维护者排查 `update.py:273` 处路径校验逻辑，或为纯文档类 PR 添加 appstore 校验豁免规则。
+PR #2790 仅修改了 `README.md` 和 `README.en.md` 两个文档文件（新增 24.03-lts-sp3、25.09 等镜像 tag 条目，更新 latest 标签），不涉及任何 Dockerfile 或构建逻辑变更，文档变更本身合法且正确。CI 在构建/编译阶段也未报任何错误。
+
+**结论：问题根源在 CI 工具侧，需要由 CI 维护团队修复 `eulerpublisher/update/container/app/update.py` 中的路径归一化逻辑。PR 代码无需任何修改。**
 
 ## 潜在风险
-无（未修改任何代码）
+无（未对任何源代码文件进行修改）
