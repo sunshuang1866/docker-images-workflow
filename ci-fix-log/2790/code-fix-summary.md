@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复——此失败为 **infra-error**（CI 基础设施问题）。
+无需代码修改。CI appstore 发布规范检查（`update.py`）对纯文档 PR 误报路径校验失败，属于 CI 基础设施/配置问题，非 PR 代码缺陷。
 
 ## 修改的文件
-无
+- 无
 
 ## 修复逻辑
-CI 分析报告明确指出该失败属于 **infra-error**，根因是 CI 工具 `eulerpublisher` 的 appstore 发布规范检查器存在路径校验 bug：对仓库根目录的 `README.md` 文件报告路径错误，声称期望路径应为 `/README.md`，但 `README.md` 本身就是根目录文件 `/README.md`，CI 工具的判定自相矛盾，属于误报（假阳性）。
+PR #2790 仅修改了根级 `README.md`（更新可用镜像 Tags 列表），不含任何 Dockerfile、meta.yml 等镜像构建相关文件。CI appstore 发布规范预检工具（`update.py:273`）的路径校验逻辑要求变更文件必须属于合法的应用镜像目录结构（如 `Category/ImageName/Version/OS-Version/Dockerfile`），根级 `README.md` 不满足该约束，因此报 `[Path Error]`。
 
-PR #2790 为纯文档变更，仅修改了 `README.md`，未涉及任何应用镜像的 Dockerfile、元数据或构建文件。该失败与 PR 的实际变更内容无关，属于 CI 基础设施层面的 bug，不需要对源码仓库中的任何文件进行修改。
+这不是代码层面的 bug，`README.md` 的内容本身没有问题。根据 CI 分析报告方向 1，修复应在 CI Pipeline 触发条件中增加过滤逻辑：当 PR 仅包含非镜像目录下的文档文件（如根级 `README.md`）变更时，跳过 appstore 规范检查步骤。此改动需修改 Jenkins/CI 流水线配置或 `update.py` 的白名单规则，均不在本次 PR 的 `pr.changed_files` 范围内。
 
 ## 潜在风险
-无——未修改任何代码。建议 CI 团队排查 `eulerpublisher/update/container/app/update.py:273` 附近路径校验函数的 leading-slash 归一化逻辑。
+无（未修改任何代码）
