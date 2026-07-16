@@ -5,7 +5,7 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2测试框架缺失
+- 新模式标题: shunit2 缺失
 - 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
@@ -24,17 +24,25 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 的 `eulerpublisher` 容器检查阶段，文件 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI Runner 上缺少 `shunit2` shell 单元测试框架（`common_funs.sh` 第 13 行尝试 source 该框架但文件不存在）。Docker 镜像构建（`#8 DONE 268.4s`）和推送（`#11 DONE 58.0s`）均已成功完成，失败仅发生在构建后验证（[Check]）阶段。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13（CI 测试基础设施脚本）
+- 失败原因: CI runner 的测试环境中缺少 `shunit2` shell 测试框架，导致 eulerpublisher 的 [Check] 阶段无法运行容器验收测试
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增了 postgres 17.6 在 openEuler 24.03-lts-sp4 上的 Dockerfile、entrypoint.sh、README.md 和 meta.yml 条目。Docker 构建和推送均成功，失败原因是 CI Runner 缺少 `shunit2` 测试框架，属于 CI 基础设施问题。
+**与 PR 变更无关。** 本次 PR 新增的 Dockerfile 构建和镜像推送均成功完成：
+- Docker 镜像编译（PostgreSQL 17.6 源码 `make && make install`）成功，`#8 DONE 268.4s`
+- 镜像构建（`COPY entrypoint.sh`、`RUN chmod`）成功，`#10 DONE 0.1s`
+- 镜像导出与推送成功，`#11 DONE 58.0s`，manifest 已推送到 docker.io
+
+失败发生在 CI 流水线的 `[Check]` 阶段——`eulerpublisher` 工具尝试运行 `common_funs.sh` 测试脚本时，发现 `shunit2` 命令不存在。`shunit2` 是一个 Shell 单元测试框架，是 CI 测试基础设施的依赖，而非 PR 中 Dockerfile 或 entrypoint.sh 应该安装的组件。该问题是 CI runner 环境配置问题，与本次代码变更完全无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI Runner 上安装 `shunit2` shell 测试框架。`shunit2` 是一个 Bash 单元测试库，需确保其路径在 `common_funs.sh` 的 source 语句可访问（通常安装到 `/usr/share/shunit2/shunit2` 或 `/usr/local/bin`）。此问题应由 CI 基础设施团队处理，Code Fixer 无需对 PR 代码做任何修改。
+在 CI runner 的测试环境中安装 `shunit2`。`shunit2` 是一个独立的 Shell 测试框架（通常为单个 `.sh` 文件），需确保其安装路径在 `common_funs.sh` 的 `PATH` 可搜索范围内，或修改 `common_funs.sh` 中 `shunit2` 的引用为绝对路径。
 
 ## 需要进一步确认的点
-- 确认 CI Runner 镜像中是否应预装 `shunit2`（可能是 Runner 模板变更或退化导致）
-- 确认该 Runner 上的其他 PR 是否也存在同样的 `shunit2: No such file or directory` 错误（判断是全局问题还是仅此 Runner 节点问题）
+- 确认其他 PR（历史通过的 postgres 镜像提交）的 Check 阶段是否也曾调用 `shunit2`，以判断这是否是新引入的 CI runner 环境变更导致的问题
+- 确认 `shunit2` 在 CI runner 上的预期安装路径（`common_funs.sh` 通过 `shunit2` 裸命令引用，未指定路径，说明期望在 `PATH` 中）
+
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+无。本次失败为 CI 基础设施问题（infra-error），PR 的 Dockerfile 和 entrypoint.sh 无需修改。
