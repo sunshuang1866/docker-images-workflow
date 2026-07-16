@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施误报：appstore 发布规范路径校验对纯文档 PR 的 `README.md` 错误触发路径校验失败。无需代码修改。
+CI 失败类型为 `infra-error`，无需代码修改。PR #2790 仅更新了根级 `README.md`（文档变更），但 CI 流水线错误地将其路由到了应用市场（appstore）发布规范校验流水线，导致 `eulerpublisher` 工具报告 `[Path Error]`。
 
 ## 修改的文件
-无代码修改。
+无。该问题属于 CI 基础设施层面的流水线路由配置问题，不涉及源代码缺陷。
 
 ## 修复逻辑
-CI 分析报告定位的根因是：PR #2790 仅修改了仓库根目录的 `README.md` 文档（更新支持的 Tags 列表），不涉及任何应用镜像构建文件（Dockerfile、meta.yml、image-list.yml 等）。CI 的 appstore 发布规范检查器设计用于校验镜像构建 PR 中的文件路径（格式为 `{category}/{image}/{version}/{os-version}/`），却将根级文档文件 `README.md` 错误地纳入检查范围，导致路径校验失败。
-
-这是一个 **infra-error**（CI 基础设施误报），而非代码缺陷。`README.md` 的内容变更完全合法，无需修改。正确的解决方向是由 CI pipeline 配置调整，使纯文档类变更跳过 appstore 规范校验（例如通过 PR 标签 `documentation` 或 `docs-only` 区分文档 PR 与镜像构建 PR）。
+分析报告明确指出失败类型为 `infra-error`，置信度中等。根因是 CI 流水线将纯文档类 PR 误触发至应用市场发布检查，而非 `README.md` 内容本身有错误。PR 的文档变更（更新支持的镜像 Tag 列表）是合法的维护操作。需要修复的是 CI 流水线的触发条件配置——使其仅对包含 `meta.yml`、`Dockerfile` 等构建文件的 PR 触发 appstore 检查，而非对所有 PR 触发。
 
 ## 潜在风险
-无。PR 仅涉及文档更新，不影响任何构建产物或镜像发布。
+无。未对任何源代码文件进行修改。
