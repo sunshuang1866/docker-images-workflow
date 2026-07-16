@@ -5,7 +5,7 @@
 - 失败类型: infra-error
 - 置信度: 低
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit启动失败
+- 新模式标题: BuildKit 启动失败
 - 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, Error response from daemon
 
 ## 根因分析
@@ -25,27 +25,24 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: `/home/jenkins/agent-working-dir/workspace/multiarch/openeuler/x86-64/openeuler-docker-images`（CI runner, x86-64 架构）
-- 失败原因: Docker BuildKit builder 容器（`buildx_buildkit_euler_builder_20260709_2057000`）在 CI runner 上启动后，Docker daemon 无法访问其根文件系统 `/`，导致 buildx 实例创建失败。实际的 Dockerfile 构建过程从未开始执行。
+- 失败位置: CI 基础设施层 — Docker BuildKit builder 容器创建阶段（`[internal] booting buildkit`）
+- 失败原因: Docker daemon 在创建 BuildKit 构建容器 `buildx_buildkit_euler_builder_20260709_2057000` 时，报 `Could not find the file / in container`，容器未能正常启动。该错误发生在 builder 启动后的文件系统检查阶段（docker daemon 尝试在刚创建的容器中查找根文件系统路径 `/`），属于 Docker daemon 或存储驱动的运行时异常，而非代码问题。实际 Dockerfile 构建步骤从未执行。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 证据如下：
-1. CI 预检阶段的 `eulerpublisher` 镜像规范检查已经通过（日志：`The image specification check for releasing on appstore has passed.`），证明新增的 Dockerfile、meta.yml、image-info.yml、README.md 均通过格式校验。
-2. 错误发生在 buildx builder 实例的**内部基础设施层**（`[internal] booting buildkit`），此时 `moby/buildkit:buildx-stable-1` 镜像已拉取成功、容器已创建，但 Docker daemon 在尝试与容器交互时失败。
-3. PR 新增的 Dockerfile 内容从未被送往 BuildKit 进行解析和执行。
+**与 PR 无关。** PR 仅新增了一个 glibc 2.42 Dockerfile 及对应的 README/doc/meta 元数据更新。CI 在检测到变更、克隆仓库、通过镜像规范检查后，在启动 BuildKit builder 容器阶段即失败——此时尚未执行任何 Dockerfile 构建指令（如 `RUN dnf install`、`wget`、`./configure` 等）。日志中无任何构建步骤输出（无 `#2`、`#3` 等后续步骤编号），证实失败发生在构建启动前的基础设施层。
 
 ## 修复方向
 
 ### 方向 1（置信度: 低）
-CI runner（`ecs-build-docker-x86-hk`）上的 Docker daemon 状态异常或 buildx builder 实例残留。建议：
-- 重试 CI job（重新触发构建流水线），排除一次性的 Docker daemon 临时故障。
-- 若重试后仍然失败，检查 runner 的 Docker daemon 日志（`journalctl -u docker`），确认存储驱动（overlay2/devicemapper）是否正常，确认 `buildx_buildkit_*` 容器是否有残留未清理的僵尸容器。
+重新触发 CI（retry/re-run）。BuildKit builder 容器 "Could not find the file /" 通常是 Docker daemon 与底层存储驱动（overlay2/devicemapper）之间的瞬时状态不一致导致，重试时大概率不再复现。此为典型临时性 infra 故障，无需修改任何代码。
 
-### 方向 2（可选，置信度: 低）
-若重试后 BuildKit 成功启动但构建本身失败，则可能需要检查 Dockerfile 中的构建依赖是否完整（如 glibc 编译可能需要 `texinfo`、`gawk`、`python3-devel` 等包），但当前日志不包含任何 Dockerfile 构建阶段的输出，无法判断。
+### 方向 2（置信度: 低）
+如反复复现，需检查 CI 节点的 Docker daemon 状态（`systemctl status docker`）和磁盘空间/存储驱动健康度。`euler_builder_*` builder 实例可能因残留的脏状态导致新容器创建异常，可尝试在该节点上执行 `docker buildx rm euler_builder_*` 清理遗留 builder 后重试。
 
 ## 需要进一步确认的点
-1. **获取 CI runner 的 Docker daemon 日志**：确认 `buildx_buildkit_euler_builder_20260709_2057000` 容器为何无法使用根文件系统（可能是 overlay 挂载失败、存储驱动 bug、或容器创建后立即崩溃）。
-2. **确认 runner 磁盘空间和 inode 状态**：`docker system df` 显示存在 1 个 14.85GB 的 Local Volume，需确认磁盘是否接近满载。
-3. **检查是否有残留的 buildx builder 实例**：在 runner 上运行 `docker buildx ls`，清理旧的 builder（`docker buildx rm`）后重试。
-4. **重试构建**：若一次性故障，重新触发 CI 即可通过；若持续失败，需要 runner 管理员介入排查 Docker 环境。
+- 同一 CI runner（`ecs-build-docker-x86-hk`）上的其他并发或近期 PR 是否也出现相同的 BuildKit 启动失败，以判断是节点级问题还是系统性故障
+- Docker daemon 日志中是否有 overlay2/storage 相关的 I/O 错误或 corruption 日志
+- 该 runner 的磁盘空间是否充足（BuildKit 容器创建需要临时文件系统空间）
+
+## 修复验证要求
+无需验证（infra-error，非代码问题，与 Dockerfile 内容无关）。重试 CI 即可。
