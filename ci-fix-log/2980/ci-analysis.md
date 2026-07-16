@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: 仓库镜像 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -19,24 +19,20 @@
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
 #7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
-Error: Error downloading packages:
+#7 ERROR: process "/bin/sh -c dnf install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
 - 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库镜像在通过 HTTP/2 协议传输过程中出现流中断（Curl error 92: INTERNAL_ERROR），导致多个包下载失败。其中 `cmake-data` 和 `git-core` 经重试后成功下载，但 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 两次重试（stream 65、stream 83）均失败，最终 dnf 耗尽所有镜像尝试后放弃。
+- 失败原因: CI 构建环境在通过 dnf 从 openEuler 24.03-LTS-SP4 仓库镜像下载 RPM 包时，多个包（`cmake-data`、`git-core`、`gcc-c++`）遭遇 HTTP/2 流错误（Curl error 92）。`gcc-c++` 包在重试所有可用镜像后仍下载失败，导致整个 `dnf install` 命令退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 仅新增了一个 Grads 2.2.3 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关文档/元数据更新。Dockerfile 自身语法和 `dnf install` 包列表均正确——依赖解析阶段（`Dependencies resolved`）已成功完成，258 个包均已识别，失败仅发生在后续的实际下载阶段。此错误是 openEuler 24.03-LTS-SP4 仓库镜像的 HTTP/2 服务端临时性不稳所致，属于 CI 基础设施问题。
+**与 PR 无关。** PR 变更仅为新增 GraDS 2.2.3 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 中的 `dnf install` 命令语法正确，所列包名均为 openEuler 24.03-LTS-SP4 仓库中存在的合法包名。失败完全由 openEuler 包仓库镜像的网络层 HTTP/2 协议中断引起，属于 CI 基础设施/网络层面的瞬态故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试触发 CI 重新构建。** 由于根因是 RPM 仓库镜像 HTTP/2 协议层临时性故障，属于瞬态网络问题，无需任何代码修改。在 PR 上重新触发 CI 流水线（如 `/retest` 或在 Jenkins 中重新构建）即可。若多次重试均失败，则需排查 openEuler 24.03-LTS-SP4 仓库镜像的服务健康状态。
-
-### 方向 2（置信度: 低）
-若问题持续复现，可考虑在 Dockerfile 的 `dnf install` 命令中添加 `--setopt=retries=10` 或 `--setopt=timeout=30` 增加下载重试容忍度。但此方案是绕过而非修复根因，仅作为镜像持续不稳定的临时变通。
+**无需代码修复。** 此为 CI 基础设施问题（openEuler 24.03-LTS-SP4 仓库镜像 HTTP/2 服务不稳定），建议重试 CI 构建。待镜像仓库服务恢复正常后，同一 Dockerfile 可正常通过构建。
 
 ## 需要进一步确认的点
-1. 确认此次构建失败在同一时间段内是否其他 PR 也遇到了相同的 `Curl error (92)`——如果是，说明是 openEuler 24.03-LTS-SP4 仓库镜像的普遍性问题。
-2. 确认 aarch64 架构的构建结果——日志仅包含 x86_64 的构建过程，若 aarch64 也失败，需检查其日志是否指向同一类网络问题。
+- 确认 openEuler 24.03-LTS-SP4 的 `repo.****.org` 仓库镜像在构建时段的可用性状态。若该镜像站持续不稳定，可考虑在 Dockerfile 中切换为其他可用的 openEuler 镜像源（如 `repo.openeuler.org`），或为 dnf 配置添加 `retries=10` 及更长的超时时间以增加容错性。
