@@ -1,16 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误：openEuler 官方镜像站 `repo.openeuler.org` 在通过 HTTP/2 传输 aarch64 RPM 包时频繁出现流异常关闭（Curl error 92: Stream error in the HTTP/2 framing layer），导致 `dnf install` 下载失败。
+无需代码修复。失败类型为 infra-error，根因是 `repo.openeuler.org` 开源社区仓库在构建时段 HTTP/2 服务端不稳定（Curl error 92: INTERNAL_ERROR），导致 `dnf install` 下载 `guile` 包失败。与本次 PR 的 Dockerfile 代码变更无关。
 
 ## 修改的文件
-无。该失败与 PR 代码变更无关，属于 CI 基础设施/上游镜像站的瞬时性问题。
+无。此错误非代码问题，属于 CI 基础设施/外部仓库服务不稳定。
 
 ## 修复逻辑
-- 失败原因：openEuler 24.03-LTS-SP4 aarch64 仓库的 HTTP/2 服务端在传输特定 RPM 包时出现 INTERNAL_ERROR，导致 `git-core`、`gcc-c++`、`guile` 等包下载失败。
-- 失败类型：`infra-error`（CI 基础设施问题），与 PR 中新增的 Dockerfile `RUN dnf install -y git gcc gcc-c++ make cmake` 命令无关。
-- 推荐操作：重新触发 CI 构建重试，该问题为镜像站 HTTP/2 服务的瞬时性波动，多数情况下重试即可成功。
-- 备选方案：若问题持续，可在 Dockerfile 第 6 行的 `dnf install` 命令中追加 `--setopt=retries=10` 提高网络容忍度（当前日志中 dnf 已自动重试但耗尽了所有镜像）。
+分析报告结论：CI 构建在 aarch64 节点上执行 `dnf install` 时，openEuler 官方仓库 `repo.openeuler.org` 的 HTTP/2 连接频繁被服务端以 `INTERNAL_ERROR` 异常关闭，导致 `guile` 包耗尽所有重试次数后彻底失败。Dockerfile 中的 `dnf install` 命令语法正确，失败发生在 Docker 构建的第一个 RUN 层，尚未进入 vvenc 源码编译步骤。同级 PR 的 aarch64 构建若有类似错误可进一步确认是仓库端问题。
+
+**推荐操作**：重新触发 CI 构建。
 
 ## 潜在风险
-无。未修改任何代码。
+无
