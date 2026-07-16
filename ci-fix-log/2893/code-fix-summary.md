@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 基础设施缺少 `shunit2` 依赖（infra-error）
+无需代码修改——CI 失败类型为 `infra-error`，根因是 CI runner 节点缺少 `shunit2` 测试框架，与本次 PR 的代码变更无关。
 
 ## 修改的文件
-无
+无（未修改任何文件）
 
 ## 修复逻辑
-CI 失败分析报告明确指出此为 **infra-error**：CI runner 上缺少 `shunit2` Shell 测试框架，导致 eulerpublisher 的后置验证脚本 `common_funs.sh:13` 执行失败。Docker 镜像的构建（aarch64）和推送均已成功完成，bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的编译和安装均无错误。此问题与 PR #2893 的代码变更无关，修复应由 CI 运维在 runner/worker 上执行 `dnf install shunit2` 解决。
+CI 分析报告明确判定本次失败为 `infra-error`（置信度: 高）。Docker 镜像构建（422 个编译目标全部通过）和镜像推送均已成功完成。失败发生在构建完成后的 `[Check]` 后置测试阶段：`eulerpublisher` 测试框架脚本 `common_funs.sh` 尝试 `source` 加载 `shunit2`，但该库未安装在 CI runner 上，导致测试初始化崩溃。
+
+此问题需要 CI 管理员在 runner 节点上安装 `shunit2`（如 `yum install shunit2`），或在 `eulerpublisher` 的部署流水线中补充该依赖。修复后重新触发 CI 即可验证。
 
 ## 潜在风险
 无
