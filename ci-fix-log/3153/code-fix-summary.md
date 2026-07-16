@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败属于基础设施错误（infra-error），由 `eulerpublisher` 预检工具的路径归一化缺陷导致，与 PR 文档变更内容无关。
+无需代码修改——CI 失败由 CI 基础设施（appstore 预检工具）导致，而非 PR 代码错误。
 
 ## 修改的文件
-无。`README.md` 的内容变更（更新基础镜像可用 tags 列表）是正确的，无需修改。
+无（未修改任何文件）
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`。根因是 `eulerpublisher/update/container/app/update.py` 中的路径匹配逻辑未对路径做归一化处理：CI 预检工具期望路径格式为 `/README.md`（带前导 `/`），而 git diff 输出为 `README.md`（无前导 `/`），导致路径格式匹配失败。该缺陷存在于 CI 基础设施代码中（非本仓库管辖范围），需由 CI 平台维护者在 `eulerpublisher` 仓库中修复 `update.py` 的路径比较逻辑。
+此 PR 仅修改了根目录 `README.md`，属于纯文档变更。CI 失败的直接原因是 appstore 上架规范预检工具（`eulerpublisher/update/container/app/update.py`）扫描 PR diff 时将 `README.md` 当作应用镜像条目进行校验，但该文件不在镜像层级目录（如 `Category/Image/Version/`）下，导致路径校验失败。
+
+分析报告明确指出：**该失败由 PR 变更触发，但并非 PR 内容有误，而是 CI 检查工具未对纯文档类 PR 做豁免处理**。PR 内容（更新可用基础镜像 tags 列表）本身完全正确。
+
+由于此问题根源在 CI 工具逻辑（需对纯文档类文件做过滤豁免），而非 PR 变更的 `README.md` 有任何错误，且 `pr.changed_files` 中不包含 CI 工具代码，因此无需对代码仓库做任何修改。
 
 ## 潜在风险
-无。PR 本身的文档变更（更新镜像 tags 列表）内容有效，不会引入任何风险。
+无——未修改任何代码。
