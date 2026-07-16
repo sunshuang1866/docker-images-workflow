@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施瞬态故障（BuildKit builder 被外部调度系统终止），与 PR 代码变更无关，无需修改代码。
+CI 基础设施瞬态故障，无需代码修改。构建过程中 BuildKit builder（`euler_builder_20260709_224657`）被外部调度系统优雅终止（`graceful_stop`），导致 gRPC 连接断开，与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。此为 infra-error，所有 PR 代码正确无误，无需修改。
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`。构建在 `dnf install` 执行到 38 秒时因 BuildKit daemon（`euler_builder_20260709_224657`）被外部调度系统优雅终止（`graceful_stop`）而中断，导致 gRPC 连接断开。错误发生在基础镜像已成功拉取、第一个 RUN 指令执行期间，与 Dockerfile 内容完全无关。PR 新增的 Dockerfile 仅包含标准的 `dnf install` 编译依赖和源码编译步骤，没有异常操作。按照修复规范，`infra-error` 类别的失败无需对源码做任何修改，仅需重新触发 CI 构建即可验证。
+分析报告明确指出失败类型为 `infra-error`，根因是 CI 构建所使用的 BuildKit daemon 在 `dnf install` 执行到 38 秒时被外部调度系统主动关闭。PR 新增的 Dockerfile 仅包含标准的编译依赖安装和 Python 源码编译步骤，没有任何异常操作。`graceful_stop` 标志确认 builder 是被人为/调度系统主动停止，而非构建错误崩溃。
 
 ## 潜在风险
-无
+无。重新触发 CI 构建（rerun failed job）即可验证。
