@@ -3,40 +3,45 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器异常终止
-- 新模式症状关键词: closing transport, EOF, graceful_stop, no builder found, rpc error, buildkit
+- 新模式标题: 构建器被终止
+- 新模式症状关键词: rpc error, Unavailable, closing transport, graceful_stop, no builder found
 
 ## 根因分析
 
 ### 直接错误
+
 ```
 #7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
 #7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
-+-------------+-------------+--------------+
-| Check Items | Description | Check Result |
-+-------------+-------------+--------------+
-+-------------+-------------+--------------+
-Build step 'Execute shell' marked build as failure
-Notifying upstream projects of job completion
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4]`（`dnf install` 下载仓库元数据阶段，已运行约 38 秒）
-- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 在 Docker 构建过程中异常终止。日志中 `graceful_stop`（goaway code: NO_ERROR）表明构建器守护进程被主动关闭（可能是 CI runner 资源回收、超时触发或节点维护），导致与构建器的 RPC 连接中断，客户端收到 EOF 后无法继续构建，后续查找该 builder 时返回 `no builder found`。
+
+- 失败位置: Docker 构建第 [2/4] 步（`dnf install` 下载 OS 仓库元数据阶段）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行期间被上层服务优雅终止（`graceful_stop`），导致 gRPC 连接断开，构建客户端失去与构建器的通信。该错误与 PR 代码变更**无关**，属于 CI 基础设施问题（构建器被回收/重启/资源耗尽等）。
 
 ### 与 PR 变更的关联
-**无关。** PR 新增的 Dockerfile 本身没有语法错误或逻辑问题——构建在步骤 2/4（`dnf install` 系统依赖）执行到一半时，BuildKit 守护进程被外部终止。这是一个 CI 基础设施层面的故障，并非由 PR 代码变更触发。Dockerfile 中 `dnf install` 的包列表（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）均为 openEuler 仓库中的常规包，不存在导致构建器崩溃的因素。
+
+**无关**。PR 新增了一个语法正确的 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`），以及配套的 README.md、image-info.yml、meta.yml 元数据更新。构建在 `dnf install` 下载仓库元数据阶段因构建器被终止而失败，远在触及任何 scann 相关逻辑之前。Dockerfile 中列出的软件包（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）均为 openEuler 标准仓库中的常见包，不存在包名或版本问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试 CI 构建。** 这是 BuildKit 构建器被 CI 基础设施意外终止的瞬时故障。无需修改任何文件。在 CI 系统中重新触发该 workflow/job 即可，通常情况下重试后构建器资源正常分配即可通过。若重复出现，需联系 CI 运维排查 runner 节点的 BuildKit daemon 稳定性或资源限制问题。
+**重试构建**。该失败为 CI 构建器实例被意外终止所致，与代码无关。最直接的修复方式是重新触发 CI 流水线（re-run），等待分配新的健康构建器实例即可通过构建。
+
+### 方向 2（置信度: 低）
+如果重试后反复在同一位置失败，需排查构建器所在宿主机的资源状况（内存、磁盘、构建器生命周期配置），但此类操作超出 PR 提交者权限范围，需联系 CI 运维团队处理。
 
 ## 需要进一步确认的点
-- 该 job 对应的 x86-64 和 aarch64 两个架构的下游构建 job 是否均为相同失败模式，还是仅某一个架构的 builder 出现问题
-- CI runner（`ecs-build-docker-x86-hk`）在对应时间段的资源状况（内存/磁盘/并发构建数），以判断是否是资源耗尽导致的 BuildKit 被 kill
+
+1. 构建器 `euler_builder_20260709_224657` 被 `graceful_stop` 的具体原因——是宿主机资源限制（OOM、磁盘满）、超时策略触发的自动回收、还是运维人员手动操作。
+2. `dnf` 下载 OS 仓库元数据时速度仅 77 kB/s（2.8 MB 耗时 37 秒），若构建器有较短的闲置/执行超时配置，慢速网络可能导致构建器在元数据下载期间被判定为超时而终止。需要确认 CI 构建器的超时配置。
+3. 建议在重试前确认 `openeuler:24.03-lts-sp4` 基础镜像在 Docker Hub 上的可用性及网络可达性（构建日志中基础镜像拉取成功，但仓库元数据下载速度异常偏慢）。
+
+## 修复验证要求
+
+不适用——本次失败为 infra-error，不涉及代码修复，无需 Code Fixer 处理。
