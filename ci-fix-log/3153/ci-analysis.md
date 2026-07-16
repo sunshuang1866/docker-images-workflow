@@ -5,45 +5,46 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 模式11
-- 新模式标题: N/A
-- 新模式症状关键词: N/A
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 11:28:17,839-...-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 11:28:17,839-update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
 |  README.md  | [Path Error] The expected path should be /README.md |   FAILURE    |
 +-------------+-----------------------------------------------------+--------------+
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
 ```
 
 ### 根因定位
 - 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: CI 的 appstore 发布规范预检工具 `eulerpublisher` 对仓库根目录下的 `README.md` 执行了路径校验，报告 `[Path Error]` 并判定 FAILURE。然而该文件在仓库中的实际路径即为 `/README.md`（仓库根目录），与工具声称的"预期路径"完全一致。此失败属于 CI 工具层面对非镜像文件误触发了 appstore 发布路径校验，与 PR 的代码变更无关。
+- 失败原因: CI appstore 发布规范预检工具对仓库根目录下的 `README.md` 路径校验失败。该工具期望路径格式为 `/README.md`（带前导 `/`），而 git diff 输出的路径为 `README.md`（无前导 `/`），导致路径格式匹配不通过。另一种可能是根目录 `README.md` 不属于任何应用镜像目录结构，CI 预检工具无法将其映射到 appstore 的预期路径规则中。
 
 ### 与 PR 变更的关联
-PR #3153 仅修改了仓库根目录下的两个 README 文件（`README.md` 和 `README.en.md`），内容为更新基础镜像的可用 Tags 列表（新增 `24.03-lts-sp4`、`24.03-lts-sp3`、`25.09`、`24.03-lts-sp2`，调整排序）。PR 未涉及任何 Dockerfile、`meta.yml`、`image-info.yml`、`image-list.yml` 或其他镜像构建/发布相关文件的变更。CI 失败由 `eulerpublisher` 工具的 appstore 发布预检逻辑将根级 README 变更误判为镜像发布提交而触发，与 PR 的实际内容无因果关联。
+本 PR 仅修改了两个文件（`README.md` 和 `README.en.md`），纯文档变更——更新基础镜像可用 tags 列表（新增 24.03-lts-sp4、24.03-lts-sp3、25.09、24.03-lts-sp2，并将 latest 标签从 sp2 更新为 sp4）。CI 失败并非由 PR 代码内容导致，而是由 CI 预检工具（`eulerpublisher` 的 `update.py`）对根目录文件路径的表征方式与 git diff 输出的路径格式不一致所引发。
+
+值得注意的是，日志中记录的差异文件仅包含 `README.md`，而 `README.en.md` 未被检查工具列出，说明该检查可能仅针对特定文件类型或仅有 `README.md` 触发了路径规则匹配。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-CI 流水线层面的问题——`eulerpublisher` 的 appstore 发布预检模块不应对仓库根目录下的 `README.md` / `README.en.md` 变更触发路径校验。建议在 CI 工具（`update.py`）中增加逻辑：当检测到的 changed file 仅包含根级文档文件（如 `README.md`、`README.en.md`）且不涉及任何镜像目录下的文件时，跳过 appstore 发布规范预检。此方向属于 CI 基础设施侧的调整，不在本 PR 的代码修改范围内。
+### 方向 1（置信度: 低）
+CI 预检工具（`eulerpublisher/update/container/app/update.py`）中的路径匹配逻辑存在缺陷，对根目录文件的路径归一化处理不统一（`README.md` vs `/README.md`）。需要 CI 平台管理员/工具维护者在 `update.py` 的路径比较逻辑中添加路径归一化（如统一添加或移除前导 `/`），使 git diff 输出的相对路径能与工具内部的绝对路径预期匹配。
+
+**修复验证要求**：需查阅 `eulerpublisher/update/container/app/update.py` 源码中路径比较的具体实现，确认是否因缺少 `os.path.normpath` 或类似归一化处理导致根目录文件被误判。
 
 ### 方向 2（置信度: 低）
-若 CI 工具不支持方向 1 的改造，可考虑在 `update.py:356` 附近的 diff 检测逻辑中，对根级 README 文件做白名单过滤，使其不进入后续的 `line:273` 路径校验流程。同样属于 CI 工具侧变更，非 PR 代码修复。
+若根目录 `README.md` 确实不在 appstore 期望的目录清单中，可在仓库元数据配置（如 `image-list.yml` 或 CI 白名单）中将根目录文件标记为例外项，绕过 appstore 预检。但此方向可能性较低，因为 README.md 属于仓库基础文档，不应被 appstore 路径检查拦截。
 
 ## 需要进一步确认的点
-1. **CI 工具路径比较逻辑**：`update.py` 中路径校验的具体实现——为何 `/README.md`（文件实际路径）与预期路径 `/README.md` 相同却被判定为 FAILURE。需排查是否存在路径格式不匹配（如是否因缺少前导 `/` 或绝对/相对路径不一致导致字符串比较失败）。
-2. **CI 工具对根级文件的处理策略**：确认 `eulerpublisher` 在设计上是否预期对仓库根目录的非镜像文件（如项目主 README）执行 appstore 路径校验，还是此行为属于未预期到的边界情况。
-3. **日志完整性**：当前日志仅来自 x86-64 job，需确认 aarch64 等下游架构 job 是否有额外的失败信息（尽管大概率会复现相同错误）。
+1. **`eulerpublisher/update/container/app/update.py` 路径比较逻辑**：确认第 273 行附近的路径检查逻辑，查明为何 `README.md` 与 `/README.md` 不匹配。
+2. **`README.en.md` 为何未被检查**：`README.en.md` 也在 PR diff 中但未被 `Difference` 列表或 Check Items 表格提及，需确认检查工具的文件过滤规则。
+3. **CI 日志中的 PR 编号不一致**：CI 日志显示 `PR 3184 [sunshuang1866:fix/3153 -> master]`，与上下文提供的 PR #3153 不一致。确认该次 CI 运行是否对应实际 PR #3153。
 
 ## 修复验证要求
-若修复方向涉及修改 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑（如添加根级 README 白名单过滤），code-fixer 必须在提交前：
-1. 从 CI 环境中获取或本地模拟 `update.py` 的 diff 检测与路径校验流程
-2. 验证修改后的逻辑对纯文档 PR（仅修改根级 README）正确跳过 appstore 预检
-3. 同时对包含镜像文件变更的正常 PR 仍能正确执行路径校验，确保不引入回归
+本失败属于 infra-error，PR 本身的文档变更内容有效。若需修复 CI 工具，code-fixer 必须：
+1. 从 `eulerpublisher` 仓库获取 `update/container/app/update.py` 源码，定位路径校验函数
+2. 确认路径归一化逻辑后再提交修改
