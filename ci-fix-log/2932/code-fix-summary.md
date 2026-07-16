@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 Docker BuildKit 基础设施故障（infra-error），与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施错误（infra-error）：BuildKit 构建器在 CI 节点 `ecs-build-docker-x86-hk` 上启动失败（`Could not find the file / in container`），与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，不涉及代码修改）。
+无（基础设施问题，无需修改源代码）
 
 ## 修复逻辑
-CI 分析报告确认：失败发生在 `[internal] booting buildkit` 阶段，Docker daemon 在创建 BuildKit builder 容器时出现瞬时故障（"Could not find the file /"），Dockerfile 中的任何指令（`FROM`、`RUN` 等）均未被执行。PR 仅新增了 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 等四个文件，且镜像规范检查已通过。根因是 CI runner 节点 `ecs-build-docker-x86-hk` 上 BuildKit builder 容器初始化异常，属于基础设施瞬时故障。
+CI 分析报告明确指出，此错误发生在 buildx 构建器容器初始化阶段（`[internal] booting buildkit`），远早于 PR Dockerfile 中任何指令的执行。PR 的变更仅限于新增一个 glibc Dockerfile 及三个元数据文件的条目追加，不涉及 CI 构建配置、构建工具链或基础设施脚本。
+
+分析报告建议重试 CI Job 即可（构建节点上可能存在前次构建残留的 buildx 资源未完全释放，或 Docker daemon 瞬时异常）。
 
 ## 潜在风险
-无。建议重新触发 CI 流水线，大概率可通过。若连续两次重试仍失败，需检查 runner 节点上 Docker 服务状态及 `moby/buildkit:buildx-stable-1` 镜像拉取情况。
+无
