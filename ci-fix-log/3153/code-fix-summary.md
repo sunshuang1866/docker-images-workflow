@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），CI 工具 `eulerpublisher` 的 appstore 路径校验逻辑中存在路径格式不匹配：期望 `/README.md` 但 git diff 上报 `README.md`（缺少前导 `/`），与 PR #3153 的文档变更内容无关。
+无需代码修改。CI 失败属于基础设施错误（infra-error），由 CI 端 `eulerpublisher` 工具的 appstore 路径校验逻辑误将根目录纯文档文件 `README.md` 纳入镜像发布规范校验范围导致。
 
 ## 修改的文件
-无
+无。PR #3153 仅修改根目录 `README.md`（更新基础镜像可用 tags 列表），文件内容正确，不存在任何需要修复的代码或文档问题。
 
 ## 修复逻辑
-CI 分析报告确认失败类型为 `lint-error`，根因定位于 CI 工具 `eulerpublisher/update/container/app/update.py:273` 的 appstore 发布路径校验逻辑。该工具在比较文件路径时未进行路径规范化（添加前导 `/`），导致 `git diff` 上报的 `README.md` 与期望的 `/README.md` 字符串匹配失败。
-
-PR #3153 仅更新了 `README.md` 中基础镜像 tags 的文档内容，属于纯文档类变更，文件路径和内容均正确。此 CI 失败是基础设施工具缺陷，应在 eulerpublisher 仓库中修复路径比较逻辑，而非修改本仓库代码。
+CI 分析报告确认：此 PR 为纯文档更新，无 Dockerfile 或构建逻辑变更。CI 工具 `eulerpublisher/update/container/app/update.py:273` 在校验变更文件时未能区分"仓库根目录文档变更"与"应用镜像目录文件变更"，将根目录 `README.md` 误判为镜像发布相关文件并报告 `[Path Error]`。此问题需在 CI 工具侧修复，不属于 PR 提交者的可控范围。
 
 ## 潜在风险
-无（无代码变更）
+无。未对任何文件进行修改，不存在引入新问题的风险。
