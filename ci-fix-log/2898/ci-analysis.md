@@ -4,9 +4,9 @@
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: CI测试框架缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, [Check] test failed
 
 ## 根因分析
 
@@ -19,18 +19,37 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 环境，`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 运行节点上缺少 `shunit2` Shell 测试框架，导致 `eulerpublisher` 的 [Check] 阶段在尝试执行镜像验证测试时，`common_funs.sh` 第 13 行 `source shunit2` 失败
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI [Check] 阶段的测试脚本 `common_funs.sh` 尝试引用 shell 单元测试框架 `shunit2`，但该工具在 CI runner 的 `PATH` 或预期路径中不存在，导致容器镜像健康检查测试（`test_go_version` 等）无法执行。
 
 ### 与 PR 变更的关联
-**无关**。该 PR 仅新增 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile` 及相关元数据文件（README.md、image-info.yml、meta.yml）。Docker 镜像的构建（#7-#11 步骤）和推送（[Build] finished、[Push] finished）均已成功完成，日志中无任何构建错误。失败发生在构建完成后的 CI 测试框架初始化阶段——`shunit2` 是 `eulerpublisher` 容器镜像测试套件的运行时依赖，属于 CI 基础设施组件，其缺失与 PR 代码变更完全无关。
+
+**与 PR 无关。** 该 PR 的变更包括：
+- 新增 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile`（Go 1.25.6 + openEuler 24.03-LTS-SP4 基础镜像）
+- 更新 `README.md`、`image-info.yml`、`meta.yml` 中的版本条目
+
+Docker 镜像的构建（#7-#11）和推送已**完整成功**——日志中可见：
+- `#7 DONE 67.8s`（Go 压缩包下载解压完成）
+- `#8 DONE 40.5s`（文件时间戳与符号链接建立完成）
+- `#9 DONE 1.5s`（构建依赖移除完成）
+- `#11 exporting to image ... DONE 41.9s`（镜像导出、推送完成）
+- `[Build] finished` / `[Push] finished`
+
+失败仅发生在构建完成后的 [Check] 容器验证阶段，由 CI 测试框架的依赖缺失（`shunit2`）引起，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI Runner 节点上安装 `shunit2` Shell 单元测试框架，使其在 PATH 中可被 `common_funs.sh` 的 `source` 命令找到。通常可通过包管理器安装（如 `dnf install shunit2` 或 `pip install shunit2`），或确保 `eulerpublisher` 包将 `shunit2` 作为依赖正确安装到 `/usr/local/etc/eulerpublisher/tests/common/` 目录下。
+在 CI 构建 runner 上安装 `shunit2` 测试框架包，确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 的第 13 行可以正确引用到 `shunit2`。对于 openEuler/CentOS 系环境，可通过包管理器安装：
+
+```
+dnf install shunit2
+```
+
+或将 `shunit2` 脚本放置在 `eulerpublisher` 测试框架的同级目录下。
 
 ## 需要进一步确认的点
-1. `shunit2` 是否应随 `eulerpublisher` 包自动安装但当前安装不完整？（检查 `eulerpublisher` 包的 `install_requires` 或 post-install 脚本）
-2. 该 CI Runner 节点是否与成功执行其他镜像 Check 测试的节点使用不同的环境配置？
-3. `common_funs.sh` 尝试 `source shunit2` 的具体路径解析方式——是否需要 `shunit2` 在同一目录下（如 `/usr/local/etc/eulerpublisher/tests/common/shunit2`），还是期望从系统 PATH 找到它？
+
+- CI runner 环境中 `shunit2` 应当预装的位置和版本：是否有特定的 `eulerpublisher` 包版本与 `shunit2` 的捆绑关系？
+- 该 [Check] 阶段是否为本次 SP4 平台新增，而相应的 CI 环境尚未配置 `shunit2` 依赖？
+- 其他同类镜像（如已有的 `1.25.6-oe2403sp3`）的 [Check] 测试是否正常通过？若正常通过，则需对比两者 CI runner 的环境差异。
