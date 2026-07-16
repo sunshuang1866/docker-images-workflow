@@ -5,33 +5,32 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: Builder被终止
-- 新模式症状关键词: graceful_stop, no builder found, closing transport, buildkit, rpc error
+- 新模式标题: BuildKit Builder断连
+- 新模式症状关键词: failed to receive status, rpc error, Unavailable, closing transport, no builder found
 
 ## 根因分析
 
 ### 直接错误
 ```
-#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建 step `[2/4]` — `dnf install` 阶段（非 PR 代码文件内）
-- 失败原因: Docker buildx builder 实例 `euler_builder_20260709_224657` 在构建过程中被优雅终止（graceful_stop），客户端与 builder 之间的 gRPC 连接断开，导致构建无法继续。该错误与 PR 的代码变更无关，属于 CI 基础设施层面的问题。
+- 失败位置: Docker 构建步骤 `#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`（dnf 正在下载仓库元数据时）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在 dnf 安装依赖包阶段（步骤 2/4）意外断开连接。`graceful_stop` 调试数据表明该 builder 被主动终止（可能是 CI 节点资源不足或调度器回收 builder 容器），导致 RPC 连接丢失，后续步骤无法执行。
 
 ### 与 PR 变更的关联
-**无关。** PR 变更内容为新增 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及相关元数据文件。构建失败发生在 `dnf install` 安装基础编译依赖阶段（步骤 2/4），此时尚未执行到 `pip install scann` 等与 scann 直接相关的步骤。该 `dnf install` 命令为标准操作，不存在语法或版本问题。builder 被终止是 CI 运行时的环境事故。
+与 PR 变更**无关**。PR 仅新增了一个标准的 Dockerfile（安装 gcc/openssl-devel/bzip2-devel/zlib-devel → 编译 Python 3.9.19 → pip 安装 scann 1.4.2），构建在第一个 `dnf install` 步骤（尚未执行到 Python 编译或 pip 安装阶段）即因 BuildKit builder 断连而失败。Dockerfile 本身的指令语法和包名均正确。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** builder 实例 `euler_builder_20260709_224657` 的 `graceful_stop` 表明其被 CI 调度系统或宿主机主动回收（可能原因：节点资源不足被驱逐、构建超时、或宿主机维护操作）。此错误为瞬时基础架构故障，重新运行 CI 大概率可以成功通过。Code Fixer 无需对代码做任何修改。
+重新触发 CI 构建。这是 BuildKit 基础设施的瞬时故障（builder 实例被意外终止），与 PR 代码变更无关。重试后大概率可以通过。
 
 ## 需要进一步确认的点
-- 无。该失败的证据充分且明确指向基础设施层，不涉及 PR 代码问题。
+- 如重试后仍失败，需检查 CI 构建节点（`ecs-build-docker-x86-hk`）的资源状况（内存/磁盘是否充足），以及 BuildKit builder 容器的 OOMKilled 或 eviction 事件日志
+- 确认 `openeuler/openeuler:24.03-lts-sp4` 基础镜像仓库源在构建时是否稳定可访问（日志中 dnf 正在下载元数据时断连，不排除仓库源间歇性不可达触发超时导致 builder 被回收）
 
 ## 修复验证要求
-无需满足。该失败为 infra-error，不涉及对 PR 代码或外部源文件的任何修复。
+无需验证（infra-error，与代码变更无关，重试 CI 即可）。
