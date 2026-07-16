@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施问题（infra-error）：Builder 阶段 `dnf install` 从 openEuler 24.03-LTS-SP4 官方 RPM 仓库下载 `gcc` 等编译依赖包时，HTTP/2 传输层反复出现流中断错误（Curl error 92），所有镜像均尝试失败，最终报 `No more mirrors to try` 退出。
+无需代码修改。CI 失败属于基础设施问题（infra-error），由 openEuler 24.03-LTS-SP4 软件仓库的 HTTP/2 传输层服务端故障导致，与 PR 代码变更无关。
 
 ## 修改的文件
-无（无需修改任何文件）
+无
 
 ## 修复逻辑
-分析报告指出此为临时性网络基础设施问题，与 PR 代码变更无关。Dockerfile 中 `dnf install` 命令格式正确、包名有效，不需要也不应该通过修改代码来绕过网络层面的故障。建议待 openEuler 24.03-LTS-SP4 仓库镜像恢复后重试 CI。若问题持续，可考虑在 Dockerfile 中配置备用镜像源（如华为云镜像站），但此优化属于增强性改进而非本次 CI 失败的修复范围。
+CI 失败分析报告明确指出：
+- 失败类型为 `infra-error`，置信度为高
+- 直接错误为 `Curl error (92): Stream error in the HTTP/2 framing layer`，来自 openEuler 24.03-LTS-SP4 镜像站的 HTTP/2 服务端流中断
+- 根因定位：与 PR 代码变更无关，Dockerfile 语法正确、包名有效，失败完全由外部仓库服务端问题引起
+- 修复方向：重新触发 CI 构建，HTTP/2 流错误通常是仓库服务器端临时故障，重试后可恢复
+
+根据规范要求，`infra-error` 类型的失败不应进行代码修改。本次无需对 [Others/multiwfn/README.md, Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile, Others/multiwfn/doc/image-info.yml, Others/multiwfn/meta.yml] 中任何文件做改动。
 
 ## 潜在风险
-无
+无。不对代码做任何变更，不存在引入新问题的风险。建议操作：重新触发 CI 构建以验证镜像站是否已恢复。
