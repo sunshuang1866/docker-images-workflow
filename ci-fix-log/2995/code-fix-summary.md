@@ -1,21 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 **infra-error**（基础设施问题），与本次 PR 的代码变更无关。
+无需代码修改。CI 失败为基础设施故障（infra-error）：eulerpublisher 工具自带的 `tests/container/app/bwa_test.sh` 文件使用了 CRLF 行尾，导致 shebang `#!/bin/sh` 被误解析为 `#!/bin/sh\r`（日志中 `^M`），Shell 无法找到解释器，测试脚本执行失败。
 
 ## 修改的文件
-无（无需修改任何代码）
+无。
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- **失败类型**: `infra-error`，置信度：高
-- **直接原因**: CI 编排工具 `eulerpublisher` 包内置的测试脚本 `/etc/eulerpublisher/tests/container/app/bwa_test.sh` 包含 Windows 风格行尾（CRLF），导致 shebang `#!/bin/sh\r` 被解析为无效的解释器路径 `/bin/sh\r`，shell 报 "bad interpreter"。
-- **与 PR 无关的证据**:
-  1. Docker 镜像构建完全成功（17 个依赖包安装正常，194 个 C 源文件编译通过，镜像构建及推送均完成）。
-  2. 失败发生在 CI 基础设施层面（`eulerpublisher` Python 包安装的文件），不来源于 PR 代码仓库。
-  3. PR 仅新增了 Dockerfile 和更新了 3 个元数据文件（README.md、image-info.yml、meta.yml），未涉及任何测试脚本。
-
-**结论**：按照工作流程规定，`infra-error` 类型的 CI 失败不需要对源代码做任何修改。修复应由 CI 基础设施维护方处理，方向为将 `eulerpublisher` 包中的 `bwa_test.sh` 行尾从 CRLF 转换为 LF。
+此问题与 PR #2995 的代码变更无关。PR 新增的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml）均正确无误，Docker 镜像构建和推送已成功完成。失败发生在 CI 工具 eulerpublisher 的后处理阶段，属于 CI 基础设施问题，应由 eulerpublisher 维护者修复测试脚本的行尾格式（CRLF → LF），PR 作者无需修改任何代码。
 
 ## 潜在风险
-无（本次未修改任何代码）
+无。
