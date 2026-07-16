@@ -4,8 +4,8 @@
 - PR: #3088 — chore(druid): add openEuler 24.03-LTS-SP4 support
 - 失败类型: build-error
 - 置信度: 高
-- 知识库匹配: 模式01 / 模式38
-- 新模式标题: (不适用 — 已有模式覆盖)
+- 知识库匹配: 模式01（同类根因：Apache CDN 仅保留最新版本，历史版本被下架后返回 404）
+- 新模式标题: (不适用)
 - 新模式症状关键词: (不适用)
 
 ## 根因分析
@@ -23,27 +23,25 @@
 
 ### 根因定位
 - 失败位置: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile:9`（RUN wget 步骤）
-- 失败原因: `dlcdn.apache.org` 是 Apache 的 CDN 分发节点，通常只托管当前最新版本。Apache Druid 35.0.0 已从该 CDN 下架，导致 `wget` 访问 `https://dlcdn.apache.org/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 返回 HTTP 404。此根因与**模式01**（Maven CDN 404）和**模式38**（ActiveMQ CDN 404）完全相同——均因 Apache CDN 不保留历史版本导致。
+- 失败原因: `dlcdn.apache.org` 是 Apache 的 CDN 分发节点，通常只保留最新版本制品。Druid 35.0.0 的二进制包已被 CDN 节点下架，导致 `wget` 下载时返回 HTTP 404，Docker 构建在 builder 阶段的第 3 步失败（exit code: 8）。
 
 ### 与 PR 变更的关联
-PR 新增的 Dockerfile `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile` 在第 9 行使用 `wget` 从 `dlcdn.apache.org` 下载 Apache Druid 35.0.0，该版本在 CDN 上已不可用。这是 PR 改动直接触发的失败。
-
-附加信息：日志中有一个非致命的 BuildKit 警告 `FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 3)`，指 Dockerfile 第 3 行 `FROM ${BASE} as builder` 中的 `as` 应写为 `AS`（大写）。这不影响构建结果，但建议修复。
+PR 新增的 Dockerfile `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile` 在 builder 阶段使用 `wget` 从 `dlcdn.apache.org` 下载 Druid 35.0.0 二进制包。该 URL 返回 404 即是本次 CI 失败的直接原因。失败与 PR 新增的 Dockerfile 代码直接相关——下载源选择（`dlcdn.apache.org`）不适合获取历史版本。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-将下载源从 `dlcdn.apache.org`（CDN，仅保留最新版）替换为 `archive.apache.org`（归档站，保留历史版本）。目标 URL 格式为：
-```
-https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz
-```
-`archive.apache.org` 是 Apache 官方归档站，历史上所有已发布版本均会迁移至此。
+将下载源从 `dlcdn.apache.org` 改为 `archive.apache.org`。`archive.apache.org` 是 Apache 官方归档站点，保留所有已发布版本的历史制品。例如将 URL 从：
+`https://dlcdn.apache.org/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`
+改为：
+`https://archive.apache.org/dist/druid/${VERSION}/apache-druid-${VERSION}-bin.tar.gz`
 
 ### 方向 2（置信度: 中）
-如果 `archive.apache.org` 在 CI 构建环境中网络不可达（参考模式33），可改用华为云镜像站 `repo.huaweicloud.com` 的 Apache 镜像，前提是该镜像站保留了 Druid 35.0.0 的制品。
+若 `archive.apache.org` 在 CI 环境中也存在网络不通问题（参考模式33，`archive.apache.org` 在部分 CI 节点不可达），可使用华为云镜像站等替代源。
 
 ## 需要进一步确认的点
-无。日志清晰，根因明确。
+- 确认 `https://archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 在 CI 构建环境中可访问（避免模式33 中 `archive.apache.org` 网络不通的问题）。
+- 需要确认 Druid 35.0.0 在 `archive.apache.org` 是否确实存在且有对应制品。
 
 ## 修复验证要求
-无需特别验证步骤。修复方向仅涉及将 `dlcdn.apache.org` 替换为 `archive.apache.org`，不涉及正则 patch 外部源文件。
+code-fixer 在提交前必须验证 `archive.apache.org/dist/druid/35.0.0/apache-druid-35.0.0-bin.tar.gz` 在当前 CI 构建环境中可通过 `wget` 成功下载（返回 200），确保替换后的 URL 有效。
