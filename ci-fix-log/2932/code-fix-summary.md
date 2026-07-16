@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 Docker BuildKit 基础设施问题（`infra-error`），与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施故障（infra-error）：Docker BuildKit 构建容器在 CI 节点 `ecs-build-docker-x86-hk` 上引导失败（`Could not find the file / in container`），PR 中 `docker build` 过程尚未开始。
 
 ## 修改的文件
-无
+无。所有 PR 变更文件（Dockerfile、README.md、image-info.yml、meta.yml）均无需修改。
 
 ## 修复逻辑
-CI 分析报告确认失败类型为 `infra-error`：Docker daemon 在创建 BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后无法访问容器根文件系统（`Could not find the file / in container`），导致 BuildKit 实例初始化失败。此失败发生在 `#1 [internal] booting buildkit` 阶段，尚未进入任何 `docker build` 步骤，因此与 PR 新增的 openEuler 24.03-LTS-SP4 Dockerfile 及元数据文件完全无关。
-
-根据修复原则，`infra-error` 无需对代码做任何修改。建议运维侧排查 CI runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon / BuildKit 状态（磁盘空间、cgroup 配置、内核参数等），并重试 CI job 以确认是否为偶发性故障。
+CI 分析报告置信度为"高"，判断此失败与 PR 代码变更无关。失败发生在 `[internal] booting buildkit` 阶段，属于 Docker 守护进程/运行环境异常。建议由 CI 运维人员检查节点 `ecs-build-docker-x86-hk` 的 Docker 守护进程状态、存储驱动、残留容器等，或重试 CI / 切换构建节点。
 
 ## 潜在风险
-无
+无。未对代码做任何修改。
