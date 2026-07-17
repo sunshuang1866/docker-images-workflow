@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器中途终止
-- 新模式症状关键词: failed to receive status, error reading from server: EOF, graceful_stop, no builder found, euler_builder
+- 新模式标题: BuildKit优雅终止
+- 新模式症状关键词: graceful_stop, buildkit, euler_builder, connection error, EOF, error reading from server
 
 ## 根因分析
 
@@ -19,29 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `[2/4]`（`dnf install` 阶段），约执行 38.6 秒时
-- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被终止（`graceful_stop`），导致 BuildKit RPC 连接断开，后续 `docker buildx` 命令无法找到该构建器
+- 失败位置: Docker 构建步骤 `#7 [2/4]`，即新增 Dockerfile 中的 `RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all` 阶段
+- 失败原因: Docker BuildKit builder 实例（`euler_builder_20260709_224657`）在 `dnf install` 下载包元数据过程中被优雅终止（`graceful_stop`），导致构建连接断开。下载速度仅 77 kB/s，耗时 37 秒下载 2.8 MB 元数据，可能因构建步骤超时或 CI runner 资源回收触发 builder 终止。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该 PR 新增了一个 Dockerfile 和三个元数据文件（README.md、image-info.yml、meta.yml），构建流程仅执行到 `dnf install` 阶段（安装 gcc、gcc-c++、make 等基础工具）即因基础设施问题中断，远未触及任何与 PR 改动相关的业务逻辑。失败是因为 CI 的 BuildKit 构建器 Pod/实例意外终止。
+**与 PR 代码变更无关**。PR 新增的 Dockerfile 语法和包列表正确，`dnf install` 命令本身没有问题。失败是 CI 基础设施层面 BuildKit 服务被终止所致，属于 `infra-error`。该 Dockerfile 在下次 CI 触发时，若基础设施正常，极大概率可成功构建。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**无需代码修改。** 这是 CI 基础设施层面的问题——BuildKit 构建器 `euler_builder_20260709_224657` 在构建过程中被终止。可能原因：
-- CI 构建节点资源不足（内存/磁盘），BuildKit 容器被 OOM Killer 或资源管理器终止
-- 构建器实例有生存时间限制（TTL），超时后被自动清理
-- 基础设施层面的计划内维护或节点回收
-
-建议在 CI 系统中重新触发该 job，若重试后通过则确认为此类 transient infra 问题。
-
-### 方向 2（置信度: 低）
-若重试后仍在相同步骤失败（`dnf install` 阶段），可能是 `openeuler:24.03-lts-sp4` 基础镜像的 `dnf` 获取元数据时消耗过多内存/时间，导致 BuildKit 构建器超时。此种情况下可考虑在 `dnf install` 前增加 `dnf makecache` 或添加 `--setopt=timeout=300` 等超时参数。
+### 方向 1（置信度: 高）
+**无需修改代码，重新触发 CI 即可。** 本次失败为 BuildKit builder 实例被 infra 层优雅终止导致的临时性故障，与 PR 新增的 Dockerfile 内容无关。推荐操作：在 PR 页面 comment `/retest` 或等同操作重新触发 CI。
 
 ## 需要进一步确认的点
-- 确认 `ecs-build-docker-x86-hk` 构建节点的资源使用情况（在构建失败时间段是否有资源水位告警）
-- 确认 BuildKit 构建器 `euler_builder_20260709_224657` 的 TTL 配置是否足以完成完整构建
-- 重试该 job 观察是否稳定复现还是偶发
 
-## 修复验证要求
-无需验证。此问题为 CI 基础设施故障，不涉及对 Dockerfile 或任何仓库代码的修改。
+1. 若重试后仍失败，需检查 CI runner（`ecs-build-docker-x86-hk`）的网络状况和 BuildKit builder 的超时配置阈值是否过短（当前仅 37 秒下载 2.8 MB 即触发终止，下载速度异常偏低）。
+2. 若重试后仍失败，需确认 `openeuler/openeuler:24.03-lts-sp4` 基础镜像内置的 dnf repo 配置在中国香港 runner 上的可用性和下载速度是否正常。
