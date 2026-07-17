@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2980 — chore(grads): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: 仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,17 +22,22 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 仓库镜像在 HTTP/2 传输层出现流错误（Curl error 92: INTERNAL_ERROR），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载时连接被服务端非正常关闭。其中 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 在两次重试后所有可用镜像均失败，dnf 无法完成安装，构建中止。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: CI 构建节点（`ecs-build-docker-x86-03-sp`）在通过 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）下载 258 个 RPM 包时，多个包遭遇 HTTP/2 流层内部错误（Curl error 92: `INTERNAL_ERROR`）。`cmake-data` 和 `git-core` 两包在镜像重试后成功下载，但 `gcc-c++`（13 MB）两次重试均失败，最终所有镜像耗尽导致构建失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该 PR 仅新增一个 Dockerfile（GrADS 2.2.3 on openEuler 24.03-LTS-SP4）及配套的 README、image-info.yml、meta.yml 元数据更新。Dockerfile 中 `dnf install` 命令语法正确、包名正确。失败纯粹是 CI 构建时 openEuler 官方仓库镜像的 HTTP/2 传输层出现网络故障，属于外部基础设施临时性问题。3 个不同包（cmake-data、git-core、gcc-c++）先后遭遇相同的 `Curl error (92)` 可印证这是仓库端问题而非特定包问题；其中 cmake-data 和 git-core 重试后成功，仅 gcc-c++ 最终耗尽所有镜像。
+**与 PR 代码变更无关。** 该 PR 仅新增了一个 Dockerfile 和对应的文档/元数据文件。Dockerfile 中 `dnf install` 的命令语法正确，包列表完整无遗漏。失败完全由 openEuler 24.03-LTS-SP4 仓库的 HTTP/2 服务端或中间代理在 CI 构建期间的流层协议错误引起，属 CI 基础设施层面的瞬态网络问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需代码修复。** 这是 openEuler 24.03-LTS-SP4 仓库镜像的临时性网络故障（HTTP/2 流中断），与 PR 变更无关。建议触发 CI 重试（re-run），待仓库镜像恢复正常后即可通过。若多次重试均在同一包失败，可考虑在 Dockerfile 中为 `dnf install` 添加 `--retries 5` 等重试参数以增强鲁棒性。
+### 方向 1（置信度: 中）
+**重新触发 CI 构建。** 该失败为间歇性网络问题（HTTP/2 流错误），`cmake-data` 和 `git-core` 在镜像重试后成功下载，仅 `gcc-c++` 运气不佳。重新触发 CI 大概率可以通过。无需修改任何代码。
+
+### 方向 2（置信度: 低）
+**在 `dnf install` 前添加仓库缓存刷新与重试配置。** 若此问题在多轮重试后仍持续出现，可在 Dockerfile 的 `dnf install` 前添加 `dnf makecache --refresh` 或调整 `/etc/dnf/dnf.conf` 中的 `max_retries` 参数增加重试次数。但此改动属于非必要的防御性措施，不建议在首次诊断时就采用。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）在当时是否存在已知的 HTTP/2 服务异常或维护事件。
-- 若重新触发 CI 后仍然失败且在新的包上出现相同 Curl error (92)，考虑是否需要将 dnf 配置中的 HTTP/2 回退到 HTTP/1.1 或更换镜像源。
+1. **仓库稳定性**：`repo.****.org`（推测为 `repo.openeuler.org`）的 openEuler 24.03-LTS-SP4 仓库在该 CI 构建时间段（2026-07-13 07:04 UTC）是否存在已知的服务端 HTTP/2 问题或 CDN 节点异常。
+2. **CI 节点网络代理**：`ecs-build-docker-x86-03-sp` 节点到仓库之间是否存在 HTTP/2 代理/负载均衡器，其流层实现是否与 curl/DNF 存在兼容性问题。
+3. **aarch64 构建结果**：日志仅包含 x86-64 架构构建步骤，需确认 aarch64 架构的构建是否也因同类问题失败，以判断问题是否局限于特定仓库 CDN 节点。
+4. **原已存在的 24.03-lts-sp3 镜像**：同仓库内 `grads/2.2.3/24.03-lts-sp3` 使用的是 openEuler 24.03-LTS-SP3 仓库源，其网络可达性是否正常可作为对照参考。
