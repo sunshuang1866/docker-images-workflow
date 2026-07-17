@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施临时故障（infra-error），`repo.openeuler.org` 在 aarch64 架构上 HTTP/2 服务不稳定导致 RPM 包下载时出现 `Curl error (92): Stream error in the HTTP/2 framing layer ... INTERNAL_ERROR (err 2)`，与 PR 代码变更无关。
+无代码问题。CI 失败由 openEuler 官方 RPM 仓库 `repo.openeuler.org` 在 aarch64 架构上的 HTTP/2 服务端瞬时故障引起（Curl error 92: INTERNAL_ERROR），属于 CI 基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无。本次为 infra-error，不涉及代码修改。
+无。根据分析报告，此次失败为 infra-error，无需修改任何代码。
 
 ## 修复逻辑
-CI 分析报告明确判定失败类型为 `infra-error`，根因是 `repo.openeuler.org` 镜像仓库在构建时间窗口（2026-07-09 14:09 UTC）内 HTTP/2 服务端对 aarch64 架构不稳定，多个 RPM 包（git-core、gcc-c++、guile）下载时反复出现 HTTP/2 stream INTERNAL_ERROR。Dockerfile 中 `dnf install` 命令正确无误，PR 新增的文件均正确。建议操作：在 CI 中重新触发 aarch64 构建任务。
+Dockerfile 中 `dnf install -y git gcc gcc-c++ make cmake` 命令本身无语法或逻辑问题。多个 RPM 包（git-core、gcc-c++、guile）从 `repo.openeuler.org` 下载时遭遇 HTTP/2 流层 `INTERNAL_ERROR`，其中 guile 包在重试所有镜像后仍失败。PR 仅新增了标准 Dockerfile、README 条目、image-info 条目和 meta 条目，同一基础镜像已有成功的 SP3 版本构建，SP4 版本 Dockerfile 逻辑完全一致。等待仓库恢复后重新触发 CI 构建即可通过。
 
 ## 潜在风险
-无。未修改任何代码，不影响任何功能。
+无
