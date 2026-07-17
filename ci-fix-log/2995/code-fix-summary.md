@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施问题（infra-error）：CI 工具链 `eulerpublisher` 包中的 `bwa_test.sh` 测试脚本包含 Windows 风格换行符（CRLF），导致 shebang `#!/bin/sh\r` 被解析为 `/bin/sh^M`，内核报 "bad interpreter: No such file or directory"。
+无需代码修改。CI 失败根因为基础设施问题：`eulerpublisher` 包内置的测试脚本 `bwa_test.sh` 包含 Windows 风格行尾（CRLF），导致 shebang 行解析失败（`/bin/sh^M: bad interpreter`）。PR 代码（Dockerfile、README 等）构建和推送均正常完成，无任何错误。
 
 ## 修改的文件
-无。PR 代码（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，Docker 镜像构建和推送均已成功完成。
+无（infra-error，不属于 PR 代码范畴）
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`，置信度为高。失败发生在 CI [Check] 阶段调用的 `eulerpublisher/tests/container/app/bwa_test.sh` 脚本中，该脚本属于 CI 基础设施（eulerpublisher 包），与 PR 变更的 4 个文件完全无关。PR 代码本身无需任何修改。
+分析报告明确指出此为 `infra-error`，失败发生在 CI 后处理阶段（`[Check]`），与 PR 变更无关：
+- Docker 镜像构建成功（`#7 DONE 199.0s`，bwa 0.7.18 编译通过）
+- 镜像推送成功（`[Push] finished`）
+- 失败原因为 CI 基础设施中 `bwa_test.sh` 的 CRLF 行尾问题
 
-此问题需由 CI 运维人员处理：对 `eulerpublisher` 包中的测试脚本执行 `dos2unix` 转换，或检查 CI runner 的 git `core.autocrlf` 配置。
+按报告建议，需 CI 维护者对 `bwa_test.sh` 执行 `dos2unix` 或修复 `eulerpublisher` 包发布流程。CI 基础设施修复后，重新触发此 PR 的 CI 流水线即可验证通过。
 
 ## 潜在风险
-无
+无（未修改任何代码）
