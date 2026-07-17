@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 镜像站HTTP/2协议异常
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install
+- 新模式标题: HTTP/2 仓库镜像流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, Stream error, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -23,21 +23,17 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 软件源镜像站在服务端 HTTP/2 协议层面出现异常（`INTERNAL_ERROR (err 2)`），多个包下载时遭遇 `Stream error in the HTTP/2 framing layer`（Curl error 92）。部分包（如 git-core）在重试后下载成功，但 gcc-c++ 在所有镜像重试耗尽后仍然失败，导致 `dnf install` 整体退出码为 1。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`:6（`dnf install` 步骤）
+- 失败原因: CI 构建环境的 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）在 HTTP/2 传输层出现服务端流错误（`INTERNAL_ERROR`），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载失败。dnf 重试所有可用镜像后均告失败，最终 `gcc-c++` 包无法下载，整个 `dnf install` 命令返回错误码 1。
 
 ### 与 PR 变更的关联
-**此次失败与 PR 代码变更无关。** PR 仅新增了一个 Dockerfile（及其元数据文件），Dockerfile 中 `dnf install` 命令的语法和包名完全正确（已验证：258 个包均通过依赖解析，下载阶段才开始报错）。失败的根本原因是 openEuler 24.03-LTS-SP4 的 RPM 软件源镜像站发生了 HTTP/2 协议层间歇性故障，属于 CI 基础设施问题（infra-error）。
+**与 PR 无关。** PR 的变更仅为新增一个 GraDS 2.2.3 在 openEuler 24.03-LTS-SP4 上的标准 Dockerfile，其 `dnf install` 命令中列出的全部是 openEuler 官方仓库的标准系统包（gcc、cmake、各种 -devel 包等），语法正确无误。失败的直接原因是 CI 构建过程中 `repo.****.org` 的 HTTP/2 连接不稳定，服务端返回 `INTERNAL_ERROR`（属于服务端/网络层面的瞬时故障），并非 Dockerfile 内容或 PR 变更所导致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，等待镜像站恢复后重试构建。** 这是典型的 CI 基础设施网络/协议层瞬时故障。至少 3 个不同包（cmake-data、git-core、gcc-c++）在下载时遭遇了相同的 HTTP/2 stream INTERNAL_ERROR，说明问题出在服务端而非客户端或 Dockerfile。其中 git-core 重试后成功，gcc-c++ 多次重试后耗尽镜像失败。建议在镜像站恢复后触发 re-run。
-
-### 方向 2（置信度: 低，若镜像站持续故障可考虑）
-若该镜像站长期不可用，可考虑在 Dockerfile 的 `dnf install` 之前修改 `/etc/yum.repos.d/` 中的 repo 配置，将 `repo.openeuler.org` 替换为其他可用镜像站。但当前日志中所有失败 URL 主机名均为 `repo.****.org`（已被脱敏），无法确认具体是哪个镜像托管站点。
+**重试构建。** 这是典型的 CI 基础设施瞬时故障（HTTP/2 流层面的服务端内部错误），与代码无关。等待仓库镜像恢复后重新触发 CI 构建即可。如果同类问题频繁出现，可联系 CI 运维团队排查 `repo.****.org` 镜像站的 HTTP/2 服务稳定性，或考虑在 Dockerfile 中为 dnf 添加 `--retries` / `--setopt=retries=10` 参数提高容错能力。
 
 ## 需要进一步确认的点
-1. 日志中的 `repo.****.org` 原始域名是什么？是否是 `repo.openeuler.org` 或其他内部镜像站？
-2. 该镜像站的 HTTP/2 故障是间歇性还是持续性？可通过手动 curl 测试特定 RPM 包 URL 的 HTTP/2 连接稳定性确认。
-3. 在相同时间窗口内，其他依赖 openEuler 24.03-LTS-SP4 源做 `dnf install` 的 PR 是否也出现相同错误？（若有多案例可佐证平台级故障）
+- 确认 `repo.****.org` 镜像站在构建时刻是否存在已知的服务降级或网络抖动。
+- 如果重试后仍持续失败，需要检查仓库镜像站是否对特定 RPM 包（如 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm`）存在损坏或发行异常。
