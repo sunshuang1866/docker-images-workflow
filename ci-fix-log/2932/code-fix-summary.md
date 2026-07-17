@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施故障（infra-error），与 PR 代码变更无关。
+无需代码修复。CI 失败为 infra-error（基础设施错误），Docker BuildKit 守护进程容器引导失败（`Could not find the file / in container`），发生在 Dockerfile 加载之前，与 PR #2932 的代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-根据 CI 失败分析报告，错误发生在 BuildKit 构建器初始化阶段（`[internal] booting buildkit`），Docker daemon 在启动 buildx builder 容器时报 `Error response from daemon: Could not find the file /`，此时 Dockerfile 中任何指令均未被解析或执行。该失败与 PR #2932 新增的 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及配套元数据文件无关，属于构建节点上 Docker daemon / BuildKit 基础设施的瞬时故障。
+CI 失败分析报告明确指出：错误发生在 `[internal] booting buildkit` 阶段，此时尚未拉取基础镜像、未加载 Dockerfile、未执行任何构建指令。根本原因是 Docker daemon 创建 BuildKit 容器时文件系统访问异常，属于 CI 构建节点的运行时基础设施问题（存储驱动瞬时异常、镜像拉取不完整或磁盘 I/O 故障）。
 
-建议操作：手动重试 CI Job。若持续复现，联系 CI 基础设施运维排查构建节点（`ecs-build-docker-x86-hk`）上 Docker daemon 的存储驱动或 overlay 文件系统状态。
+修复方式是重新触发 CI（通过 Jenkins 重试），让构建在健康的节点或重新创建 BuildKit 容器后执行。无需对任何源码文件做代码修改。
 
 ## 潜在风险
 无
