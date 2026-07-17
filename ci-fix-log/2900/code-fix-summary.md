@@ -1,17 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error）：CI 运行器环境缺少 `shunit2` 测试框架库，导致 `[Check]` 阶段测试框架初始化失败。无需代码修改。
+CI 基础设施缺陷：`eulerpublisher` 测试框架缺少 `shunit2` 依赖，与 PR 代码变更无关，无需代码修改。
 
 ## 修改的文件
-无（本次 CI 失败与 PR 代码变更无关，无需修改任何源代码）
+无（infra-error，无需修改任何仓库文件）
 
 ## 修复逻辑
-CI 失败分析报告的根因是 CI 运行器上的 `eulerpublisher` 测试脚本 `common_funs.sh` 在加载 `shunit2` 库时找不到该文件。该问题发生在 CI 测试框架自检阶段，不属于 PR 代码问题：
+CI 失败发生在构建和推送全部成功之后的 `[Check]` 阶段。测试脚本 `common_funs.sh:13` 尝试通过 `. shunit2` 引入 `shunit2` shell 测试库，但该库在 CI runner 上未安装，导致所有测试项无法执行。
 
-1. 所有 `RUN` 步骤均正常完成，Docker 镜像构建和推送成功
-2. PR 仅新增 openEuler 24.03-LTS-SP4 的 Dockerfile 及配套文件，不涉及 CI 基础设施配置
-3. 需要在 CI 运行器（runner）上安装 `shunit2` 测试框架才能修复此问题（属于 CI 环境运维范畴，非代码修复）
+此问题与本次 PR 新增的 httpd 2.4.66 openEuler 24.03-LTS-SP4 Dockerfile、httpd-foreground 脚本、README 等改动完全无关。需要由 CI 运维团队在构建节点上安装 `shunit2`（可通过包管理器安装或手动部署到 `/usr/local/etc/eulerpublisher/tests/container/common/` 等可被 `common_funs.sh` 找到的路径）。
 
 ## 潜在风险
 无
