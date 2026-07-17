@@ -1,18 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施错误（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施故障（Docker BuildKit 容器启动失败），与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 失败发生在 Docker BuildKit 引导阶段（`[internal] booting buildkit`），即 BuildKit 容器 `buildx_buildkit_euler_builder_*` 在构建节点 `ecs-build-docker-x86-hk` 上初始化时，Docker daemon 报告 `Could not find the file / in container`，导致容器创建后立即出错。
-- 该错误发生在实际 Dockerfile 构建步骤（`docker build`）执行之前，PR 新增的 Dockerfile 从未被执行到，无证据表明其内容有任何问题。
-- 常见原因是构建节点磁盘空间不足、Docker 存储驱动状态异常或 Docker daemon/内核兼容性问题。
-
-**建议操作**：触发 CI 重试（re-run）。若持续失败，需由 CI 运维团队检查构建节点 `ecs-build-docker-x86-hk` 的 Docker daemon 状态和存储空间。
+CI 分析报告确认本次失败类型为 `infra-error`，根因是 Docker daemon 在创建 buildx 构建器容器后无法访问其根文件系统（`Could not find the file / in container`），属于宿主机 Docker 运行时层面的基础设施偶发故障。本次 PR 仅新增了 glibc 镜像的 Dockerfile 及元数据文件，不会导致 BuildKit 守护进程层面的容器根文件系统访问错误。处理方式：重新触发 CI 流水线即可，大概率可以正常通过。
 
 ## 潜在风险
-无。PR 涉及的 4 个文件（Dockerfile、README.md、meta.yml、image-info.yml）均未修改，不存在风险。
+无
