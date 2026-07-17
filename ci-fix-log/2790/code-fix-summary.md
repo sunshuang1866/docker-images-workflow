@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error（CI 基础设施问题）：CI 流水线触发器将仅修改 README.md 的纯文档 PR 错误地送入 appstore 发布规范校验器（`update.py`），导致校验器误报 `[Path Error]`。
+无需代码修改 — CI 失败属于基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无（未修改任何文件）
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`，置信度中。根因是 CI 触发器（`multiarch/openeuler/trigger/openeuler-docker-images`）在下游 job 调度时未根据 PR 变更文件类型进行过滤，纯文档更新 PR 被错误地路由到 appstore 发布规范校验流程。此问题属于 CI 基础设施层面，不在源码仓库代码范围内，不需要也不应对 README.md 或任何源码文件进行修改。
+CI 失败分析报告明确指出：PR #2790 仅修改了仓库根目录的文档文件 `README.md`（和 `README.en.md`），未涉及任何 Dockerfile、`meta.yml`、`image-info.yml` 或其他应用镜像构建/发布相关文件。CI 失败的原因是 Jenkins 流水线将纯文档修改的 PR 错误路由到了 appstore 发布规范校验 Job（`multiarch/openeuler/x86-64/openeuler-docker-images`），该 Job 按应用镜像路径规范校验 `README.md`，因路径不匹配而报错。
+
+此为 CI 流水线路由配置问题，修复应在 Jenkins 流水线的 trigger 层添加过滤逻辑：当 PR 仅修改仓库根目录文档文件且不涉及任何应用镜像目录时，跳过 appstore 发布规范校验 Job。**PR 的代码变更本身完全正确，无需任何修改。**
 
 ## 潜在风险
-无（源码无变更）。建议在 CI 触发器层增加文件变更过滤逻辑：当 PR 仅包含根目录文档变更且不含应用镜像目录变更时，跳过 appstore 规范校验 job。
+无 — 此修复方向不涉及任何仓库内代码变更，对现有功能无影响。
