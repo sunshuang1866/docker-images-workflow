@@ -1,13 +1,14 @@
 # 修复摘要
 
 ## 修复的问题
-PR #3201 新增 maca-sdk 镜像时遗漏在 `AI/image-list.yml` 中注册该镜像的根目录条目，导致 CI 元数据完整性校验（`parse_image_prefix`）失败。
+`EUR.repo` 中 `repo_gpgcheck=1` 导致 dnf 要求验证仓库元数据 GPG 签名，但上游 Copr 仓库未提供 `repomd.xml.asc`（HTTP 404），仓库被忽略后 `dnf install` 找不到 `maca-sdk` 包，构建失败。
 
 ## 修改的文件
-- `AI/image-list.yml`: 在 `images` 列表末尾添加 `maca-sdk: maca-sdk` 条目，将 `AI/maca-sdk/` 注册为 maca-sdk 镜像的根目录路径。
+- `AI/maca-sdk/3.7/24.03-lts-sp3/EUR.repo`: 将第 8 行 `repo_gpgcheck=1` 改为 `repo_gpgcheck=0`
 
 ## 修复逻辑
-CI 预检工具 `format.py` 的 `parse_image_prefix` 函数在遍历变更文件时，通过 `image-list.yml` 查找每个文件对应的镜像根目录。PR 在 `AI/` 场景下新增了 maca-sdk 镜像的四个文件（Dockerfile、EUR.repo、README.md、meta.yml），但未在 `AI/image-list.yml` 中添加 `maca-sdk` 条目，导致 `parse_image_prefix` 抛出 `ValueError("Missing required image root directory for multi-scene processing.")`。添加该条目后，CI 工具即可正确解析 `AI/maca-sdk/README.md` 的归属。
+CI 分析报告定位根因为 `EUR.repo:8` 的 `repo_gpgcheck=1`。上游 Copr 仓库 (`eur.openeuler.openatom.cn`) 未对仓库元数据做 GPG 签名，`repomd.xml.asc` 返回 404。禁用仓库级 GPG 检查后，dnf 将能正常读取该仓库的包列表。包级 GPG 检查（第 6 行 `gpgcheck=1`）保留，因为 `pubkey.gpg` 可用且导入正常。
 
 ## 潜在风险
-无。该修改仅追加一行 YAML 条目，不影响现有镜像的解析逻辑。
+- 仓库元数据未签名，存在元数据篡改风险，但这是上游仓库的限制，属于可接受的 trade-off。
+- 构建成功后需关注 `baseurl` 中的 `SP2` 路径与基础镜像 `SP3` 的兼容性，如出现依赖冲突需联系上游确认是否有 SP3 专用仓库路径。
