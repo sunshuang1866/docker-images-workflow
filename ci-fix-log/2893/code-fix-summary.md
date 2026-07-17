@@ -1,18 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败属于 **infra-error**，无需对代码仓库做任何修改。失败原因是 CI runner 宿主系统上缺少 `shunit2` Shell 测试框架，导致 `[Check]` 阶段无法运行容器验收测试。
+CI 基础设施问题：CI runner 环境缺少 `shunit2` Shell 单元测试框架，导致 [Check] 阶段的容器健康检查测试无法执行。此问题与 PR #2893 的代码变更完全无关——Docker 构建阶段（422/422 编译目标）和镜像推送均已成功完成。
 
 ## 修改的文件
-无。PR 代码本身（Dockerfile、named.conf、README.md、image-info.yml、meta.yml）均正确且构建成功（422/422 编译目标全部通过）。
+无。该失败为 `infra-error`，根因在 CI 运行环境而非 PR 代码，**无需修改任何代码文件**。
 
 ## 修复逻辑
-根据 CI 失败分析报告，该失败为基础设施问题（`shunit2` 未安装在 CI runner 上），与 PR 变更无关：
-- Docker 构建完全成功，镜像已成功推送到 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`
-- 失败发生在 `[Build] finished` 和 `[Push] finished` 之后的 `[Check]` 阶段
-- 根因是 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 执行 `source shunit2` 时找不到文件
+CI 分析报告明确指出：
+- 失败位置：`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`，执行 `. shunit2` 时找不到文件
+- 失败类型：`infra-error`（CI 基础设施问题）
+- 与 PR 关联：无关。PR 仅新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、named.conf 及元数据文件，Docker 构建完全通过
 
-此问题需由 CI 管理员在 runner 宿主系统上安装 `shunit2`（如 `yum install shunit2`），然后重新触发 CI 即可。
+该问题需由 CI 运维人员在 runner 环境中安装 `shunit2` 包（如 `dnf install shunit2` 或从源码安装）来解决，属于基础设施层面的修复，不在代码修复范围内。
 
 ## 潜在风险
-无
+无。未修改任何代码，不存在引入新问题的风险。
