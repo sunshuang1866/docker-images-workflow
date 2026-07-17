@@ -1,15 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），由 `eulerpublisher` 包内置测试脚本 `bwa_test.sh` 的 CRLF 换行符导致。
+无需代码修改。CI 失败属于 infra-error，根因是 CI 框架 `eulerpublisher` 内置测试脚本 `bwa_test.sh` 存在 CRLF 换行符问题，与本次 PR 的 Dockerfile/元数据变更无关。
 
 ## 修改的文件
-无（无需修改 PR 文件）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：PR 的 Dockerfile 构建和镜像推送均已完全成功，失败仅发生在 CI 自身的 [Check] 后置测试阶段。`bwa_test.sh` 位于 `eulerpublisher` Python 包安装目录下（`/usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh`），不是 PR 引入的文件。该脚本使用 Windows 换行符（CRLF），导致 shell 将 `/bin/sh\r` 识别为解释器路径而报错。
-
-此问题需要 CI 运维人员修正 `eulerpublisher` 包中的测试脚本文件格式（将 CRLF 转换为 LF），不属于 Code Fixer 或 PR 作者的修复范围。
+分析报告明确指出：
+- 失败发生在 CI 框架 `eulerpublisher` 的 `[Check]` 阶段，其内置脚本 `/etc/eulerpublisher/tests/container/app/bwa_test.sh` 的 shebang 行末尾带有 `\r`（`^M`），导致系统查找名为 `/bin/sh\r` 的解释器失败。
+- PR 仅新增 Dockerfile 和更新元数据文件（README.md、image-info.yml、meta.yml），Docker 镜像的构建和推送均已成功。
+- 该问题需要 CI 基础设施维护者对 `eulerpublisher` 包中的 `bwa_test.sh` 执行 `dos2unix` 或等效操作清除 CRLF 字符。
+- 与 PR 代码无关，PR 的 Dockerfile 无需任何修改。
 
 ## 潜在风险
 无
