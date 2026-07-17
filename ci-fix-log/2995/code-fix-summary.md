@@ -1,19 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施错误（infra-error）：eulerpublisher 测试框架中的 `bwa_test.sh` 脚本使用 CRLF 换行符，导致 shebang 行解析失败。无需对本次 PR 的任何代码文件进行修改。
+无需代码修改。CI 失败为基础设施问题（infra-error），非 PR 代码变更导致。
 
 ## 修改的文件
-无。本次 CI 失败属于基础设施侧问题（eulerpublisher Python 包内的测试脚本换行符错误），不在当前 PR 变更范围内。
+无。PR 涉及的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）均无需改动。
 
 ## 修复逻辑
-CI 分析报告确认：
-- Docker 构建完全成功（`[Build] finished`、`[Push] finished`）
-- 镜像已成功构建并推送至 `docker.io/****test/bwa:0.7.18-oe2403sp4-x86_64`
-- 失败发生在 [Check] 测试阶段，报错 `/bin/sh^M: bad interpreter`，根因是 eulerpublisher 包内 `/etc/eulerpublisher/tests/container/app/bwa_test.sh` 文件以 DOS 换行符（CRLF）保存
-- 该测试脚本由 CI 框架控制，**完全不由本次 PR 的代码控制**，无法通过修改 PR 文件解决
+CI 分析报告确认：Docker 镜像构建和推送阶段均成功完成（`[Build] finished`、`[Push] finished`）。失败发生在 `[Check]` 后置测试阶段，根因是 `eulerpublisher` Python 包内置的测试脚本 `/usr/lib64/python3.9/../../etc/eulerpublisher/tests/container/app/bwa_test.sh` 包含 Windows 风格换行符（CRLF），导致 shebang `#!/bin/sh` 末尾携带 `\r` 字符，系统将其解释为查找 `/bin/sh\r` 解释器，从而报 `bad interpreter: No such file or directory`。
 
-此问题需由 eulerpublisher 维护者将 `bwa_test.sh` 的换行符从 CRLF 转换为 LF 后重新发布 Python 包。
+该问题与 PR #2995 的所有代码变更无关，应由 CI 平台维护方修复 `eulerpublisher` 包中测试脚本的换行符后重新发布。
 
 ## 潜在风险
-无。本次未修改任何代码文件，无引入新问题的风险。
+无
