@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 infra-error，由 `repo.openeuler.org` 仓库 HTTP/2 网络波动导致 RPM 包下载失败（Curl error 92/56），与 PR 代码变更无关。
+无需代码修改 — CI 失败为基础设施问题（infra-error），由 openEuler 官方软件源 `repo.openeuler.org` 在 aarch64 构建环境中出现间歇性 HTTP/2 连接异常（Curl error 92）导致 yum install 下载 vim-common 包失败。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确判定失败类型为 infra-error，根因为 `repo.openeuler.org` 在 aarch64 构建节点的高并发下载阶段出现 HTTP/2 传输层错误（INTERNAL_ERROR 和 SSL_ERROR_SYSCALL），多个包（gcc、kernel-headers、perl-MIME-Base64）出现间歇性下载失败，vim-common 最终耗尽所有镜像重试机会。该问题属于 CI 基础设施网络问题，Dockerfile 中的 `yum install` 命令语法和包名均正确无误。修复方向为重新触发 CI 构建，等待仓库服务恢复。
+分析报告明确指出该失败与 PR 的任何代码变更无关。Dockerfile 中的 `yum install` 命令语法正确，所列软件包均为 openEuler 24.03-LTS-SP4 官方仓库中的标准包。失败由 CI 构建时软件源网络不稳定导致，属于 transient 网络问题。建议**重新触发 CI 构建**即可。
 
 ## 潜在风险
 无
