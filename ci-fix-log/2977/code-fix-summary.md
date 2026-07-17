@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施临时性故障：openEuler 官方软件源 `repo.openeuler.org` 在构建时段发生 HTTP/2 连接不稳定，导致 `yum install` 下载 RPM 包失败（Curl error 92 / 56），与 PR 代码无关。
+无需代码修复。CI 失败为基础设施问题（`repo.openeuler.org` HTTP/2 服务不稳定），与 PR 代码无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-根据 CI 失败分析报告，失败类型为 **infra-error**，根因是 `repo.openeuler.org` CDN/镜像节点在构建时段（2026-07-09 13:44 UTC 前后）的 HTTP/2 连接不稳定。Dockerfile 中的 `yum install` 命令语法正确，安装的均为 openEuler 24.03-LTS-SP4 仓库中存在的标准软件包。PR 仅为新增 brpc 1.16.0 on openEuler 24.03-LTS-SP4 的 Dockerfile 及相关元数据文件，代码本身无问题。**无需代码修改，直接触发 CI 重跑即可。**
+CI 分析报告判定失败类型为 `infra-error`。根因是 aarch64 runner 在构建时从 `repo.openeuler.org` 下载 RPM 包时反复遇到 HTTP/2 流层错误（`INTERNAL_ERROR`），以及 SSL 读取错误（`SSL_ERROR_SYSCALL`），导致 `yum install` 无法完成并返回 exit code 1。
+
+Dockerfile 本身内容（安装构建依赖 → clone 源码 → cmake 编译）无语法错误或逻辑问题，PR 仅新增了标准的 Dockerfile。失败纯粹由上游仓库在构建时段（2026-07-09 13:45 UTC）的网络服务不稳定导致，属于偶发性基础设施故障。
+
+根据修复指令：基础设施类问题不应修改代码。
+
+建议操作：等待 `repo.openeuler.org` 恢复后重新触发 CI 构建（retry）。
 
 ## 潜在风险
 无
