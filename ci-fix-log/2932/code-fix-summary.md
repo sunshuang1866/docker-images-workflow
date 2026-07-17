@@ -1,15 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障，无需代码修改。
+无需代码修复。CI 失败为基础设施问题（`infra-error`），与 PR 变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告结论：失败类型为 `infra-error`，与 PR #2932 的代码变更**无关联**。错误发生在 BuildKit 内部容器启动阶段（`[internal] booting buildkit`），日志显示 `Error response from daemon: Could not find the file / in container`，这是 Docker daemon 层级的容器根文件系统挂载故障，早于任何 Dockerfile 指令执行。PR 仅新增了 glibc openEuler 24.03-LTS-SP4 的 Dockerfile 及元数据文件，均为纯配置类变更，无法触发此类基础设施异常。日志中镜像规范预检也已通过，进一步确认问题不在代码层面。
+CI 失败分析报告确认：错误发生在 BuildKit 容器的 `[internal] booting buildkit` 阶段（`Could not find the file / in container`），此时尚未进入 Dockerfile 解析阶段。PR 仅新增了 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及更新了三个元数据文件（README.md、image-info.yml、meta.yml），这些变更无法导致 Docker daemon 级别的容器启动异常。
 
-建议：重新触发 CI 构建，验证是否为偶发性 infra 故障；若持续失败，需运维侧排查构建节点 `ecs-build-docker-x86-hk` 的 Docker daemon / BuildKit 状态。
+**根因**：构建节点 `ecs-build-docker-x86-hk` 上的 Docker daemon 运行时异常（存储驱动状态异常、磁盘空间不足或 BuildKit 镜像损坏）。
+
+**建议行动**：重新触发 CI 运行（retry）。若重试后仍失败，需排查该构建节点的 Docker daemon 健康状态和磁盘资源。
 
 ## 潜在风险
-无
+无（未修改任何代码）
