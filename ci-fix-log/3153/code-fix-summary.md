@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 **infra-error**，根因在 CI 基础设施工具（eulerpublisher `update.py`）的路径比较逻辑缺陷，与 PR 代码变更无关。
+CI appstore 规范预检工具误将根目录 `README.md` 的文档变更判定为路径校验失败，属于 infra-error，无需修改 PR 代码。
 
 ## 修改的文件
-无。PR 仅修改了 `README.md`（更新基础镜像可用 tags 的文档信息），该文件本身不存在需要修复的问题。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：失败由 eulerpublisher 的 appstore 发布规范预检工具（`update.py:273`）在处理 `git diff --name-only` 输出的文件路径时未做路径规范化导致——工具期望绝对路径 `/README.md`，但 `git diff` 输出相对路径 `README.md`，字符串比较不匹配。这是一个 CI 基础设施层面的 bug，应由 CI 维护者修复 `update.py` 中的路径比较逻辑（统一添加或去除前导 `/`）。PR 仅更新了根目录下的 README 文档文件，未涉及任何 Dockerfile 或镜像元数据变更，该 CI 检查本不应阻塞此 PR。
+CI 分析报告明确指出这是 **infra-error**。失败的直接原因是 `eulerpublisher/update/container/app/update.py:273` 中的 appstore 规范预检工具对仓库根目录的纯文档文件（`README.md`）执行了路径规范校验，但该校验逻辑是为应用镜像子目录（如 `AI/foo/…`、`Bigdata/bar/…`）设计的，不适用于根目录文档。PR #3153 仅更新了基础镜像可用 Tags 列表，是合规的文档维护操作，不涉及任何应用镜像构建文件。根因在 CI 基础设施工具侧，不应从 PR 代码层面进行修改。
 
 ## 潜在风险
-无——本次未对任何源代码文件做修改。
+无 — 当前修复不涉及任何代码变更。真正的修复应在 CI 基础设施的 `update.py` 中添加白名单/过滤逻辑，将根目录文档文件排除在路径校验范围之外。
