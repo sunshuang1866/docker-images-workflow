@@ -5,32 +5,34 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 构建器异常终止
-- 新模式症状关键词: `failed to receive status`, `rpc error`, `Unavailable`, `graceful_stop`, `no builder found`
+- 新模式标题: BuildKit builder 失联
+- 新模式症状关键词: `failed to receive status`, `rpc error`, `closing transport`, `builder.*not found`, `graceful_stop`
 
 ## 根因分析
 
 ### 直接错误
 ```
 #7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
+#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker buildx 构建阶段，步骤 `#7 [2/4]`（dnf install），无具体 Dockerfile 行号
-- 失败原因: CI 使用的 buildkit 构建器实例 `euler_builder_20260709_224657` 在 Docker 镜像构建过程中异常终止（`graceful_stop`），导致 RPC 连接中断。该构建器实例在 `dnf install` 下载软件包阶段被关闭，随后查无此实例（`no builder found`）
+- 失败位置: Docker build 阶段 `#7 [2/4]`（`dnf install` 正在下载 metadata 时）
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被优雅终止（`graceful_stop`），导致客户端与 builder 的连接断开（`error reading from server: EOF`），后续操作无法找到该 builder（`no builder found`）。这是 CI 基础设施层面的问题，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 仅新增了一个标准的 Dockerfile（安装编译依赖 → 编译 Python 3.9 → pip 安装 scann）、更新了 README.md、image-info.yml 和 meta.yml。所有变更均遵循项目既有模板，不包含任何可能触发构建器崩溃的非标准操作。故障发生在 BuildKit 基础设施层（构建器实例被终止），而非 Dockerfile 执行层（无语法错误、无依赖缺失、无编译失败）。
+**与 PR 无关。** PR 新增的 Dockerfile 语法正确、依赖声明完整，构建过程仅执行到第 2 步（共 4 步）的 `dnf install` 阶段就被基础设施中断。该 Dockerfile 镜像在 x86-64 架构上也存在同名 sp3 版本（`Others/scann/1.4.2/24.03-lts-sp3/Dockerfile`，同样使用 openEuler 24.03 系列基础镜像），CI 历史上未报告过该路径下的 `dnf` 元数据下载或包安装问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**触发 CI 重试。** 这是典型的构建基础设施短暂故障（runner 上的 buildkit 守护进程被重启、资源不足导致构建器被驱逐、或网络抖动导致 RPC 连接断开）。PR 代码无需任何修改，重新触发 CI 流水线即可。
+无需修改 PR 代码。这是 CI 基础设施中 BuildKit builder 的偶发性失联问题（可能由节点资源回收、网络抖动或 builder 超时自动清理触发）。重新触发 CI 流水线即可。
+
+### 方向 2（置信度: 低）
+如果重试后仍然失败，可能需要检查 CI 的 builder 超时配置或节点资源水位，但这属于运维层面，非 Code Fixer 职责范围。
 
 ## 需要进一步确认的点
-- 确认 CI runner `ecs-build-docker-x86-hk` 在构建时段是否有资源压力（内存/磁盘不足导致 buildkit 容器被 OOM-kill 或驱逐）
-- 确认 buildkit 构建器实例 `euler_builder_20260709_224657` 是否为该 runner 上的共享资源，是否被其他并发构建任务影响
-- 如果重试后仍然失败，需要获取 buildkit 守护进程端日志（而非客户端 RPC 错误）以确定 `graceful_stop` 的根本原因
+- 确认该 CI 节点（`ecs-build-docker-x86-hk`）在失败时段的资源状态和 builder 超时策略。
+- 确认重试后是否通过（该错误模式通常为重试后可恢复的偶发故障）。
