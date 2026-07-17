@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。失败为 CI 基础设施问题（infra-error）：CI runner 的测试环境中缺少 `shunit2` Shell 单元测试框架，导致 `[Check]` 阶段执行容器镜像功能测试时失败。
+无需代码修复。CI 失败是基础设施问题：CI runner 环境中缺少 `shunit2` shell 测试框架。
 
 ## 修改的文件
-无。Docker 镜像构建和推送均已成功完成，PR 代码变更（新增 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile` 及元数据文件）无需修改。
+无。本次 CI 失败不涉及 PR 代码层面的修复。
 
 ## 修复逻辑
-CI 分析报告明确指出此为 infra-error，不属于代码修复范畴。CI 管理员应在 aarch64 runner 上安装 `shunit2` 框架后重新触发流水线。
+CI 分析报告判定失败类型为 `infra-error`，根因是 CI runner 上的 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 尝试引用 `shunit2` 时找不到该文件/命令。PR 中的 Docker 镜像构建和推送均已成功完成，失败仅发生在 [Check] 阶段，与本次 PR 新增的 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关配置文件无关。
+
+此问题需要在 CI 基础设施层面解决（在 CI runner 上安装 `shunit2`），不应对 PR 的任何代码文件进行修改。
 
 ## 潜在风险
-无（未修改任何代码）。
+无。未对任何代码文件进行修改。
