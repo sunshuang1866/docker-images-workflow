@@ -5,33 +5,29 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit builder被终止
-- 新模式症状关键词: graceful_stop, connection error, error reading from server: EOF, no builder found, buildx
+- 新模式标题: BuildKit Builder 异常终止
+- 新模式症状关键词: `graceful_stop`, `no builder found`, `closing transport`, `rpc error`, `connection error`
 
 ## 根因分析
 
 ### 直接错误
 ```
-#7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4]`（`RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`）
-- 失败原因: CI 的 BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被优雅关闭（`graceful_stop`），导致 buildx 客户端与 builder 之间的 gRPC 连接断开，构建中断。这是 CI 基础设施层面的问题，与 Dockerfile 内容无关。
+- 失败位置: Docker build 步骤 `#7 [2/4] RUN dnf install -y ...`
+- 失败原因: BuildKit Docker 构建器 `euler_builder_20260709_224657` 在构建过程中被异常终止（gRPC goaway 附带 `graceful_stop` 标志），导致所有正在运行的构建步骤被中断，后续无法再找到该 builder
 
 ### 与 PR 变更的关联
-**无关**。PR 新增的 Dockerfile 仅包含标准的系统包安装和 Python 编译步骤，构建失败时 `dnf install` 正在进行中（元数据正常下载，速度 77 kB/s），Dockerfile 语法和包名均无错误。失败原因完全是 BuildKit builder 被意外终止所致。
+与 PR 变更**无关**。PR 仅新增了一个标准的 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）和配套的元数据文件更新。构建在前 6 步（拉取基础镜像、加载 Dockerfile、下载 .dockerignore）均成功完成，在步骤 `#7` 执行 `dnf install` 下载软件包元数据时，BuildKit builder 进程被外部终止。该 Dockerfile 内容和结构与其他已成功的同类 Dockerfile 一致，不存在语法或逻辑错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。由于 BuildKit builder 被 `graceful_stop` 终止属于 CI 基础设施的偶发性问题（可能由节点资源回收、调度超时、builder 健康检查失败等触发），不需要修改任何代码。重新运行 CI Job 大概率可以通过。
+这是一个 CI 基础设施故障（BuildKit builder 进程意外终止），与 PR 代码变更无关，**无需修改任何代码**。Code Fixer 无需处理。建议重新触发 CI 运行，构建器可恢复后构建预期可正常通过。
 
 ## 需要进一步确认的点
-- Builder `euler_builder_20260709_224657` 被终止的具体原因：是 CI 节点资源不足（OOM）、builder 空闲超时自动回收、还是调度策略触发的主动下线。这些信息仅在 Jenkins 节点管理日志或 buildkit 守护进程日志中可见，当前提供的构建日志无法确认。
-
-## 修复验证要求
-无。本次失败为 infra-error，无需修改 Dockerfile 或任何代码文件。
+- 该 BuildKit builder (`euler_builder_20260709_224657`) 被 `graceful_stop` 的原因（可能是  CI 节点的资源限制、Docker daemon 重启、或调度层面的主动回收）
+- 重新触发 CI 后是否复现——若持续复现，可能存在 builder 资源分配或超时配置问题而非本次 PR 引入
