@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：aarch64 runner 从 `repo.openeuler.org` 下载 RPM 包时遇到 HTTP/2 传输层错误（Curl error 92/56），属间歇性网络波动，无需代码修改。
+无需代码修改。CI 失败为 infra-error，根因是 `repo.openeuler.org` 镜像站在构建时刻的 HTTP/2 传输不稳定（Curl error 92/56），与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，不涉及代码修复）
+无（infra-error，无需修改任何文件）
 
 ## 修复逻辑
-CI 失败分析报告将该失败定性为 `infra-error`，置信度为高。失败原因是 CI aarch64 runner（`ecs-build-docker-aarch64-04-sp`）与 `repo.openeuler.org` 之间的 HTTP/2 传输层中断（`INTERNAL_ERROR` / `SSL_ERROR_SYSCALL`），导致 `vim-common` 等 4 个 RPM 包下载失败。172 个包成功下载，仅 4 个包因间歇性网络问题失败。
+分析报告明确指出：Dockerfile 的 `yum install` 命令语法正确、包名有效，失败完全由 openEuler 官方仓库 `repo.openeuler.org` 在 aarch64 构建时的 HTTP/2 流错误（`INTERNAL_ERROR`）和 SSL 读错误（`SSL_ERROR_SYSCALL`）导致。虽然大部分 RPM 包通过 yum 内置重试成功下载，但传递依赖 `vim-common` 耗尽所有镜像重试次数后永久失败。
 
-Dockerfile 中声明的所有包名（gcc、cmake、protobuf-devel 等）均正确有效，Dockerfile 语法无误，与 PR 改动无关。根据指令，infra-error 不应强行修改代码，建议触发 CI 重试。
+建议处理方式：触发 CI 重新构建，同一 Dockerfile 在仓库网络正常时大概率能通过。
 
 ## 潜在风险
 无
