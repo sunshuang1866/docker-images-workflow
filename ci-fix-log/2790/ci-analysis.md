@@ -4,40 +4,38 @@
 - PR: #2790 — update readme.md
 - 失败类型: infra-error
 - 置信度: 中
-- 知识库匹配: 新模式
-- 新模式标题: appstore校验误报
-- 新模式症状关键词: Path Error, expected path, README.md, appstore, specification error, update.py
+- 知识库匹配: 模式11
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 15:28:07,685-/home/jenkins/agent-working-dir/workspace/multiarch/****/x86-64/****-docker-images/eulerpublisher/update/container/app/update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 15:28:07,685-/home/jenkins/agent-working-dir/workspace/.../eulerpublisher/update/container/app/update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 |  README.md  | [Path Error] The expected path should be /README.md |   FAILURE    |
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`（CI appstore 发布规范校验工具）
-- 失败原因: CI 流水线在 x86-64 下游 job 中运行了 appstore 发布规范校验器（`update.py`），该校验器检测到 PR 变更文件为 `README.md`（及 `README.en.md`），但此 PR 为纯文档更新**不包含任何应用镜像发布内容**（无 Dockerfile、meta.yml 等），校验器将其视为不符合 appstore 发布规范路径的变更，报 `[Path Error]`。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`（CI 工具，非仓库内文件）
+- 失败原因: CI 的 appstore 发布规范校验器（`eulerpublisher`）检测到 PR 修改了根目录的 `README.md`，将其按应用镜像路径规范进行校验，由于 `README.md` 位于仓库根目录（而非 `{category}/{image}/{version}/{os-version}/` 层级结构下），校验失败。
 
 ### 与 PR 变更的关联
-本次 PR 仅修改了 `README.md` 和 `README.en.md` 两个根目录文档文件，更新了"可用镜像的 Tags"列表（将 latest 标签从 24.03-lts-sp2 改为 24.03-lts-sp3，新增 25.09 条目等）。这些变更**不涉及**任何应用镜像的 Dockerfile、meta.yml、image-info.yml 或 image-list.yml，因此 appstore 发布规范校验与此 PR 无关。CI 流水线错误地将该文档 PR 当作应用镜像发布 PR 进行了校验，导致误报。
+**PR 变更本身有效，不触发此错误。** PR #2790 仅修改了仓库根目录的两个文档文件：
+- `README.md` — 更新可用镜像 Tags 表格（将 `24.03-lts-sp2` 更新为 `24.03-lts-sp3` 作为 latest，新增 `25.09`、`24.03-lts-sp3`、`24.03-lts-sp2` 条目）
+- `README.en.md` — 同上变更
+
+这两个文件均未涉及任何 Dockerfile、`meta.yml`、`image-info.yml` 或其他应用镜像构建/发布相关文件。CI 失败是由于 Jenkins 流水线将文档类 PR 路由到了 appstore 发布规范校验 Job（`multiarch/openeuler/x86-64/openeuler-docker-images`），该 Job 的设计目的是校验应用镜像的目录结构和元数据是否符合上架规范，不应处理纯文档修改的 PR。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 流水线/触发器在调度下游 job 时未区分 PR 的变更类型，将纯文档更新 PR 也送入了 appstore 发布规范校验流程。应在 trigger 层增加文件变更过滤逻辑：当 PR 仅包含根目录 README/文档变更且不包含应用镜像目录变更时，跳过 appstore 规范校验 job。
-
-### 方向 2（置信度: 低）
-`eulerpublisher/update/container/app/update.py` 校验器自身对根目录 `README.md` 的路径校验规则可能存在缺陷。「The expected path should be /README.md」提示期望路径与实际路径一致却仍报 FAILURE，可能为校验逻辑 bug。需排查 `update.py:273` 附近的路径比较逻辑是否正确处理了根路径。
+此为 CI 流水线路由问题（infra-error），**无需修改 PR 中的任何代码**。需要在 Jenkins 流水线的 trigger 层添加过滤逻辑：当 PR 仅修改仓库根目录的文档文件（如 `README.md`、`README.en.md`）且不涉及任何应用镜像目录时，跳过 appstore 发布规范校验 Job（`multiarch/openeuler/x86-64/openeuler-docker-images` 及对应的 aarch64 Job），直接标记为成功。
 
 ## 需要进一步确认的点
-1. CI 触发器（`multiarch/openeuler/trigger/openeuler-docker-images`）是否有根据 PR 变更文件类型过滤下游 job 的机制？若无，这是基础设施层面的问题，Code Fixer 无法介入。
-2. `eulerpublisher/update/container/app/update.py` 中第 273 行附近的具体路径校验逻辑是什么？需在代码库中查阅 `update.py` 源码确认"Path Error"的判定条件。
-3. 根目录 `README.md` / `README.en.md` 的变更在 CI 规范中是否被允许？是否要求必须伴随应用镜像的实质性变更？
-4. 上游 trigger job（build number 2783）的日志需确认 — 它是否也以 `Finished: SUCCESS` 结束，仅将失败传播到下游？若是，需获取 trigger 层日志确认其调度逻辑。
+1. Jenkins 流水线 trigger 层（`multiarch/openeuler/trigger/openeuler-docker-images`）的触发条件配置——确认为何仅修改根级 README 的 PR 也会触发下游 x86-64 构建/校验 Job
+2. `eulerpublisher/update/container/app/update.py` 中路径校验的具体逻辑（line 273 附近的路径匹配规则），确认是否有方法让校验器识别并跳过仓库根目录文档
+3. 是否存在其他仅修改根级文档但成功通过的 PR（用于对比 trigger 条件差异）
 
 ## 修复验证要求
-若修复方向涉及修改 CI 校验规则（如 `update.py` 中的路径匹配逻辑），Code Fixer 必须在提交前验证：
-- 模拟一个仅含 README 变更的 PR 场景，确认修改后的校验器不再误报
-- 模拟一个含应用镜像 Dockerfile 变更的 PR 场景，确认修改后校验器仍能正确拦截不合规路径
+无需验证——此失败与代码变更无关，修复措施在 CI 流水线配置层面（Jenkinsfile / pipeline 脚本），不属于本 PR 或本仓库的文件修改范围。
