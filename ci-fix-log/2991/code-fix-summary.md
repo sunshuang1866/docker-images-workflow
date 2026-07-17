@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败类型为 **infra-error**，根因是 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 软件仓库在构建期间 HTTP/2 传输层出现间歇性 `INTERNAL_ERROR` 流错误（Curl error 92），导致 `dnf install` 阶段 `guile` 包下载失败。
+无需代码修改。此 CI 失败是基础设施问题（infra-error）。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-分析报告确认该失败与 PR #2991 的变更无关。Dockerfile 中 `dnf install -y git gcc gcc-c++ make cmake` 命令本身语法和逻辑均正确。失败发生在软件包下载阶段，属于 openEuler 官方镜像仓库 `repo.openeuler.org` 的 CDN/源服务器在 CI 构建时间窗口内的临时性网络波动。建议重试 CI job 即可通过。
+CI 失败发生在 `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6` 的 `dnf install` 步骤，根因是 `repo.openeuler.org` 的 aarch64 RPM 仓库在构建时出现 HTTP/2 流层错误（Curl error 92: INTERNAL_ERROR），导致 `guile` 等多个包下载失败。Dockerfile 本身内容（标准依赖安装 → git clone → cmake 构建）完全正确，失败与 PR 新增代码无关，属于 CI 基础设施级别的临时网络问题。
+
+建议重新触发 CI 构建（retry），通常网络恢复后即可通过。
 
 ## 潜在风险
 无
