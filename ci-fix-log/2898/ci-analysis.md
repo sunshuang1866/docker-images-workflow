@@ -4,9 +4,7 @@
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: shunit2测试框架缺失
-- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, [Check] test failed
+- 知识库匹配: 模式39（CI工具依赖缺失）
 
 ## 根因分析
 
@@ -20,27 +18,20 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 运行环境中的 `eulerpublisher` 测试框架 `common_funs.sh` 在第 13 行引用了 `shunit2`，但 `shunit2`（Shell 单元测试框架）未安装在 CI runner 上，导致 `[Check]` 阶段失败。
-
-Docker 镜像构建（`[Build]`）和推送（`[Push]`）均已成功完成：
-- 步骤 #7：Go 源码下载和验证 — 完成（67.8s）
-- 步骤 #8：文件时间戳规范化 — 完成（40.5s）
-- 步骤 #9：构建工具卸载 — 完成（1.5s）
-- 步骤 #10：WORKDIR 设置 — 完成
-- 步骤 #11：镜像导出和推送至 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64` — 完成（41.9s）
-- 日志明确输出 `[Build] finished` 和 `[Push] finished`
-
-失败仅发生在构建后的 `[Check]` 阶段，是 CI 基础设施缺少 `shunit2` 依赖所致。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI 编排工具 `eulerpublisher` 在 [Check] 阶段执行容器测试时，测试脚本 `common_funs.sh` 第 13 行尝试 source/调用 `shunit2`（一个 Shell 单元测试框架），但该框架在当前 CI runner 上不存在，导致 `[Check] test failed`。Docker 镜像的构建（Build）和推送（Push）阶段均已完成且成功。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据文件（README.md、image-info.yml、meta.yml），Docker 镜像本身的构建和推送均已成功。`shunit2` 缺失是 CI runner 环境问题，属于基础设施故障。
+**与 PR 无关。** PR 新增了 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile` 及相关元数据文件（README.md、image-info.yml、meta.yml），Docker 构建步骤（#7 下载安装 Go → #8 touch 文件 → #9 清理构建依赖 → #10 WORKDIR → #11 导出并推送镜像）全部执行成功，镜像已推送至 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64`。失败发生在构建完成后的 [Check] 阶段，是 CI runner 环境缺少 `shunit2` 测试框架所致，与 PR 的 Dockerfile 或元数据变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 环境（`ecs-build-docker-aarch64-01-sp` 或对应节点）上安装 `shunit2` Shell 测试框架包。openEuler 仓库中 `shunit2` 的包名为 `shunit2`，可通过 `dnf install shunit2 -y` 安装。安装后重新触发 CI 构建即可通过 `[Check]` 阶段。
+CI 运维侧修复：在运行 `eulerpublisher` 的 CI runner 环境中安装 `shunit2` 包，或将 `shunit2` 纳入 `eulerpublisher` 包的依赖项中。此问题需要 CI 基础设施维护者处理，**Code Fixer 无需对当前 PR 做任何代码修改**。
 
 ## 需要进一步确认的点
-- 确认 build 日志来自 aarch64 runner，对应标签为 `1.25.6-oe2403sp4-aarch64`。需确认 x86_64 runner 的构建 job 是否也存在相同的 `shunit2` 缺失问题。
-- 确认 `shunit2` 包在 openEuler 24.03-LTS-SP4 仓库中的确切包名和可用性。
+- 确认 `shunit2` 在其他 runner（如 x86_64 节点）上是否同样缺失，以判断是单个 runner 的环境问题还是所有 runner 的基础镜像缺少该依赖。
+- 确认 `eulerpublisher` 包的安装流程是否应自动安装 `shunit2` 依赖。
+
+## 修复验证要求
+无需验证（infra-error，非代码修复）。
