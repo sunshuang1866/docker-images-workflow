@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是 **infra-error**（基础设施误报），非 PR 变更内容有问题。
+CI appstore 发布规范检查工具对纯文档 PR 产生误报，`README.md` 被错误判定为路径校验失败。此失败为 **infra-error**，无需对源码仓库进行任何代码修改。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-PR #3153 仅修改了仓库根目录的 `README.md`（更新基础镜像可用 tags 列表），修改内容完全正确。
-
-CI 失败的直接原因是 `eulerpublisher/update/container/app/update.py` 的 appstore 发布规范预检工具检测到 `README.md` 发生变更，但该文件位于仓库根路径，不符合工具期望的镜像发布目录规范（如 `Category/Image/Version/OS/Dockerfile`），因此报 `Path Error`。
-
-本质上是 CI 流水线无法区分"纯文档更新 PR"和"应包含镜像发布内容的 PR"，将合法的文档变更误判为路径错误。这是 CI 基础设施层面的问题，应在 Jenkins pipeline 中增加对仅 `.md` 文件变更的跳过逻辑，或修改 `update.py` 的路径校验/白名单机制。
-
-由于 `README.md` 的修改内容正确无误，且该文件是 `pr.changed_files` 中唯一可修改的文件，不存在对源码的修改需求。
+PR #3153 仅修改了 `README.md`（和 `README.en.md`），更新了基础镜像可用 Tags 列表的文档内容，属于纯文档类变更，不涉及任何 Dockerfile、meta.yml、image-info.yml、image-list.yml 等镜像构建相关文件。CI 的 appstore 发布规范检查工具（`eulerpublisher/update/container/app/update.py`）对纯文档变更 PR 不适用，产生了误报。根据分析报告结论（方向 1，置信度: 高），此错误属于 CI 基础设施问题，应由 CI 管理员在触发/调度层增加过滤逻辑，当 PR 仅变更仓库根目录的文档文件且不含镜像构建文件时跳过 appstore 规范校验步骤。本 PR 的源码无需任何修改。
 
 ## 潜在风险
-无（未修改任何代码）
+无。不涉及代码修改。
