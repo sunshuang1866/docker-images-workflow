@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 容器初始化失败
-- 新模式症状关键词: Error response from daemon, Could not find the file / in container, buildx_buildkit, booting buildkit
+- 新模式标题: BuildKit 容器启动失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, docker-container driver
 
 ## 根因分析
 
@@ -24,24 +24,19 @@ ERROR: Error response from daemon: Could not find the file / in container buildx
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 守护进程容器初始化阶段（`buildx_buildkit_euler_builder_20260709_2057000`）
-- 失败原因: Docker 守护进程在创建 BuildKit builder 容器后，无法找到容器内的文件 `/`（根文件系统），导致 buildkit 无法启动，整个构建流程中断
+- 失败位置: Docker BuildKit 启动阶段（Dockerfile 构建步骤尚未执行）
+- 失败原因: CI 构建节点上的 Docker daemon 在创建 BuildKit 容器（`buildx_buildkit_euler_builder_20260709_2057000`）时，因内部文件路径 `/` 解析异常而失败。构建尚未进入任何 Dockerfile 步骤，属于 CI 基础设施层面的问题。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。CI 失败发生在 Docker BuildKit 基础设施层面的容器引导（`booting buildkit`）阶段，此时尚未进入 `docker build` 步骤——即尚未开始解析和构建 PR 中的 Dockerfile。PR 的 4 个变更文件（新增 glibc 2.42/openEuler 24.03-LTS-SP4 的 Dockerfile、更新 README.md、image-info.yml、meta.yml）均为标准的镜像新增操作，没有引入任何可能导致 BuildKit 运行异常的配置。
+**与 PR 变更无关。** 本次 PR 仅新增了 4 个文件/修改（一个 glibc Dockerfile + 三个元数据文件的条目增加），所有变更均为模板式的新增操作，不涉及任何可能影响 BuildKit 容器启动的配置。错误发生在 BuildKit 内部启动阶段（`[internal] booting buildkit`），远早于 Dockerfile 中任何 `RUN` 指令的执行。
 
-该错误是 CI runner（`ecs-build-docker-x86-hk`）上 Docker daemon 或 buildx 组件的运行时问题，属于基础设施故障。
+日志中 `Cleaning up...` 后显示依赖安装正常（`python3-dnf`、`git`、`python3-pip`、`cpio` 均已安装），`eulerpublisher` 的差异检测也正常识别到了 PR 变更的文件。失败发生在 `docker buildx` 创建 builder 容器时，系 CI runner 上 Docker 运行时的偶发异常。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改 PR 代码。** 此为 infra-error，应由 CI 管理员执行以下操作之一：
-- 清理并重启 CI runner 上的 Docker daemon 和 buildx builder 实例
-- 检查 runner 磁盘空间是否已满（`docker system prune -a -f`）
-- 删除残留的 buildx builder（`docker buildx rm euler_builder_20260709_205700`），重建 builder
-- 若持久化存在该问题，升级 runner 上的 Docker Engine 到与 `moby/buildkit:buildx-stable-1` 兼容的版本
+**CI 基础设施问题，Code Fixer 无需处理。** 建议重新触发 CI 构建（retry/rebuild）。BuildKit `docker-container` driver 的容器创建在特定条件下（如节点磁盘 I/O 繁忙、containerd 状态异常）会偶发此错误。这是 Docker 运行时的瞬时故障，通常重试即可通过。
 
 ## 需要进一步确认的点
-- 同一 CI runner（`ecs-build-docker-x86-hk`）在同一时段是否有其他 PR 构建也出现相同错误，以判断是节点级故障还是偶发的 Docker daemon 瞬时异常
-- runner 上 `docker info` 和 `docker buildx ls` 的当前状态
-- runner 的磁盘/内存资源是否处于临界状态
+- CI 构建节点（`ecs-build-docker-x86-hk`）的 Docker daemon 日志，确认容器创建时的具体异常原因
+- 确认节点磁盘空间是否充足（日志中 `Local Volumes` 占用 14.85GB，Volume 清理后可能仍有残留影响）
