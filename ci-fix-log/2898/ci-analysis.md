@@ -5,7 +5,7 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: Check阶段缺少shunit2
+- 新模式标题: CI检查框架缺shunit2
 - 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
@@ -13,31 +13,24 @@
 ### 直接错误
 ```
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-2026-07-09 12:32:51,082-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
+2026-07-09 12:32:51,082 - CRITICAL - [Check] test failed
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
 - 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI Runner 的 [Check] 阶段测试脚本 `common_funs.sh` 在第 13 行尝试 source `shunit2`（Shell 单元测试框架），但 CI 运行环境未安装该工具，导致测试阶段直接报错退出。
+- 失败原因: CI 测试阶段（[Check]）在执行容器镜像健康检查脚本时，`common_funs.sh` 试图加载 `shunit2`（Shell 单元测试框架），但该框架未安装在 CI Runner 上，导致脚本执行失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 本次 PR 仅新增 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile` 及配套的 meta.yml、README.md、image-info.yml 更新。Docker 镜像构建和推送均成功完成：
-
-- `#7 DONE 67.8s` — Go 源码下载/解压
-- `#8 DONE 40.5s` — touch + symlink 设置
-- `#9 DONE 1.5s` — 构建工具移除
-- `#10 DONE 0.0s` — WORKDIR 设置
-- `#11 DONE 41.9s` — 镜像导出并推送至 docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64
-
-失败仅发生在构建后 CI 自身的 `[Check]` 测试验证阶段，原因是 CI Runner 环境中 `shunit2` 未安装，属于基础设施问题。
+**与 PR 无关。** 本次 PR 仅新增 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据（README.md、image-info.yml、meta.yml）。Docker 镜像的构建（#7-#10 步骤）和推送（[Build] finished、[Push] finished）已全部成功完成，没有任何构建层错误。失败仅发生在构建后由 `eulerpublisher` 编排的 [Check] 阶段，因 Runner 缺少 `shunit2` 框架导致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI Runner 环境中安装 `shunit2` 测试框架。`shunit2` 是一个 Shell 单元测试库，应在 `eulerpublisher` 工具的容器测试运行环境中预装。检查 CI 节点配置或 `eulerpublisher` 包的依赖声明，确保 `shunit2` 在测试执行前已安装至 `PATH` 可搜索到的目录或 `common_funs.sh` 指定的 source 路径。
+CI Runner 镜像/环境缺少 `shunit2` 包。需在 Runner 初始化脚本或基础镜像中安装 `shunit2`（如通过 `dnf install shunit2 -y` 或从 GitHub 下载 `shunit2` 脚本放置到 PATH）。此为 CI 基础设施问题，Code Fixer 无需处理本 PR 的代码。
 
 ## 需要进一步确认的点
-- CI Runner 节点的系统镜像或初始化脚本中是否遗漏了 `shunit2` 的安装步骤。
-- 同为 openEuler 24.03-LTS-SP4 的其他镜像（如模式39 提到的 `Others/bisheng-jdk`）当次 CI 是否也因相同原因在 [Check] 阶段失败，以排除该问题是否仅影响新架构 `aarch64` 节点。
+- 确认 CI Runner 所使用的执行环境镜像是否包含 `shunit2` 包。
+- 确认 `shunit2` 在 openEuler 24.03-LTS-SP4 仓库中的包名（可能是 `shunit2` 或需从源码安装）。
+- 确认同批次其他 PR/镜像的 [Check] 阶段是否也失败，以排除 Runner 单点故障。
