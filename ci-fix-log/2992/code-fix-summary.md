@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-openEuler 24.03-LTS-SP4 软件仓库镜像 HTTP/2 传输层协议错误导致 dnf install 下载 RPM 包失败（Curl error 92），为 CI 基础设施问题，无需修改源代码。
+无需代码修复。CI 失败为 infra-error，根因是 openEuler 24.03-LTS-SP4 RPM 仓库镜像服务器 HTTP/2 流错误，与 PR 代码无关。
 
 ## 修改的文件
-无代码修改。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出该失败为 `infra-error`，根因是 CI 构建环境在通过 dnf 从 openEuler 24.03-LTS-SP4 仓库镜像下载 RPM 包时，遇到 HTTP/2 传输层协议错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），多个包反复重试后仍失败。Dockerfile 中的 `dnf install` 指令语法和包名均正确，失败与 PR 变更无关。建议重新触发 CI 构建或等待仓库镜像服务恢复后重试。
+CI 失败分析报告判定此次失败为 `infra-error`（CI 基础设施问题）。Dockerfile 中的 `dnf install` 命令语法正确、包名有效，失败原因在于 `repo.***.org`（openEuler RPM 仓库服务器）在处理 HTTP/2 连接时反复出现 `Stream error in the HTTP/2 framing layer: INTERNAL_ERROR (err 2)`，导致 RPM 包下载失败。这是服务器端的临时性网络故障，不影响 Dockerfile 的正确性。建议等待仓库服务恢复后触发 CI 重跑。
 
 ## 潜在风险
-无。
+无
