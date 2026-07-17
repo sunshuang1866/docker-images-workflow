@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, dnf install, repo.openeuler.org, No more mirrors to try
+- 新模式标题: DNF包下载网络异常
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, repo.openeuler.org
 
 ## 根因分析
 
@@ -18,26 +18,24 @@
 #7 1709.6 [MIRROR] guile-2.2.7-6.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/guile-2.2.7-6.oe2403sp4.aarch64.rpm [HTTP/2 stream 49 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1709.6 [FAILED] guile-2.2.7-6.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1709.7 Error: Error downloading packages:
+#7 1709.7   guile-5:2.2.7-6.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
 #7 ERROR: process "/bin/sh -c dnf install -y git gcc gcc-c++ make cmake && dnf clean all" did not complete successfully: exit code: 1
-ERROR: failed to solve: process "/bin/sh -c dnf install -y git gcc gcc-c++ make cmake && dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile:6（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
-- 失败原因: openEuler 24.03-LTS-SP4 官方仓库（`repo.openeuler.org`）在 aarch64 架构的 Docker 构建过程中，多个 RPM 包（`git-core`、`gcc-c++`、`guile`）下载时出现 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR）。其中 `git-core` 和 `gcc-c++` 经重试后成功下载，但 `guile-2.2.7-6.oe2403sp4.aarch64.rpm` 在耗尽所有镜像源后仍下载失败，最终导致 `dnf install` 退出码为 1，Docker 构建失败。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6` — `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`
+- 失败原因: CI 在 aarch64 构建节点上执行 `dnf install` 时，`repo.openeuler.org` 镜像站返回 HTTP/2 流错误（Curl error 92），多个 RPM 包（`git-core`、`gcc-c++`）下载触发自动镜像重试后恢复，但 `guile` 包（git 的传递依赖）在所有镜像重试耗尽后仍下载失败，导致 dnf 退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 无关**。PR 变更仅新增了一个标准的 Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`），其中的 `dnf install` 命令为常规的编译依赖安装（`git gcc gcc-c++ make cmake`），语法正确，包名有效。失败原因是 openEuler 官方仓库在特定时段对 aarch64 架构出现了 HTTP/2 协议层面的服务端故障（`INTERNAL_ERROR`），属于 CI 基础设施问题，非代码缺陷。
+
+**无关。** PR 仅新增了一个标准格式的 Dockerfile（`Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`）及配套的 README.md、image-info.yml、meta.yml 更新。Dockerfile 中的 `dnf install` 命令（安装 git、gcc、gcc-c++、make、cmake）是该仓库同类 Dockerfile 的通用模式，不存在语法错误或依赖声明缺陷。失败完全由 `repo.openeuler.org` 镜像站在 aarch64 构建时间点上的 HTTP/2 流传输不稳定导致，与 PR 代码变更无因果关联。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建**。HTTP/2 流错误（`INTERNAL_ERROR err 2`）是服务端临时性故障，下游仓库可能在不同时间段恢复正常。直接触发重新构建（rerun CI），多数情况下仓库恢复后即可通过。
-
-### 方向 2（置信度: 低）
-**规避 HTTP/2**。若该仓库的 HTTP/2 问题持续复现，可在 Dockerfile 的 `dnf install` 之前配置 dnf 强制使用 HTTP/1.1（通过 `echo "http2=false" >> /etc/dnf/dnf.conf` 或设置 libcurl 环境变量禁用 HTTP/2），以绕过仓库 HTTP/2 协议栈的服务端缺陷。此方向仅应在多次重试仍失败后采用。
+**重新触发 CI 运行。** 此失败为 transient（暂时性）网络基础设施问题，`repo.openeuler.org` 在构建时刻对 aarch64 节点的 HTTP/2 连接不稳定。通常情况下，重新触发构建流水线即可通过（网络状态恢复后 rpm 包可正常下载）。Code Fixer 无需修改任何代码。
 
 ## 需要进一步确认的点
-- 此失败是否仅在 aarch64 架构上发生，还是 x86_64 构建也受影响？当前日志仅来自 aarch64 runner。
-- `repo.openeuler.org` 的 HTTP/2 故障是否为已知的间歇性问题，是否可以联系基础设施团队确认仓库服务状态。
-- 如果重试后仍然失败，需要确认是 `guile` 包本身在 SP4 仓库中缺失，还是 HTTP/2 流错误导致所有大文件下载均失败。
+
+- 如果多次重试 CI 后仍然在同一包（guile）上失败，需排查 `repo.openeuler.org` 上 `guile-2.2.7-6.oe2403sp4.aarch64.rpm` 是否存在损坏或该文件在 CDN 边缘节点同步异常。
+- 如果该仓库的其他 SP4 Dockerfile 在同一个 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上也出现类似的 HTTP/2 流错误，则可能是该 runner 到 `repo.openeuler.org` 的网络链路存在间歇性问题。
