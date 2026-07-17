@@ -1,16 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败是 openEuler 24.03-LTS-SP4 aarch64 官方软件包仓库（`repo.openeuler.org`）的临时性 HTTP/2 服务端故障导致的，与 PR 变更无关。
+无需代码修改 — 本次 CI 失败为 openEuler 官方软件包仓库 (`repo.openeuler.org`) 的临时性 HTTP/2 基础设施故障，与 PR #2991 的代码变更无关。
 
 ## 修改的文件
-无 — 该失败属于 infra-error，PR 代码无需任何修改。
+无
 
 ## 修复逻辑
-CI 分析报告诊断结果为 **infra-error**，置信度 **高**：
-- `Dockerfile:6` 的 `dnf install -y git gcc gcc-c++ make cmake` 命令格式正确，所列包均为 openEuler 24.03-LTS-SP4 仓库中的标准包。
-- 在 aarch64 runner 上构建时，`repo.openeuler.org` 持续返回 HTTP/2 流内部错误（`INTERNAL_ERROR (err 2)`），导致 git-core、gcc-c++、guile 等 RPM 包下载失败，dnf 耗尽所有重试后退出。
-- 这是 CI 基础设施的临时性问题，应等待仓库恢复后重新触发 CI 构建即可通过。
+CI 分析报告确认失败类型为 **infra-error**，根因是 `repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 仓库在构建期间持续返回 HTTP/2 流内部错误 (`Curl error (92): Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2)`)，导致 `git-core`、`gcc-c++`、`guile` 等 RPM 包下载失败。PR 新增的 Dockerfile 内容格式正确，`dnf install` 命令列出的包均为仓库标准包，代码本身无任何问题。修复方向为等待上游仓库恢复后重试 CI 构建。
 
 ## 潜在风险
-无 — 本次未修改任何代码。
+无
