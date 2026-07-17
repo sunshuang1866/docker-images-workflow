@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2991 — chore(vvenc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: RPM仓库HTTP/2下载失败
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install, repo.openeuler.org
+- 新模式标题: 仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, dnf install, repo.openeuler.org, No more mirrors to try
 
 ## 根因分析
 
@@ -22,24 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake`）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库 `repo.openeuler.org` 在 aarch64 构建节点上返回 HTTP/2 协议层流错误（Curl error 92: INTERNAL_ERROR），导致多个 RPM 包（git-core、gcc-c++、guile）下载中断；`guile`（git 的传递依赖）在耗尽所有镜像重试后仍下载失败，`dnf install` 以退出码 1 终止。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: `dnf install` 从 `repo.openeuler.org` 下载多个 RPM 包（git-core、gcc-c++、guile）时遭遇 HTTP/2 流错误（Curl error 92: `HTTP/2 stream was not closed cleanly: INTERNAL_ERROR`），`guile` 包所有镜像重试均失败，导致 dnf 安装步骤整体失败。此为 openEuler 官方仓库的 HTTP/2 协议层间歇性问题，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。PR 仅新增了一个标准的 vvenc Dockerfile（基于 openEuler 24.03-lts-sp4 基础镜像，安装 git/gcc/gcc-c++/make/cmake，编译 vvenc 1.14.0），以及配套的 README、image-info.yml、meta.yml 元数据更新。Dockerfile 语法和构建逻辑均无问题，失败完全是 `repo.openeuler.org` RPM 仓库在构建时段的 HTTP/2 网络不稳定所致。
+PR 变更仅新增了一个标准的 Dockerfile（安装编译依赖后构建 vvenc），以及配套的 README.md、meta.yml、image-info.yml 更新。Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 命令语法完全正确，无任何逻辑问题。失败纯粹由 openEuler 仓库 `repo.openeuler.org` 的 HTTP/2 传输层间歇性错误导致，**与 PR 改动无关**。这是基础设施层面的瞬时网络故障。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修复代码，重试即可。** 这是 CI 基础设施层面的临时网络问题（RPM 仓库服务端 HTTP/2 连接异常），与 PR 代码变更完全无关。Code Fixer 无需处理。建议在 Jenkins 上手动重新触发该 job 的构建重试（rerun/replay），待 repo.openeuler.org 的网络状态恢复后构建即可通过。
+### 方向 1（置信度: 中）
+由于此失败为 infra-error（openEuler 仓库 HTTP/2 协议层抖动），通常无需修改任何代码。建议触发 CI 重试（re-run），在仓库网络恢复正常的时段重新构建。
 
 ### 方向 2（置信度: 低）
-若多次重试仍持续失败，可考虑在 Dockerfile 的 `dnf install` 命令前添加 `dnf makecache` 并设置 `ip_resolve=4`（禁用 IPv6）或降低 HTTP 协议版本（如强制 HTTP/1.1），以规避 HTTP/2 层的协议错误。但这属于对基础设施问题的 workaround，不应作为首选方案。
+如果该仓库的 HTTP/2 问题频繁出现，可考虑在 Dockerfile 的 `dnf install` 前添加 `echo 'http1_only=True' >> /etc/dnf/dnf.conf` 来强制 dnf 使用 HTTP/1.1，规避 HTTP/2 流错误。但考虑到这只是瞬时基础设施问题（该仓库通常是可用的），不建议为此修改代码。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 在构建时段（2026-07-09 14:09 UTC）是否存在已知的服务端 HTTP/2 层问题或负载异常
-- 确认同一时段其他使用 `dnf install` 的 aarch64 构建 job 是否也出现相同类型的 Curl error (92)
-- 确认 x86_64 架构的构建 job 日志是否也出现同样的 HTTP/2 stream error（本次日志仅包含 aarch64 构建）
-
-## 修复验证要求
-无需验证（infra-error，非代码修复范畴）。若采用方向 2（workaround），需在 aarch64 runner 上重新触发构建并确认所有 RPM 包均下载成功。
+1. 检查同一时间段内其他 PR 在 aarch64 上是否也出现了类似的 `Curl error (92)` 报错——若有，可确认是仓库侧问题
+2. 确认 x86_64 架构的构建是否也失败——当前日志仅包含 aarch64 构建的日志
+3. 重试构建后是否成功——如果重试成功，则证实为瞬时网络问题
