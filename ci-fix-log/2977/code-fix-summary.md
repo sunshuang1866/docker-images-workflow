@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复 — 本次 CI 失败为 `infra-error`（基础设施问题），与 PR 变更无关。
+无需代码修复——CI 失败为 infra-error，由 openEuler 官方仓库 `repo.openeuler.org` 在构建时段的临时网络抖动导致。
 
 ## 修改的文件
-无（未修改任何文件）
+无。此失败与 PR 代码变更无关，不需要修改任何文件。
 
 ## 修复逻辑
-CI 失败分析报告明确指出：失败类型为 `infra-error`，置信度高。根因是 `repo.openeuler.org` openEuler 官方仓库在构建时出现 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），导致 `yum install` 下载 aarch64 RPM 包失败。PR 仅新增了一个 Dockerfile 及配套元数据文件，`yum install` 命令语法和包名均正确无误，失败与代码变更无关。
+CI 日志显示 `yum install` 在下载 173 个 RPM 包的过程中，多个包遭遇 Curl 错误（HTTP/2 stream INTERNAL_ERROR、SSL_ERROR_SYSCALL），其中前 3 次错误通过重试恢复，但最后一个包 `vim-common` 耗尽所有重试次数导致构建失败。已成功下载 172/173 个包，`yum install` 命令语法和包列表均正确无误。PR 新增的 Dockerfile 内容没有问题。
 
-建议操作：触发 CI 重试（re-run），待 openEuler 仓库服务恢复后构建应能通过。
+处理方式：重新触发 CI 构建（retry/rerun），上游仓库问题大概率已自行恢复。
 
 ## 潜在风险
-无
+无。如果多次重试后同一包仍然下载失败，可考虑从 `yum install` 列表中移除 `vim-common`（git 的弱依赖，非构建必需），但此概率极低。
