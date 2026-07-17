@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, aarch64, repo.openeuler.org, dnf install
+- 新模式标题: RPM仓库HTTP/2流中断
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, repo.openeuler.org
 
 ## 根因分析
 
@@ -18,25 +18,34 @@
 #7 1709.6 [MIRROR] guile-2.2.7-6.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/guile-2.2.7-6.oe2403sp4.aarch64.rpm [HTTP/2 stream 49 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1709.6 [FAILED] guile-2.2.7-6.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1709.7 Error: Error downloading packages:
+#7 1709.7   guile-5:2.2.7-6.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
 #7 ERROR: process "/bin/sh -c dnf install -y git gcc gcc-c++ make cmake && dnf clean all" did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的 aarch64 RPM 仓库（`repo.openeuler.org`）在 HTTP/2 层反复返回服务端内部错误（`INTERNAL_ERROR (err 2)`），导致多个软件包下载失败。最终 `guile` 包耗尽所有镜像重试次数，dnf 安装过程退出码 1。此错误为服务端临时的 HTTP/2 协议层故障，与 Dockerfile 内容无关。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 步骤）
+- 失败原因: CI aarch64 构建节点（`ecs-build-docker-aarch64-04-sp`）执行 `dnf install` 从 `repo.openeuler.org` 下载 RPM 包时，多个包的 HTTP/2 传输流异常中断（Curl error 92: INTERNAL_ERROR）。其中 `git-core` 和 `gcc-c++` 经重试后成功下载，但 `guile`（git 的传递依赖）在重试耗尽所有 mirror 后仍未成功，导致 `dnf install` 以 exit code 1 失败。
 
 ### 与 PR 变更的关联
-PR 变更与此次失败无因果关系。该 PR 仅新增了一个标准的 vvenc Dockerfile（`24.03-lts-sp4` 版本），其中 `dnf install` 命令是仓库内标准写法。失败发生在 dnf 从 `repo.openeuler.org` 下载 RPM 包的 HTTP/2 传输层，属于 openEuler 镜像站服务端的临时/间歇性故障。日志中可见部分包（如 `git-core`）在重试后下载成功，另一部分（如 `gcc-c++`）重复出现流错误，而 `guile` 最终耗尽重试次数成为触发构建失败的最后一环——这进一步印证是服务端 HTTP/2 实现不稳定，而非 Dockerfile 配置问题。
+**与 PR 变更无关。** 这是一个纯粹的 CI 基础设施问题。Dockerfile 中 `dnf install` 命令本身完全正确——所请求的包（git、gcc、gcc-c++、make、cmake）均是 openEuler 24.03-LTS-SP4 仓库中存在的标准包。失败原因是 `repo.openeuler.org` 的 aarch64 包仓库在 HTTP/2 层存在服务器端流传输错误，导致部分大型 RPM 包（如 `guile` 6.3MB）下载中断。
+
+需要特别指出：**x86_64（amd64）架构的构建可能已成功**，当前日志仅来自 aarch64 runner 的构建过程。日志中 `#7` 步骤在下载阶段的三个包（`git-core`、`gcc-c++`、`guile`）均出现过 Curl error 92，说明 `repo.openeuler.org` 的 aarch64 仓库在此期间普遍不稳定。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-重新触发 CI 构建。该失败为 openEuler 镜像站 aarch64 SP4 仓库的临时 HTTP/2 服务端故障（`INTERNAL_ERROR`），是基础设施层面问题。直接重新运行 CI job 极大概率可以通过（或仅需一次重试）。
+**无需修改 PR 代码。** 这是 openEuler 官方 RPM 镜像仓库（`repo.openeuler.org`）的临时网络/服务端问题，应通过以下方式处理：
 
-### 方向 2（置信度: 中）
-若重试后仍然失败，可在 Dockerfile 的 `dnf install` 前添加 dnf 重试/超时配置（如 `echo 'retries=10' >> /etc/dnf/dnf.conf && echo 'timeout=120' >> /etc/dnf/dnf.conf`），提高对网络抖动的容忍度。但需注意这仅是对治方案，不解决服务端根因。
+1. **等待仓库恢复后重试 CI**：`Curl error (92)`（HTTP/2 INTERNAL_ERROR）通常是服务端临时故障，重新触发 CI 构建（retry）大概率可以通过。
+2. **如果持续失败，联系 openEuler 基础设施团队**：排查 `repo.openeuler.org` 的 aarch64 仓库 HTTP/2 配置，考虑是否有 CDN 节点或反向代理存在问题。
+
+### 方向 2（置信度: 低，仅在方向 1 无效后考虑）
+如果 `repo.openeuler.org` 的 aarch64 仓库 HTTP/2 问题长期不能修复，可在 Dockerfile 中将 `dnf install` 改为 `dnf install --setopt=retries=10`（增加下载重试次数），或通过在 base image 中预先安装关键构建依赖来规避此问题。但这只是绕过而非根因修复，不推荐作为首选方案。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP4 aarch64 仓库在 CI 构建时间段（2026-07-09 14:00 UTC 左右）是否存在已知的服务端 HTTP/2 故障或维护窗口
-- 同一时间窗口内其他依赖 SP4 仓库的镜像构建（如 `24.03-lts-sp4` 的其他 Dockerfile）是否也出现了类似错误——如果是，可确认是仓库服务端问题
-- 此前 SP3 版本的 vvenc 镜像在同一 aarch64 runner 上是否构建稳定（用于对比排除 runner 网络环境问题）
+1. 检查同一 CI run 中 **x86_64（amd64）架构**的 vvenc 构建是否成功（若 x86_64 也失败且报相同错误，则仓库问题更普遍；若成功，则仅 aarch64 仓库节点有问题）。
+2. 确认 `repo.openeuler.org` 的服务状态——是否在 CI 构建时间窗口（2026-07-09 14:08 UTC）有已知的 aarch64 仓库故障或维护公告。
+3. `guile` 包（6.3MB）是 git 的强依赖（`Requires: guile`），即使通过增加 retries 使其下载成功，其他大型包（如 `gcc` 30MB、`cmake` 13MB）也存在同样的 HTTP/2 中断风险。
+
+## 修复验证要求
+不适用——本失败为 infra-error，无需修改任何代码文件。若后续重试 CI 仍失败，code-fixer 应首先确认失败是否仍然为相同的 Curl error (92)，而非新的错误类型。
