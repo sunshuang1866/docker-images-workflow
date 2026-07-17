@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于基础设施问题（`infra-error`），根因是 `repo.openeuler.org` 在 CI 运行期间网络不稳定，导致 `vim-common` 等 aarch64 RPM 包下载失败（HTTP/2 协议层传输中断、SSL 读取失败）。
+CI 构建失败由 `repo.openeuler.org` 镜像站在构建期间的 HTTP/2 传输中断导致，属于基础设施网络波动，与 PR 代码变更无关。
 
 ## 修改的文件
-无（未对任何文件进行代码修改）
+无。此失败为 infra-error，无需修改任何代码文件。
 
 ## 修复逻辑
-分析报告明确指出此为 `infra-error`，与 PR 变更无关。PR 新增的 Dockerfile 中 `yum install` 命令语法正确，在同仓库其他 openEuler SP4 Dockerfile 中广泛使用。失败原因是 `repo.openeuler.org` 的 aarch64 软件源在 CI 构建时间段出现网络抖动。建议重新触发 CI 构建，在网络恢复后大概率能通过。
+分析报告确认：
+- 失败类型为 `infra-error`，置信度高
+- Dockerfile 语法正确，yum install 命令中的包名均有效（172/173 个包成功下载，仅 `vim-common` 因镜像站 HTTP/2 中断重试耗尽而失败）
+- 错误信息均为 Curl error (92/56)，指向 `repo.openeuler.org` 的 HTTP/2 传输层和 SSL 连接异常
+
+**直接重新触发 CI 构建即可**，无需修改 Dockerfile 或任何代码。
 
 ## 潜在风险
 无
