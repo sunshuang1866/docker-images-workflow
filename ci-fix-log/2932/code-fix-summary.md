@@ -1,15 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。此 CI 失败为 infra-error（Docker 守护进程在启动 BuildKit 容器时出现瞬态文件系统异常），与 PR 代码变更无关。
+CI 失败为基础设施问题（infra-error），与 PR 代码变更无关，无需代码修改。
 
 ## 修改的文件
-无
+无（未修改任何文件）
 
 ## 修复逻辑
-CI 分析报告确认该失败类型为 `infra-error`，直接错误为 `Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`。该错误发生在 Docker buildx builder 容器创建阶段，Dockerfile 内的任何构建步骤均未执行。PR #2932 仅新增 glibc Dockerfile 和更新元数据文件，不涉及任何可能影响 Docker buildx 基础设施的变更。
+CI 失败发生在 BuildKit 容器启动阶段（`[internal] booting buildkit`），早于任何 Dockerfile 指令的执行。错误信息 `Could not find the file / in container buildx_buildkit_euler_builder_*` 表明 Docker daemon 在创建 buildkit 容器后无法访问其根文件系统，属于 Docker 存储驱动或构建节点环境层面的临时性/环境性问题。
 
-建议操作：重新触发 CI job。若重试后通过则确认为瞬态故障；若反复失败，需联系 CI 运维团队排查 `ecs-build-docker-x86-hk` 节点的存储驱动状态。
+本 PR 仅新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及相关文档更新，无任何可能影响构建基础设施的修改。CI 日志中前置检查（文件变更检测、依赖安装、镜像规格校验）全部通过，进一步证明 PR 变更本身无问题。
+
+建议在 CI 侧重试该 job 以排除临时性环境故障。
 
 ## 潜在风险
-无
+无（未做代码修改）
