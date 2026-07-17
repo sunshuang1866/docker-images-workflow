@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器被终止
-- 新模式症状关键词: graceful_stop, no builder found, rpc error: code = Unavailable, closing transport, error reading from server: EOF, buildx
+- 新模式标题: BuildKit Builder 被终止
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, Unavailable
 
 ## 根因分析
 
@@ -19,26 +19,20 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker build 步骤 #7（`dnf install` 阶段），Dockerfile `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 第 9 行
-- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载软件包过程中被 CI 系统以 `graceful_stop` 方式终止，导致与构建器的 RPC 连接断开（`closing transport`），此后构建器已不可用（`no builder found`），整个 Docker 构建失败。
+- 失败位置: Docker 构建步骤 #7（`dnf install` 系统包安装阶段）
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在实际构建启动仅约 39 秒后被外部终止（收到 `graceful_stop` 的 gRPC GOAWAY 信号），随后构建客户端失去 builder 连接，构建中断。
 
 ### 与 PR 变更的关联
-PR 变更与失败**无直接关联**。PR 仅新增了 4 个文件：一个标准的 Dockerfile、README 条目、image-info.yml 条目和 meta.yml 条目。失败发生在 Docker 构建的 `dnf install` 基础系统包安装阶段——该阶段尚未接触到 PR 引入的任何业务逻辑代码。`dnf install` 命令本身是 openEuler 环境下的标准包管理操作，不存在语法或逻辑错误。`graceful_stop` 信号来自 CI 编排层，属于基础设施层面的事件。
+**无关**。PR 仅新增了一个 Dockerfile（为标准 `scann 1.4.2` 镜像添加 `24.03-lts-sp4` 变体）及配套的 README、image-info.yml、meta.yml 更新。构建在 DNF 安装基础系统包阶段即失败，远未到达运行 PR 特有任何自定义逻辑的阶段。该错误是 CI 基础设施侧的 BuildKit builder 资源被回收/超时/节点漂移导致的，与 PR 代码内容无因果关系。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-CI 基础设施问题——BuildKit 构建器被平台提前回收。
+### 方向 1（置信度: 高）
+**重试构建即可**。该失败属于 CI 基础设施的偶发性 builder 回收问题，无需修改任何 Dockerfile 或代码。在 CI 界面重新触发该 job 即可，多数情况下重试后能正常通过。
 
-`graceful_stop` 带有 `NO_ERROR` 标记，说明构建器本身运行正常，是被 CI 编排系统主动终止的。可能原因包括：
-- Jenkins job 或 buildx builder 达到超时上限（`dnf install` 已运行 38+ 秒且仍在下载元数据，Docker 构建整体耗时可能超过 CI 配置的 step 超时）
-- CI runner（`ecs-build-docker-x86-hk`）资源紧张，builder 容器被调度系统驱逐
-- 网络波动导致与 builder 的 gRPC 连接中断
-
-**建议操作**: 重新触发 CI 运行（retry）。如果反复出现相同错误，联系 CI 基础设施团队检查 runner 上的 buildx builder 资源池状态和超时配置。此失败无需修改 PR 代码。
+### 方向 2（置信度: 低）
+若多次重试后仍在同一阶段（`dnf install` 下载 repo metadata）超时失败，可能是 `dlcdn.apache.org` 源或其他 openEuler 仓库在当前 builder 节点的网络连通性存在问题，可考虑临时换源处理。
 
 ## 需要进一步确认的点
-1. CI runner `ecs-build-docker-x86-hk` 上的 buildx builder 实例是否有存活时间（TTL）限制，是否会在构建耗时较长时自动回收
-2. 本次构建的 `dnf install` 步骤是否有额外的下载耗时（如 mirrors 响应慢），导致总构建时间触发了某个超时阈值
-3. 同时间段是否有其他构建共享同一 builder 实例，是否存在资源争抢
-4. 重新触发 CI 后是否仍然复现——如果复现，需检查 `openeuler:24.03-lts-sp4` 基础镜像的 dnf repo 配置是否在 CI 网络环境中可达
+- 检查该 CI job 是否有构建超时限制（日志中 `dnf install` 步骤从启动到 builder 被终止约 39 秒），若超时阈值设置过低也可能触发 builder 回收。
+- 若该 builder 节点频繁出现 `graceful_stop`，建议排查 CI 集群的资源调度策略（如 builder 闲置时间阈值、节点抢占策略等）。
