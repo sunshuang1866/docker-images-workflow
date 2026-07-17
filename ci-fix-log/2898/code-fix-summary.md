@@ -1,18 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败是基础设施错误（infra-error）：CI runner 缺少 `shunit2` 测试框架，导致 `eulerpublisher` 工具在镜像构建完成后的 [Check] 阶段执行失败。
+无需代码修复。CI 失败为基础设施问题：CI runner 环境缺少 `shunit2` 测试库，导致容器构建后的 [Check] 验证阶段失败。
 
 ## 修改的文件
-无（infra-error，不涉及 PR 代码变更）
+无。此问题不涉及任何源代码文件的修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- **失败位置**：CI runner 上的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`，`shunit2: No such file or directory`
-- **与 PR 变更的关联**：**无关**。PR 仅新增 Go 1.25.6 镜像的 Dockerfile 和更新元数据文件（README.md、image-info.yml、meta.yml），镜像构建和推送均成功完成
-- **修复方向**：在 CI runner 环境上安装 `shunit2`（例如通过 `dnf install shunit2` 或从 GitHub releases 获取），确保路径可被 `common_funs.sh` 正确引用
-
-此为 CI 基础设施问题，需要运维/CI 管理员在 runner 节点上安装 `shunit2`，无需对源代码仓库进行任何修改。
+1. CI 分析报告明确将此次失败归类为 `infra-error`，根因为 CI runner 缺少 `shunit2`，与 PR 代码变更无关。
+2. Docker 镜像构建（步骤 #1 ~ #11）和推送（[Build] + [Push] 阶段）均已成功完成，镜像 `docker.io/openeulertest/go:1.25.6-oe2403sp4-aarch64` 已成功推送到仓库。
+3. 失败仅发生在 `common_funs.sh:13` 调用的 `shunit2` 找不到（`No such file or directory`），属于 CI runner 环境配置问题。
+4. 修复需由 CI 基础设施管理员在 runner 镜像中执行 `dnf install shunit2 -y`，无需修改本仓库任何代码。
 
 ## 潜在风险
-无（未修改任何代码）
+无。PR 新增的 Dockerfile 及元数据文件均无需修改。
