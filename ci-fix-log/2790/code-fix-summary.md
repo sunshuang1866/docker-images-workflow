@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。该 CI 失败为 **infra-error**，根因是 CI 路径校验工具 (`eulerpublisher/update/container/app/update.py:273`) 在路径比对时，期望路径带前导 `/`（如 `/README.md`），而 git diff 输出的路径无前导斜杠（如 `README.md`），导致字符串比对不通过。与 PR 代码变更无关。
+无需代码修改 - 本次 CI 失败为基础设施误报（infra-error），与 PR 文档变更无关。
 
 ## 修改的文件
-无。PR 仅修改了 `README.md` 和 `README.en.md`（更新可用镜像 Tags 列表），文件内容和位置均正确，无需任何修改。
+无
 
 ## 修复逻辑
-该失败属于 CI 基础设施问题（infra-error），需要 CI 工具维护者修复 `update.py` 中的路径归一化逻辑（统一添加或去除前导 `/`），不涉及任何源代码改动。
+CI 失败分析报告指出，`eulerpublisher/update/container/app/update.py`（appstore 发布规范预检工具）在比对变更文件路径时，将 git diff 产出的路径 `README.md`（不带前导 `/`）与规范路径 `/README.md`（带前导 `/`）进行比对，因格式不一致导致误报。本 PR 仅修改了 `README.md` 的文档内容（更新支持的 Tags 列表），没有任何代码或构建脚本改动。该问题属于 CI 基础设施中预检工具的路径格式处理缺陷，不应通过修改本仓库的 `README.md` 来绕过。
 
 ## 潜在风险
-无
+无（未做任何代码修改）
