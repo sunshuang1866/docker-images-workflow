@@ -1,19 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error）：CI runner 缺少 `shunit2` shell 测试框架，导致 `eulerpublisher` 的 `[Check]` 阶段失败。
+无需代码修改。CI 失败为 `infra-error`，根因是 CI runner 环境中缺少 `shunit2` 工具，与 PR #2839 新增的 Dockerfile / entrypoint.sh 等源码无关。
 
 ## 修改的文件
-无（未修改任何文件）
+无。本次 CI 失败无需修改任何源码文件。
 
 ## 修复逻辑
-CI 分析报告确认此失败与 PR #2839 的代码变更无关：
-1. 构建阶段（Build）成功：PostgreSQL 17.6 在 openEuler 24.03-lts-sp4 上完整编译安装成功
-2. 推送阶段（Push）成功：Docker 镜像构建和推送均完成
-3. 失败仅发生在 Check 阶段：`common_funs.sh:13` 尝试加载 `shunit2` 时报 "No such file or directory"，`shunit2` 是 `eulerpublisher` CI 工具自身的测试依赖，与 Dockerfile/entrypoint.sh 内容无关
-4. PR 变更内容（Dockerfile、entrypoint.sh、README.md、meta.yml）均无语法或逻辑问题
-
-此问题应由 CI 运维团队在 runner 环境中安装 `shunit2`（如 `dnf install shunit2`），Code Fixer 无需对 PR 代码做任何修改。
+- CI 分析报告明确指出失败类型为 `infra-error`，置信度：中。
+- [Build] 和 [Push] 阶段均已成功完成，[Check] 阶段因 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 调用 `shunit2` 时找不到该工具而失败。
+- PR 变更的 4 个文件（Dockerfile、entrypoint.sh、README.md、meta.yml）均不涉及 CI 基础设施配置，不是失败原因。
+- 应在 CI runner 上安装 `shunit2`（如 `dnf install shunit2`），或在 `eulerpublisher` 部署流程中加入该依赖，然后重新触发 CI。
 
 ## 潜在风险
-无
+无。
