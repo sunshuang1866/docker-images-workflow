@@ -1,16 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败属于基础设施错误（infra-error），与 PR 代码变更无关。
+上游 Copr 仓库传输大体积 RPM 文件（mcblaslt ~400MB）时频繁断连（Curl error 18），dnf 内部 10 次重试耗尽后安装失败，仅 aarch64 架构受影响。
 
 ## 修改的文件
-无修改。失败由 COPR 仓库 `eur.openeuler.openatom.cn` 网络不稳定导致 RPM 包下载中断（Curl error 18），PR 中的 Dockerfile、EUR.repo、meta.yml、image-list.yml 和 README.md 均无语法或逻辑错误。
+- `AI/maca-sdk/3.7/24.03-lts-sp3/Dockerfile`: dnf 安装步骤增加 `keepcache=1` 缓存策略和 bash 级重试循环
 
 ## 修复逻辑
-CI 分析报告将失败类型明确判定为 `infra-error`（置信度: 高）。根因是 CI 构建环境与第三方 COPR 仓库之间的网络连接极不稳定，下载速度仅约 24 kB/s，大文件（45MB~849MB）在传输中被远端关闭，dnf 的所有重试均以相同方式失败。Dockerfile 中 `dnf install -y --allowerasing maca-sdk-${ARCH}` 命令本身正确，`dnf makecache` 阶段也成功解析了 58 个包的依赖关系。该问题需通过基础设施层面解决（如重试构建、更换镜像源、或等待 COPR 仓库网络恢复），代码层面无改动必要。
 
-## 备注
-分析报告同时指出了一个潜在的版本不一致问题：`EUR.repo` 中 baseurl 路径为 `openeuler-24.03_LTS_SP2-$basearch`，而基础镜像是 `openeuler/openeuler:24.03-lts-sp3`（SP2 vs SP3 差异）。报告认为这不影响当前下载行为（元数据缓存和包列表均正确获取），但建议后续确认 SP2 的 RPM 包是否与 SP3 系统完全兼容，或是否应切换到 SP3 对应的 repo 路径。此问题与本次 CI 失败无关，不在本修复范围内。
+修复 CI 分析报告中方向 1（多阶段构建缓存）的简化版——利用 dnf 自身的 keepcache 机制替代多阶段构建中的手动 COPY 缓存：
+
+1. **`keepcache=1`**：dnf 包缓存持久化，一次安装失败后，已成功下载的 58 个 RPM 包保留在 `/var/cache/dnf/` 中，后续重试仅需重试下载失败的几个大文件，而非每次从头下载全部 2.4 GB。
+2. **bash 级重试循环（5 次，间隔 30s）**：突破 dnf 单次 `retries=10` 的限制，将总重试机会提高到 `5 × 10 = 50` 次，同时在重试之间给上游服务器 30 秒缓冲时间。
+3. **`max_parallel_downloads=2`**：将并发下载数从 4 降至 2，减少同时传输大文件时连接被上游服务器限流或中断的概率。
+4. **成功后清理**：`dnf clean all` 仅在安装成功后执行，清理 ~2.4 GB 缓存，不残留到最终镜像层。
 
 ## 潜在风险
-无（未修改任何代码）。
+- 若上游 Copr 仓库彻底不可用（非断连而是 404/403），5 次重试后构建仍会失败，此修复仅解决传输中断问题。
+- `EUR.repo` 中 baseurl 使用 `openeuler-24.03_LTS_SP2` 而基础镜像为 `24.03-lts-sp3`，分析报告指出当前不是失败原因，但可能存在运行时兼容性风险，未在本次修复中处理。
