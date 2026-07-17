@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施问题（infra-error），系 BuildKit 容器启动阶段 `moby/buildkit:buildx-stable-1` 容器创建异常（`Could not find the file /`），属于 Docker daemon 运行时的偶发瞬时故障，与 PR #2932 的代码变更无关。
+无需代码修复。CI 失败属于 infra-error（基础设施层错误），发生在 BuildKit 容器启动阶段，与 PR 代码变更无关。
 
 ## 修改的文件
-无（未修改任何源代码）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：错误发生在 `[internal] booting buildkit` 阶段，此时尚未进入任何 Dockerfile 指令执行。本次 PR 仅新增了一个 glibc 镜像的 Dockerfile 及三个元数据文件的条目更新，均为模板式操作，不可能影响 BuildKit 容器启动。根因是 CI 构建节点 `ecs-build-docker-x86-hk` 上 Docker 运行时的瞬时异常，建议重新触发 CI 构建（retry/rebuild）即可。
+CI 构建节点 (`ecs-build-docker-x86-hk`) 上的 Docker daemon 在创建 buildx BuildKit 容器时失败，报错 `Could not find the file / in container`。该错误发生在 `[internal] booting buildkit` 阶段，PR 中新增的 Dockerfile 构建步骤从未被实际执行。根据 CI 分析报告的判断，这是 Runner 节点的瞬态故障，需要重新触发 CI 运行而非修改代码。
 
 ## 潜在风险
 无
