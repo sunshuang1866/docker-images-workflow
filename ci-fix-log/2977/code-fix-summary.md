@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施网络故障（infra-error），非 Dockerfile 或代码问题。
+CI 构建失败是 openEuler 24.03-LTS-SP4 官方软件仓库（`repo.openeuler.org`）在 aarch64 runner 上的间歇性网络故障，属于 CI 基础设施问题（infra-error），无需修改任何 PR 代码。
 
 ## 修改的文件
-无
+无。此失败与 PR 代码变更无关，PR 新增的 Dockerfile 内容本身无错误。
 
 ## 修复逻辑
-CI 分析报告确认失败类型为 `infra-error`，根因是 openEuler 24.03-LTS-SP4 官方仓库 `repo.openeuler.org` 在 CI 构建时段出现 HTTP/2 流传输不稳定，导致多个 RPM 包（gcc、kernel-headers、perl-MIME-Base64、vim-common）下载失败。Dockerfile 中 `yum install` 的依赖列表语法正确，所列软件包均为 openEuler 24.03-LTS-SP4 仓库的标准包，与 PR 变更无关。根据规范要求：infra-error 无需代码修改，等待仓库服务恢复后触发 CI 重试即可。
+失败发生在 `yum install` 从远端仓库下载 RPM 包的阶段，报错为 HTTP/2 流传输中断（Curl error 92、Curl error 56），多个 RPM 包下载失败后切换镜像重试，最终 vim-common 包耗尽所有镜像仍无法下载。这是 `repo.openeuler.org` 与 aarch64 CI runner 之间的网络连通性问题，不是 PR 代码变更导致。应在 CI 层面重试构建（re-run the failed job）。
 
 ## 潜在风险
-无
+无。
