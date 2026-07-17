@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器消失
-- 新模式症状关键词: closing transport, graceful_stop, no builder found, euler_builder, goaway
+- 新模式标题: BuildKit构建器丢失
+- 新模式症状关键词: `failed to receive status`, `rpc error`, `closing transport`, `graceful_stop`, `no builder found`
 
 ## 根因分析
 
@@ -19,18 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 构建器 `euler_builder_20260709_224657`（非代码层级）
-- 失败原因: BuildKit 构建器在 Docker 镜像构建进行到第 2/4 步（`dnf install` 正在下载仓库元数据时）被主动优雅关闭（`graceful_stop`），随后构建器实例被移除，导致构建中断。该错误与 PR 代码变更完全无关，属于 CI 基础设施层面的构建器生命周期管理问题（可能由资源回收、超时或节点调度策略触发）。
+- 失败位置: Dockerfile `RUN dnf install -y ...` 步骤（构建步骤 #7 [2/4]）
+- 失败原因: Docker 构建的 BuildKit builder 实例 `euler_builder_20260709_224657` 在执行 `dnf install`（下载 OS 仓库元数据阶段，已耗时约 38 秒，速度仅 77 kB/s）时被远程终止（gRPC `graceful_stop`），导致构建连接丢失，构建失败。与 PR 代码变更无关，属于 CI 基础设施问题。
 
 ### 与 PR 变更的关联
-**无关。** PR 变更仅为新增 scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据文件（README.md、image-info.yml、meta.yml），属于标准的新平台支持流程。Dockerfile 语法正确，构建步骤合理。失败发生在 BuildKit 基础设施层面（构建器在 `dnf install` 下载元数据期间被回收），任何 Dockerfile 在此环境下均可能触发同类失败。
+PR 新增了 scann 1.4.2 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（meta.yml、README.md、image-info.yml）。所涉及的 Dockerfile 语法和 `dnf install` 依赖包列表均正确无误，构建失败发生在 `dnf install` 下载仓库元数据的中途（非命令本身报错），根因是 BuildKit builder 被意外回收/关闭，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修复代码。** 该失败为 CI 基础设施问题（BuildKit 构建器被提前回收），建议重新触发 CI 运行（retry）。如果在多次重试后仍反复出现同一错误，需要排查 CI 节点的 BuildKit 构建器资源配额、超时配置或节点健康状态。
+**触发 CI 重试**。该失败为 CI 基础设施的瞬时故障（BuildKit builder 在构建过程中因未知原因被 `graceful_stop`），与代码无关。重新触发一次 CI 构建即可验证——若新构建在相同步骤成功完成，则确认本次为 infra-error。
 
 ## 需要进一步确认的点
-- CI runner 节点 `ecs-build-docker-x86-hk` 上的 BuildKit builder 实例是否有资源限制或超时自动回收策略。
-- 该构建器 `euler_builder_20260709_224657` 的 `graceful_stop` 是由外部调度系统触发还是 BuildKit 自身内部机制触发。
-- 同类 PR 在同一时间段内是否有类似的基础设施故障模式（可用于判断是否为 CI 集群级别的间歇性问题）。
+- CI 平台的 BuildKit builder 是否有最大执行时间限制（如 1 小时），以及本次构建的 builder `euler_builder_20260709_224657` 是否因超时被回收。
+- `dnf install` 步骤中 OS 仓库元数据下载速度仅 77 kB/s 是否正常——若该速度持续偏低，可能触发 builder 超时回收机制。
+- 若重试后仍然失败，需要确认是否为该 builder 节点（`ecs-build-docker-x86-hk`）的特定问题（考虑重调度到其他节点）。
