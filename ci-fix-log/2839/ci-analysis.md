@@ -3,18 +3,16 @@
 ## 基本信息
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: shunit2缺失
-- 新模式症状关键词: shunit2: No such file or directory, common_funs.sh, [Check] test failed
+- 新模式标题: shunit2测试框架缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-09 09:40:24,013 - INFO - [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
 2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
 +-------------+-------------+--------------+
 | Check Items | Description | Check Result |
@@ -25,33 +23,28 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（CI 测试框架内部文件，非 PR 变更内容）
-- 失败原因: CI 流水线的 `[Check]` 阶段运行时，`eulerpublisher` 工具的测试框架 `common_funs.sh`（第 13 行）尝试 source `shunit2`，但该 Shell 单元测试库未安装或不在 `PATH` 中，导致整个 Check 阶段无法执行任何测试用例即告失败。Check 结果表为空，说明所有测试项均未实际运行。
+- 失败位置: CI Runner 上的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI 测试框架 `eulerpublisher` 的公共函数脚本 `common_funs.sh` 在第 13 行尝试引用 `shunit2`（Shell 单元测试框架），但 `shunit2` 未安装在当前 CI runner 上，导致 Check 阶段所有测试无法加载执行，检查结果表为空，CI 判定构建失败。
 
 ### 与 PR 变更的关联
-**本次失败与 PR 代码变更无关。** 证据如下：
-1. Docker 镜像构建阶段（`#8`）全部成功完成（268.4s），`./configure && make -j "$(nproc)" && make install` 均正常退出，所有 make install 子目标无错误。
-2. Docker 镜像推送阶段（`[Push] finished`）成功完成，manifest 已推送至 registry。
-3. 唯一的错误发生在 CI 工具自身的 `[Check]` 阶段——测试框架启动时即因缺少 `shunit2` 而崩溃，早于任何针对该镜像的测试用例执行。
+**与 PR 无关。** PR 的变更（新增 PostgreSQL 17.6 on openEuler 24.03-LTS-SP4 的 Dockerfile、entrypoint.sh、meta.yml 条目、README 更新）均与 Docker 构建阶段相关。Docker 镜像构建和推送已完全成功：
 
-PR 仅新增了 Dockerfile、entrypoint.sh、README.md 更新和 meta.yml 条目，这些变更均不涉及 CI 基础设施配置。
+- `./configure && make -j "$(nproc)" && make install` 全部通过（`#8 DONE 268.4s`）
+- 镜像导出、推送均成功（`#11 DONE 58.0s`）
+- CI 日志明确记录 `[Build] finished` 和 `[Push] finished`
+
+失败发生在构建/推送之后的 `[Check]` 阶段，是 CI runner 测试环境缺少 `shunit2` 依赖所致，属于基础设施问题，与 PR 的 Dockerfile、entrypoint.sh 或其他代码变更无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**CI 基础设施修复**：在 CI runner 的执行环境中安装 `shunit2` Shell 单元测试库。该库应由 CI 平台管理员或 Docker runner 镜像维护者提供，而非通过本次 PR 修复。Code Fixer **无需处理**此问题。
+### 方向 1（置信度: 中）
+在 CI runner 上安装 `shunit2` 测试框架。`shunit2` 是一个 Shell 单元测试框架，常见安装方式为通过包管理器（如 `apt install shunit2`、`dnf install shunit2`）或从 GitHub 下载（`https://github.com/kward/shunit2`）。确认安装后，`common_funs.sh` 第 13 行的引用应能正常解析。
 
-### 方向 2（置信度: 中）
-若 `shunit2` 仅在该特定 runner 上缺失（而非所有 runner），可能是 runner 环境不一致导致。可尝试重新触发 CI 构建，观察是否在其他 runner 上通过 Check 阶段。
-
-### 旁注（非修复方向）
-日志中出现的两个 Docker BuildKit 警告：
-```
-LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 26)
-LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 30)
-```
-对应 Dockerfile 中的 `ENV PGDATA /var/lib/pgsql/data`（第 26 行附近）和 `ENV PATH ${PATH}:/usr/local/pgsql/bin`（第 30 行附近）使用了旧式 `ENV key value` 格式。这是警告而非错误，不导致构建失败，但建议后续改为 `ENV key=value` 格式以符合 BuildKit 最佳实践。
+### 方向 2（置信度: 低）
+若其他并行构建的同类型镜像（如 postgres 17.6 on sp2）的 Check 阶段正常通过，则可能是该 CI runner 的部署配置遗漏了 `shunit2`。此时需要在 CI 编排配置中确保 `shunit2` 作为前置依赖安装。
 
 ## 需要进一步确认的点
-- 确认 `shunit2` 在该 CI runner 上是否应默认预装。若其他 PR（如其他 postgres 版本的同类提交）的同阶段 Check 正常通过，则可能是本次调度到的 runner 环境有差异，重新触发即可。
-- 确认 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh` 中 `shunit2` 的 source 路径是否为相对路径依赖问题（如依赖 `PATH` 或特定工作目录）。
+1. `common_funs.sh` 第 13 行的具体内容是什么（是 `source shunit2`、`. shunit2`，还是其他形式的引用），以确认 `shunit2` 的预期安装路径。
+2. 该 CI runner 上其他 Database 类镜像（如同仓库中已存在的 postgres 17.6-oe2403sp2）的 Check 阶段是否也因同样原因失败，还是一直能通过。如果是后者，说明该 runner 最近发生了变更导致了 `shunit2` 丢失。
+3. `shunit2` 是否作为 `eulerpublisher` 的依赖项在 CI runner 初始化脚本中安装，还是需要单独配置。
+4. Dockerfile 中两个 ENV 格式警告（`LegacyKeyValueFormat` at lines 26, 30）虽不导致失败，但建议一并修正为 `ENV key=value` 格式以消除警告。
