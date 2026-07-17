@@ -1,15 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI [Check] 后置测试阶段因 runner 环境缺少 `shunit2` 测试框架而失败，Docker 镜像构建及推送均成功。属于 infra-error，与 PR 代码变更无关。
+CI 基础设施错误：CI runner 环境缺少 `shunit2` 测试框架，与 PR 代码变更无关，无需修改源代码。
 
 ## 修改的文件
-无代码修改。
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-CI 分析报告确定此失败为 **infra-error**：所有 422 个编译目标和 6 个 Docker 构建步骤均成功完成，镜像已成功推送至 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`。失败发生在 CI 的 [Check] 后置测试阶段 —— `common_funs.sh` 第 13 行尝试 `source shunit2`，但 `shunit2` 测试框架未安装在 aarch64 CI runner 节点上。
+CI 失败分析报告明确指出：
+- Docker 镜像构建（[Build]）和推送（[Push]）均已完成且成功
+- 失败发生在 [Check] 阶段：`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13: .: shunit2: file not found`
+- 根因为 CI runner 环境缺少 `shunit2` Shell 单元测试框架
+- PR 变更（新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配置文件）与该失败完全无关
 
-此问题与 PR #2893 新增的 Dockerfile、named.conf 及元数据文件完全无关，无需修改任何 PR 代码。修复需要 CI 运维团队在负责镜像 Check 测试的 runner 节点上安装 `shunit2` 测试框架。
+此问题需由 CI 基础设施管理员在 runner 镜像中安装 `shunit2` 解决，不在本仓库源码范围内。
 
 ## 潜在风险
-无。未修改任何代码，不存在引入新问题的风险。
+无
