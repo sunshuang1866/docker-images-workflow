@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
+- 新模式标题: 仓库镜像 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, INTERNAL_ERROR
 
 ## 根因分析
 
@@ -23,20 +23,18 @@
 
 ### 根因定位
 - 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 软件仓库镜像站在 HTTP/2 协议层面出现间歇性流错误（`INTERNAL_ERROR (err 2)`），导致 `gcc-c++` RPM 包在两次重试后仍下载失败。同次构建中 `cmake-data` 和 `git-core` 也遇到相同错误但最终重试成功，说明镜像站当时存在间歇性不稳定，而非包本身不存在。
+- 失败原因: openEuler 24.03-LTS-SP4 的官方软件仓库镜像在本次构建期间存在 HTTP/2 传输层间歇性故障（Curl error 92: INTERNAL_ERROR），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载遭遇 `Stream error in the HTTP/2 framing layer`。其中 cmake-data 和 git-core 经重试后成功，但 gcc-c++ 的两次重试均失败，最终 `No more mirrors to try`，dnf 安装步骤退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增了一个标准的 GraDS Dockerfile（基础镜像 `openeuler/openeuler:24.03-lts-sp4`）和配套的 README/meta/image-info 元数据更新。Dockerfile 中的 `dnf install` 命令语法正确，包名有效。失败完全由 openEuler 24.03-LTS-SP4 仓库镜像站的网络/协议层瞬时故障导致，属于 CI 基础设施问题。
+**与 PR 变更无关。** 该 PR 新增的 Dockerfile 内容完全正确——`dnf install` 命令语法无误、包名均有效、构建逻辑合理。失败纯粹是 openEuler 24.03-LTS-SP4 仓库镜像的网络基础设施问题：HTTP/2 连接流在传输大体积 RPM（gcc-c++ 13MB）时不稳定，导致 stream 异常关闭。日志中多个不同 RPM 包在不同 stream 上均出现同类错误，进一步排除包自身问题，确认根因在仓库服务端。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** 这是仓库镜像站的瞬时网络故障（HTTP/2 流错误），与代码变更无关。最简单有效的处理是等待镜像站恢复后重新运行 CI 流水线。通常此类问题在数小时到一天内自行恢复。
-
-### 方向 2（置信度: 中）
-**在 dnf install 命令中添加重试参数。** 如果此类问题频繁出现，可在 Dockerfile 的 `dnf install` 命令中追加 `--setopt=retries=10 --setopt=timeout=120` 等参数增加容错性。但这属于防御性优化而非必须修复，因为根因在服务端。
+此失败为 **infra-error**，与 PR 代码无关。无需修改 Dockerfile 或任何代码文件。建议操作：
+1. 等待 openEuler 仓库镜像恢复稳定后，在 CI 中重试（re-trigger）该 job。
+2. 若该仓库镜像持续不稳定，可考虑在 Dockerfile 的 `dnf install` 命令中增加 `--retries 5` 或添加 `--setopt=retries=5` 参数，提高 dnf 对偶发网络错误的容忍度。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像站当前是否已恢复正常服务。
-- 如果多次重试后仍失败，需要从 CI 节点手动执行 `curl -v` 测试仓库 URL 的可达性和 HTTP/2 兼容性。
-- 当前提供的日志仅包含 x86_64 架构的构建失败信息。如果 aarch64 构建也失败（通常 CI 会并行构建双架构），需确认是否为同一原因。
+- 确认 openEuler 24.03-LTS-SP4 仓库镜像 `repo.****.org` 的网络状态是否已恢复。可查看同一时间段内其他基于 24.03-lts-sp4 的 PR 构建是否也出现类似的 Curl error (92)。
+- 若该仓库持续不稳定，确认 CI 环境是否可配置备用镜像站（如清华镜像站），通过 `dnf` 配置多镜像 fallback 提升下载可靠性。
