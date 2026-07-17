@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器意外终止
-- 新模式症状关键词: failed to receive status, closing transport, graceful_stop, no builder found, euler_builder
+- 新模式标题: BuildKit构建器意外关闭
+- 新模式症状关键词: graceful_stop, no builder found, rpc error, Unavailable, closing transport, connection error, EOF
 
 ## 根因分析
 
@@ -19,17 +19,16 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 下载 OS 包阶段被优雅终止（`graceful_stop`），导致构建 gRPC 连接断开，后续步骤无法执行。日志显示构建仅进行了约 38 秒，`dnf` 正在以 77 kB/s 的低速下载元数据（已下载 2.8 MB）。Builder 发送了 `NO_ERROR` 的 GOAWAY 帧后关闭连接，排除代码错误导致的崩溃。
+- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install -y ...`（Dockerfile 第 8-10 行对应的 RUN 指令）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被服务端主动发送 `graceful_stop` goaway 信号后关闭，导致客户端与构建器之间的 gRPC 连接中断（`error reading from server: EOF`），随后构建器实例不可用（`no builder found`）。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 失败发生在 `dnf install` 阶段，尚未执行到任何与 scann 或 Python 编译相关的步骤。PR 新增的 Dockerfile 安装依赖列表正确（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`），`pip install scann` 命令格式无误。该失败为 CI 基础设施层面的 BuildKit builder 异常终止，属于偶发性基础设施故障。
+**与 PR 变更无关。** PR 仅新增了一个标准的 Dockerfile（安装 gcc/gcc-c++/make/wget 和 devel 包，构建 Python 3.9.19 并 pip 安装 scann）以及配套的文档/元数据更新。Dockerfile 中 `dnf install` 命令参数正确，包名均合法，构建在 `dnf` 下载元数据阶段（OS metadata 已下载 2.8 MB）被 BuildKit 基础设施中断，而非因代码错误导致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-重新触发 CI 运行。此失败是 BuildKit daemon 在构建中途被意外终止所致，与代码无关，预计重试即可通过。常见触发方式：在 PR 评论中发送 `/retest` 或在 CI 平台手动重新运行失败的 job。
+**触发 CI 重试。** 此失败属于 CI 基础设施的偶发性故障（BuildKit 构建器被服务端主动关闭），PR 代码变更本身没有问题。直接触发 workflow 重跑（retry）即可，无需修改任何代码。
 
 ## 需要进一步确认的点
-- 如果重新触发后仍反复出现同类错误，需排查 CI runner 节点上 BuildKit 服务的稳定性，检查是否存在 OOMKill、磁盘满或 daemon 自动重启等问题。
-- 日志中 `dnf` 下载速度仅 77 kB/s，远低于正常水平。若重试后仍因相同步骤失败（如超时），需检查 runner 节点的网络状况或考虑为 `dnf` 配置更稳定的镜像源。
+- 若重试后仍出现相同错误，需排查 BuildKit 构建器 `euler_builder_*` 实例的稳定性：是否存在资源不足（内存/磁盘）、构建器超时回收策略过短、或 `docker-container` driver 的连接保活问题。
