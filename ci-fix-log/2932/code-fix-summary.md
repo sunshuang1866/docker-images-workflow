@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败类型为 `infra-error`（基础设施错误），错误发生在 Docker BuildKit builder 容器引导阶段（`Could not find the file /`），Dockerfile 尚未被解析或执行，与 PR #2932 的代码变更无关。
+无需代码修改。CI 失败为 `infra-error`（基础设施问题），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无（未修改任何源代码文件）
 
 ## 修复逻辑
-根据 CI 失败分析报告，错误 `Error response from daemon: Could not find the file /` 发生在 `[internal] booting buildkit` 阶段，属于 CI runner 节点 `ecs-build-docker-x86-hk` 上 Docker daemon / BuildKit 的间歇性基础设施故障。PR 变更的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）在语法和结构上均无异常，不会导致该类型错误。
+CI 分析报告明确指出：
+- 失败发生在 Docker BuildKit 容器引导阶段（`[internal] booting buildkit`），报错 `Could not find the file / in container`，此时尚未加载该 PR 引入的 Dockerfile。
+- 失败类型为 `infra-error`，根因是 CI runner（`ecs-build-docker-x86-hk`）上的 Docker daemon 或 BuildKit 运行环境异常。
+- PR 变更仅包含 glibc 镜像的 Dockerfile 新增、README 和 meta 文件更新，均不涉及 BuildKit 配置、CI 脚本或 Docker 守护进程。
 
-**建议操作**：重新触发 CI 流水线。若多次重试仍失败，需排查 CI runner 节点上的 Docker daemon 状态（磁盘空间、inode 耗尽、残留 buildx builder 实例等）。
+根据修复原则，对于 `infra-error` 不应强行修改代码。建议重新触发 CI job，或联系 CI 运维检查 runner 环境（磁盘空间、BuildKit 镜像完整性、Docker 存储驱动状态）。
 
 ## 潜在风险
-无
+无（未修改任何代码）
