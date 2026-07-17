@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），根因在 `eulerpublisher` CI 工具内部的路径规范化缺陷。
+无需代码修复。CI 失败为 **infra-error**，根因在 CI 基础设施工具（eulerpublisher `update.py`）的路径比较逻辑缺陷，与 PR 代码变更无关。
 
 ## 修改的文件
-- 无（infra-error，无需修改 `README.md` 或任何源码文件）
+无。PR 仅修改了 `README.md`（更新基础镜像可用 tags 的文档信息），该文件本身不存在需要修复的问题。
 
 ## 修复逻辑
-CI 分析报告明确指出：失败类型为 `infra-error`，置信度 **高**。CI 工具 `eulerpublisher/update/container/app/update.py:273` 中的 appstore 路径校验逻辑对 git diff 产生的相对路径 `README.md` 与预期绝对路径 `/README.md` 做字符串严格比对，因缺少前导 `/` 报错。PR #3153 仅修改了 `README.md` 和 `README.en.md` 中的文档标签列表（纯文档更新），代码本身无误。修复应在上游 CI 工具 `eulerpublisher` 中进行，为本仓库开源代码之外的基础设施问题。
+CI 分析报告明确指出：失败由 eulerpublisher 的 appstore 发布规范预检工具（`update.py:273`）在处理 `git diff --name-only` 输出的文件路径时未做路径规范化导致——工具期望绝对路径 `/README.md`，但 `git diff` 输出相对路径 `README.md`，字符串比较不匹配。这是一个 CI 基础设施层面的 bug，应由 CI 维护者修复 `update.py` 中的路径比较逻辑（统一添加或去除前导 `/`）。PR 仅更新了根目录下的 README 文档文件，未涉及任何 Dockerfile 或镜像元数据变更，该 CI 检查本不应阻塞此 PR。
 
 ## 潜在风险
-无。本仓库无需任何代码变更。
+无——本次未对任何源代码文件做修改。
