@@ -4,9 +4,9 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39（CI工具依赖缺失）
-- 新模式标题: (无)
-- 新模式症状关键词: (无)
+- 知识库匹配: 新模式
+- 新模式标题: CI测试框架缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
@@ -19,22 +19,20 @@
 | Check Items | Description | Check Result |
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 测试环境 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI Runner 环境中缺少 `shunit2` Shell 单元测试框架，导致 [Check] 阶段无法加载测试工具，容器测试完全无法执行。Docker 镜像的构建和推送阶段均已成功完成（`#8 DONE 268.4s`、`[Build] finished`、`[Push] finished`）。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI runner 上缺少 `shunit2` 测试框架，导致 `common_funs.sh` 脚本在第 13 行尝试加载 `shunit2` 时失败，[Check] 阶段无法执行任何容器测试（测试结果表为空）。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** 该 PR 新增的 Dockerfile 已正确完成编译构建和推送，PostgreSQL 17.6 在 openEuler 24.03-LTS-SP4 上成功通过 `./configure && make -j "$(nproc)" && make install` 全部流程。失败发生在 CI 后置的容器静态检查阶段，属于 CI Runner 环境问题——测试框架 `shunit2` 未安装在 Runner 上。
+**与 PR 变更无关。** PR 仅新增了 Postgres 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、entrypoint.sh、meta.yml 条目和 README 更新。日志显示 Docker 镜像构建（`[Build] finished`）和推送（`[Push] finished`）均已成功完成，所有 10 个 `RUN`/`COPY` 步骤均正常通过（`#8 DONE 268.4s` / `#10 DONE 0.1s`）。失败发生在 CI 测试框架的 [Check] 阶段——CI runner 环境中 `shunit2`（Shell 单元测试框架）缺失，导致测试脚本初始化时立即失败，未能执行任何实质性的镜像验证测试。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI Runner 上安装 `shunit2` Shell 测试框架。`shunit2` 是容器测试脚本 `common_funs.sh` 的核心依赖，缺失导致所有容器镜像的 [Check] 阶段均无法执行。通常通过系统的包管理器安装（如 `dnf install shunit2` 或 `pip install shunit2`），或由 CI 初始化脚本自动部署。
+这是 CI 基础设施问题。需 CI 管理员在 runner 环境中安装 `shunit2`，或确保 `eulerpublisher` 容器镜像测试依赖在 [Check] 阶段执行前已正确安装。Code Fixer 无需处理此 PR。
 
 ## 需要进一步确认的点
-- 确认 `shunit2` 在该 CI Runner 上是原本就缺失，还是近期被误删/环境变更导致
-- 确认同 Runner 上其他镜像 PR 的 [Check] 阶段是否同样失败（如果是，则为 Runner 级系统性基础设施问题）
+- 确认 `shunit2` 在 CI runner 上的预期安装路径，以及是否被配置在 `PATH` 或测试脚本的 `source` 路径中
+- 检查同一 CI 环境下其他近期成功镜像的 [Check] 阶段是否正常通过，以判断本次是 runner 实例的偶发问题还是持久性配置缺失
