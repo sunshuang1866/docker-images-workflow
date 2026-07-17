@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败原因为 BuildKit 构建器 `euler_builder_20260709_224657` 在构建过程中被优雅终止（`graceful_stop`），属于 CI 基础设施不稳定导致的一次性故障，与本次 PR 的代码变更无关。
+CI 基础设施瞬态故障：BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被意外终止（graceful_stop），导致 gRPC 连接断开。与 PR 代码变更无关，无需代码修复。
 
 ## 修改的文件
 无（infra-error，无需代码修改）
 
 ## 修复逻辑
-分析报告确认：构建失败发生在 `dnf install` 系统包安装阶段（下载 openEuler 仓库元数据时），尚未执行到 Dockerfile 中任何项目特定的 `RUN` 指令。失败的直接原因是 BuildKit 构建器异常终止导致 gRPC 连接断开。PR #2994 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及相关元数据文件，均为常规的镜像版本新增操作，与构建器故障无关联。建议重新触发 CI pipeline 重试构建。
+分析报告明确指出这是 CI 基础设施层面的问题，失败发生在 `dnf install` 基础阶段（尚未执行到任何 PR 特定逻辑），Dockerfile 语法和内容本身没有问题。根因是 BuildKit builder 容器/服务被意外关停或回收。
+
+建议重新触发 CI 流水线让构建在健康的 builder 实例上重试。如果相同问题反复出现，需要排查 Jenkins 节点的 BuildKit builder 服务稳定性（如 OOM killed、自动回收策略等）。
 
 ## 潜在风险
 无
