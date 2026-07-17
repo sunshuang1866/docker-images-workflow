@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题：CI runner 缺少 `shunit2` 依赖，导致 [Check] 阶段容器验证测试无法执行。与 PR #2900 的代码变更无关。
+无需代码修复。CI 失败属于 **infra-error**，与 PR #2900 的代码变更无关。
 
 ## 修改的文件
-无代码修改。
+无（未修改任何文件）
 
 ## 修复逻辑
-失败类型为 `infra-error`。Docker 镜像构建和推送均已成功完成（`[Build] finished` + `[Push] finished`），PR 新增的 Dockerfile、httpd-foreground 脚本及元数据文件均正确。失败发生在 eulerpublisher 的 [Check] 阶段，因 CI runner 环境缺失 `shunit2`（shell 单元测试框架）导致 `common_funs.sh` 第 13 行 `. shunit2` 执行失败。这是 CI 基础设施层面需要安装依赖的问题，无需修改源代码。
+CI 分析报告明确指出：
+
+1. **失败类型**：`infra-error`（CI 基础设施问题）
+2. **根因**：CI [Check] 阶段中，`eulerpublisher` 测试框架的 `common_funs.sh:13` 执行 `. shunit2` 时找不到 `shunit2`（Shell 单元测试框架库未安装或不在 `PATH` 中），导致测试崩溃
+3. **与 PR 关联**：**无关**。Docker 镜像构建和推送均已成功完成（`[Build] finished`、`[Push] finished`、`#14 DONE`），PR 代码无任何问题
+
+**修复方向**：需要在 CI runner 上安装 `shunit2` 包，或将 `shunit2` 的安装路径加入 `PATH`。这是 CI 基础设施侧的配置问题，不涉及仓库代码修改。
 
 ## 潜在风险
-无 — 无需代码变更，修复需由 CI 运维人员在 runner 上安装 `shunit2`（如 `dnf install shunit2`）。
+无
