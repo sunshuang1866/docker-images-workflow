@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 BuildKit 容器引导阶段的临时性基础设施故障（`Error response from daemon: Could not find the file / in container`），与 PR 代码变更无关，Dockerfile 构建步骤未被实际执行。
+无需代码修改。CI 失败为 `infra-error`：BuildKit 容器在 CI runner 上引导失败（`Could not find the file / in container buildx_buildkit_euler_builder_*`），是 Docker 守护进程的瞬时基础设施故障，发生在任何 Dockerfile 指令被解析/执行之前。
 
 ## 修改的文件
-无（infra-error，不涉及代码修改）
+无
 
 ## 修复逻辑
-CI 分析报告将该失败归为 `infra-error`，置信度为高。错误发生在 `[internal] booting buildkit` 阶段，此时尚未进入 Dockerfile 的 `RUN`/`COPY` 等构建步骤。Docker daemon 在成功创建 BuildKit 容器后无法定位其根文件系统 `/`，属于 Docker/容器运行时层面的一次性故障。PR 的 4 个文件变更均为纯增量变更（新增 openEuler 24.03-LTS-SP4 glibc 镜像的 Dockerfile 及配套文档），不会引发此错误。
-
-推荐操作：重新触发 CI 运行。若重跑仍复现，需排查构建节点 `ecs-build-docker-x86-hk` 的 Docker daemon 状态。
+CI 分析报告明确指出此错误与 PR 代码变更完全无关。错误发生在 buildx 的 `[internal] booting buildkit` 阶段，此时尚未读取或解析 Dockerfile 内容。PR 仅新增了纯文本/Dockerfile/YAML 文件，不可能触发此类基础设施级错误。修复方向为重新触发 CI 流水线（retry），无需修改任何源代码。
 
 ## 潜在风险
 无
