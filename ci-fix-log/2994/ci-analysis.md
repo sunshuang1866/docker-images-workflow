@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 被终止
-- 新模式症状关键词: graceful_stop, no builder found, rpc error, closing transport, EOF, euler_builder
+- 新模式标题: BuildKit构建器中途终止
+- 新模式症状关键词: failed to receive status, error reading from server: EOF, graceful_stop, no builder found, euler_builder
 
 ## 根因分析
 
@@ -19,20 +19,29 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4]`（dnf install 执行中，约 38 秒处）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被触发 `graceful_stop`（优雅关闭），导致已建立的 RPC 连接被中断，客户端收到 `EOF` 后报错。构建随后因找不到 builder 而失败。
+- 失败位置: Docker 构建步骤 `[2/4]`（`dnf install` 阶段），约执行 38.6 秒时
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被终止（`graceful_stop`），导致 BuildKit RPC 连接断开，后续 `docker buildx` 命令无法找到该构建器
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** PR 仅新增了一个 Dockerfile 和对应的元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容为标准的 dnf 安装、源码编译 Python、pip 安装 scann，无语法错误或逻辑问题。构建在 `dnf install` 阶段（尚未执行到 PR 特有的 Python 编译或 pip 安装步骤）因 BuildKit 基础设施异常而中断，非本次改动触发。
+**与 PR 变更无关。** 该 PR 新增了一个 Dockerfile 和三个元数据文件（README.md、image-info.yml、meta.yml），构建流程仅执行到 `dnf install` 阶段（安装 gcc、gcc-c++、make 等基础工具）即因基础设施问题中断，远未触及任何与 PR 改动相关的业务逻辑。失败是因为 CI 的 BuildKit 构建器 Pod/实例意外终止。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**重新触发 CI**。BuildKit builder 的 `graceful_stop` 通常由 CI 编排层触发（如节点维护、资源回收、超时清理），属于临时性基础设施问题，与代码质量无关。重新执行 CI pipeline 大概率可以成功构建。
+**无需代码修改。** 这是 CI 基础设施层面的问题——BuildKit 构建器 `euler_builder_20260709_224657` 在构建过程中被终止。可能原因：
+- CI 构建节点资源不足（内存/磁盘），BuildKit 容器被 OOM Killer 或资源管理器终止
+- 构建器实例有生存时间限制（TTL），超时后被自动清理
+- 基础设施层面的计划内维护或节点回收
+
+建议在 CI 系统中重新触发该 job，若重试后通过则确认为此类 transient infra 问题。
 
 ### 方向 2（置信度: 低）
-如重试后持续失败，需排查 CI 基础设施侧：检查构建节点 `ecs-build-docker-x86-hk` 的资源状态、builder 生命周期管理策略，以及是否存在 builder 超时时间过短导致正常构建被误杀的情况。
+若重试后仍在相同步骤失败（`dnf install` 阶段），可能是 `openeuler:24.03-lts-sp4` 基础镜像的 `dnf` 获取元数据时消耗过多内存/时间，导致 BuildKit 构建器超时。此种情况下可考虑在 `dnf install` 前增加 `dnf makecache` 或添加 `--setopt=timeout=300` 等超时参数。
 
 ## 需要进一步确认的点
-- 确认 `euler_builder_20260709_224657` 被 graceful_stop 的原因（节点维护 / 资源不足 / 超时 / 其他 builder 生命周期策略），此信息不在当前日志中，需查看 BuildKit builder 的调度/管理日志。
-- 如重试 CI 后仍然失败，需对比同批次其他成功构建的镜像，确认是否仅有该 builder 异常。
+- 确认 `ecs-build-docker-x86-hk` 构建节点的资源使用情况（在构建失败时间段是否有资源水位告警）
+- 确认 BuildKit 构建器 `euler_builder_20260709_224657` 的 TTL 配置是否足以完成完整构建
+- 重试该 job 观察是否稳定复现还是偶发
+
+## 修复验证要求
+无需验证。此问题为 CI 基础设施故障，不涉及对 Dockerfile 或任何仓库代码的修改。
