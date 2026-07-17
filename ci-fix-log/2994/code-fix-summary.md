@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。本次 CI 失败为 infra-error，系 Docker BuildKit builder 实例（`euler_builder_20260709_224657`）在 `dnf install` 下载包元数据过程中被优雅终止（`graceful_stop`）导致，与 PR 新增的 Dockerfile 内容无关。
+CI 基础设施异常（infra-error），无需修改 PR 代码。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出本次失败类型为 `infra-error`，根因是 BuildKit builder 在 CI runner 上被基础设施层终止（连接断开、EOF），而非 PR 代码变更引起的构建错误。新增的 Dockerfile 语法和包列表均正确，`dnf install` 命令本身没有问题。推荐操作：在 PR 页面重新触发 CI（如 `/retest`），在 Builder 正常运行的情况下极大概率可成功构建。
+CI 失败分析报告确认该失败为 **infra-error**：Docker BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被上层 CI 基础设施优雅终止（goaway frame 携带 `graceful_stop` 指令），导致 gRPC 传输连接断开。构建中断发生在 dnf 元数据下载阶段（`[2/4] RUN dnf install`），此时尚未进入实际包安装流程，Dockerfile 语法和内容均无错误。
+
+PR 新增的 Dockerfile 内容正确，`dnf install` 包列表均为 openEuler 24.03-LTS-SP4 标准仓库下的有效包名。README.md、image-info.yml、meta.yml 均无问题。
+
+**建议操作**：重新触发 CI 构建（re-run / re-trigger）即可。若反复出现同类问题，需排查 CI 调度器对 `euler_builder_*` 构建器的生命周期管理是否异常。
 
 ## 潜在风险
-无
+无。未修改任何代码。
