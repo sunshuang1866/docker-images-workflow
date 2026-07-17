@@ -6,7 +6,7 @@
 - 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: BuildKit容器启动失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, booting buildkit, moby/buildkit, docker-container driver
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, docker-container driver
 
 ## 根因分析
 
@@ -28,25 +28,24 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 引导阶段（`[internal] booting buildkit`），远在 Dockerfile 中任何指令执行之前
-- 失败原因: Docker daemon 在创建 BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后无法找到容器内文件系统根路径 `/`，导致 BuildKit 引导失败，Docker 构建流程完全未启动
+- 失败位置: CI runner `ecs-build-docker-x86-hk` 上的 Docker BuildKit 启动阶段（Dockerfile 尚未被解析）
+- 失败原因: Docker daemon 在创建 BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法找到容器内的根文件系统路径 `/`（"Could not find the file /"），导致 buildx 的 `docker-container` driver 启动失败。错误发生在 `[internal] booting buildkit` 阶段，**早于任何 Dockerfile 指令执行**。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** 该 PR 仅新增了一个 glibc 2.42 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml）。CI 失败发生在 Docker BuildKit 守护进程容器引导阶段——此时尚未加载 Dockerfile、未拉取基础镜像、未执行任何 `RUN`/`COPY` 等构建指令。错误来自 Docker daemon 内部的文件系统访问异常，属于 CI 构建节点的运行时基础设施问题。
+**与 PR 代码变更无关。** PR 仅新增了 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 以及更新了 README.md、image-info.yml、meta.yml 三个元数据文件。错误发生在 BuildKit 守护进程容器自身的启动过程中——此时尚未加载或解析任何 Dockerfile。这是 CI 基础设施层面的故障（Docker daemon / BuildKit 运行时异常），非 PR 改动触发。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI**。此错误为 Docker BuildKit 运行时瞬时故障，可能的原因包括：
-- CI 构建节点上的 Docker 存储驱动（overlay2/devicemapper）在创建容器文件系统时出现瞬时异常
-- `moby/buildkit:buildx-stable-1` 镜像拉取不完整或校验错误
-- 构建节点磁盘 I/O 瞬时故障
+**触发 CI 重试。** 该错误为 BuildKit 容器启动时的瞬时性基础设施故障（可能是 runner 上的 Docker daemon 状态异常、存储驱动短暂不可用、或 `/` 在容器的 mount namespace 中暂时不可访问）。retrigger CI job 大概率可恢复正常。
 
-Code Fixer 无需对任何文件做代码修改。应通过 Jenkins 重新触发该 PR 的 CI 流水线，让构建在健康的节点或重新创建 BuildKit 容器后重试。
+### 方向 2（置信度: 低）
+若重试多次均失败，检查 CI runner `ecs-build-docker-x86-hk` 上的 Docker daemon 状态和 buildx builder 实例：
+- 执行 `docker buildx ls` 查看 builder 状态
+- 清理陈旧 builder：`docker buildx rm euler_builder` 后重建
+- 检查 Docker daemon 存储驱动（overlay2/devicemapper）是否健康
 
 ## 需要进一步确认的点
-- 如果多次重试后仍出现相同错误，需要检查 CI 构建节点 `ecs-build-docker-x86-hk` 上的 Docker 版本、存储驱动状态及磁盘健康状况
-- 确认 `moby/buildkit:buildx-stable-1` 镜像在构建节点的 Docker 缓存中是否完整
-
-## 修复验证要求
-无。此失败为 infra-error，不涉及代码修改，无需 code-fixer 验证。
+- CI runner 上 Docker daemon 的运行状态及日志（`journalctl -u docker`）
+- BuildKit 镜像 `moby/buildkit:buildx-stable-1` 是否完整拉取且无损坏
+- 该 runner 上是否曾出现类似的 BuildKit 启动失败记录
