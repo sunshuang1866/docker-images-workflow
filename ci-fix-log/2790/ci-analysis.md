@@ -2,47 +2,44 @@
 
 ## 基本信息
 - PR: #2790 — update readme.md
-- 失败类型: lint-error
-- 置信度: 中
-- 知识库匹配: 模式11（YAML / 元数据文件错误 — 路径校验子类）
-- 新模式标题: -
-- 新模式症状关键词: -
+- 失败类型: infra-error
+- 置信度: 低
+- 知识库匹配: 新模式
+- 新模式标题: 根README路径误检
+- 新模式症状关键词: appstore, Path Error, README.md, expected path, 发布规范
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-14 15:28:07,685-update.py[line:273]-ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-14 15:28:07,685-... -ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
 |  README.md  | [Path Error] The expected path should be /README.md |   FAILURE    |
 +-------------+-----------------------------------------------------+--------------+
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: CI 的 appstore 发布规范检查工具检测到 PR 变更了 `README.md`（仓库根目录），对该文件执行路径校验时判定失败，报 `[Path Error] The expected path should be /README.md`。PR diff 中 `README.md` 的路径即为 `/README.md`，路径本身符合预期，但校验工具仍报告路径错误，可能与工具从 fork 仓库 (`sunshuang1866/****-docker-images`) 克隆并比对路径时的路径解析逻辑有关，或该工具对根级 README.md 的变更有额外的联带变更要求（如需要同步更新 `image-list.yml` 等元数据文件）。
+- 失败位置: CI appstore 发布规范预检阶段（`eulerpublisher/update/container/app/update.py:273`）
+- 失败原因: CI 的 appstore 发布规范检查工具对仓库根目录的 `README.md` 文件进行了路径校验，错误信息称"期望路径应为 `/README.md`"，但该文件实际就在 `/README.md` 位置，存在自相矛盾。仓库根目录的 `README.md` 是项目级文档，并非 appstore 镜像发布的范畴，CI 工具应将其排除在校验范围之外。该失败与 PR 内容无关。
 
 ### 与 PR 变更的关联
-PR 仅变更了仓库根目录的两个文档文件：`README.md`（中文）和 `README.en.md`（英文），更新了"可用镜像的 Tags"列表——将 `latest` 标签对应的版本从 `24.03-lts-sp2` 更新为 `24.03-lts-sp3`，同时新增 `25.09`、`24.03-lts-sp3`、`24.03-lts-sp2` 三个标签条目，修正了原条目中标签与 URL 不一致的问题（原 `24.03-lts-sp2` 标签指向了 SP1 的 URL）。
-
-CI 的 appstore 规范校验器（`eulerpublisher`）自动对变更文件进行路径合规检查。`README.md` 被检查时路径校验失败。此失败由 PR 的文档变更触发，但因文件实际路径与期望路径一致，冲突可能来源于校验工具逻辑或缺少联带元数据更新，而非 PR 内容本身有误。
+PR 仅修改了 `README.md` 和 `README.en.md` 两个文档文件，更新了 openEuler LTS 版本标签信息（新增 24.03-lts-sp3、25.09、24.03-lts-sp2 标签，将 latest 指向从 SP1 改为 SP3），属于纯文档变更。CI 的 appstore 路径校验工具误将根目录 `README.md`（项目整体说明文档）当作需上架 appstore 的镜像文件进行校验，导致路径检查失败。该失败与 PR 改动无因果关系，任何修改根目录 `README.md` 的 PR 都可能触发相同失败。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-检查 `eulerpublisher/update/container/app/update.py:273` 附近的路径校验逻辑，确认对于仓库根级 `README.md` 的校验规则是否存在已知缺陷（如 fork 仓库路径前缀未正确剥离）。若为工具 bug，则需在 eulerpublisher 中修复路径解析逻辑；若为预期行为，则需确认该 PR 是否需要额外更新 `image-list.yml` 或其他 appstore 元数据文件以通过校验。
+### 方向 1（置信度: 低）
+CI appstore 发布规范检查工具（`eulerpublisher` 的 `update.py`）应将项目根目录的 `README.md` / `README.en.md` 从文件变更检查范围中排除——这些文件是仓库级别的项目文档，不涉及应用镜像上架。此修复需由 CI 基础设施团队在 `eulerpublisher` 工具侧完成，PR 作者无需修改任何代码。
 
 ### 方向 2（置信度: 低）
-如果 `README.md` 被 appstore 校验器纳入检查范围本身是不合理的（因为根级 README 不属于任何应用镜像），可能需要在 `eulerpublisher` 工具中为根级文件添加白名单，使其跳过 appstore 路径校验。
+若 CI 工具的路径校验逻辑本身存在 bug（期望路径与实际路径一致却仍报 FAILURE），需检查 `update.py:273` 附近的正则/路径匹配逻辑是否存在代码缺陷。
 
 ## 需要进一步确认的点
-1. `eulerpublisher/update/container/app/update.py:273` 周边代码的具体路径校验逻辑——为何 `/README.md` 这条实际正确的路径会被判为 FAILURE。
-2. 该 appstore 规范校验是否要求对根级 `README.md` 的变更必须伴随其他元数据文件（如 `image-list.yml`）的更新。
-3. 从 fork 仓库（`gitcode.com/sunshuang1866/****-docker-images`）克隆后，路径解析是否引入了多余前缀导致校验失败。
+- `eulerpublisher` 工具的 `update.py` 中，appstore 发布规范检查的路径过滤逻辑是什么：是否将仓库根目录的 `README.md` 纳入了检查范围？若纳入，是预期行为还是 bug？
+- 错误信息"expected path should be /README.md"与实际路径 `/README.md` 一致却报 FAILURE 的原因——是路径判断逻辑有误，还是错误消息中的路径与实际校验路径不一致？
+- 同 PR 中 `README.en.md` 也被修改，但 CI 差异检测仅列出了 `README.md`，需确认 `README.en.md` 是否被正确忽略了，以及两者处理逻辑是否一致。
+- 该 CI 失败是否为当前 CI 环境中的已知问题（是否存在类似 case 表明修改根 README 总是触发此误报）？
 
 ## 修复验证要求
-若修复方向涉及修改 eulerpublisher 校验代码，code-fixer 需在本地模拟 CI 校验流程（克隆 fork 仓库 → 比对变更 → 运行路径校验），确认修复后 `README.md` 的路径校验通过且不引入其他误判。
+该失败为 infra-error，置信度为"低"，**code-fixer 不应执行任何代码修改**。如果 CI 团队确认是 `eulerpublisher` 工具的 bug 并修复后，需重新触发 CI 流水线验证该 PR 能否通过 appstore 发布规范检查。
