@@ -1,19 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 此 CI 失败为基础设施错误（infra-error），由 openEuler 24.03-LTS-SP4 RPM 仓库的 HTTP/2 协议层临时故障导致。
+无需代码修改。CI 失败为 openEuler 24.03-LTS-SP4 软件仓库服务器的 HTTP/2 协议间歇性流错误（Curl error 92），属于基础设施问题（infra-error），非 PR 代码缺陷。
 
 ## 修改的文件
-无
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-CI 分析报告确认：
-- 失败类型：**infra-error**
-- 根因：openEuler 24.03-LTS-SP4 的 RPM 软件仓库镜像（`repo.****.org`）在 HTTP/2 协议层面出现流中断（`Curl error (92): Stream error in the HTTP/2 framing layer`），导致多个 RPM 包下载失败，最终 `gcc-12.3.1-110.oe2403sp4.x86_64.rpm` 因所有镜像源均已尝试无果而彻底失败，dnf install 命令以 exit code 1 退出。
-- PR 新增的 Dockerfile（`Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile`）语法正确，`dnf install` 命令列出的所有包均为 openEuler 仓库中实际存在的合法包名，**与 PR 代码变更无关**。
-- 未改动的 stage-1（#7）中相同的 dnf 下载操作也同样出现了 HTTP/2 流错误，进一步证明问题发生在仓库侧。
+CI 分析报告明确指出：失败类型为 `infra-error`，根因是 openEuler 24.03-LTS-SP4 的 DNF 软件仓库在通过 HTTP/2 协议下载 RPM 包时反复出现 `Stream error in the HTTP/2 framing layer`（Curl 错误码 92），多次重试后耗尽所有镜像导致 `dnf install` 失败。
 
-根据任务指令中"infra-error 无需代码修改，不要强行改代码"的规定，本次不做任何代码变更。建议等待仓库服务恢复后重新触发 CI 流水线。
+PR #2992 新增的 Dockerfile 内容正确无语法错误，`dnf install` 命令中列出的包名均有效（与 SP3 版本一致）。该问题可通过以下方式规避（非代码修改）：
+- **重试构建**：该问题表现为间歇性，重新触发 CI 构建可能通过。
+- **DNF 配置降级到 HTTP/1.1**：在 Dockerfile 的 `dnf install` 前添加 `RUN echo "http2=false" >> /etc/dnf/dnf.conf` 以规避 HTTP/2 流错误。
+- **增加 DNF 重试次数**：在 `dnf install` 命令中添加 `--setopt=retries=10` 提高重试次数。
+
+按照修复原则，`infra-error` 不应强行修改代码。
 
 ## 潜在风险
 无
