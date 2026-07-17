@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。该 CI 失败为 **infra-error**，根因是 CI 工具 `eulerpublisher` 内置测试脚本 `bwa_test.sh` 使用了 Windows 换行符（CRLF），导致 shebang 被内核误解析为 `/bin/sh^M` 而无法执行。
+无需代码修改。CI 失败为基础设施错误（infra-error），根因在 `eulerpublisher` 包内置的 `bwa_test.sh` 测试脚本使用了 CRLF 换行符，与本次 PR 的代码变更无关。
 
 ## 修改的文件
-无。PR 的变更文件（Dockerfile、README.md、image-info.yml、meta.yml）无需修改，Docker 镜像构建和推送均已成功完成。
+无（未对源码仓库做任何修改）
 
 ## 修复逻辑
-分析报告确认：
-- Docker 构建阶段（Build）成功完成
-- Docker 推送阶段（Push）成功完成
-- 失败发生在 CI 校验阶段（Check），由 `eulerpublisher` 工具自身的测试脚本换行符导致
+分析报告明确指出：失败发生在 CI 基础设施的 `[Check]` 阶段，Docker 镜像构建（`[Build]`）和推送（`[Push]`）均成功完成。`bwa_test.sh` 脚本的换行符问题（`^M`）属于 `eulerpublisher` Python 包的 bug，不属于本仓库代码范畴。本次 PR 新增的 Dockerfile 及配套元数据文件均正确无误，无需修改。
 
-此问题需在 `eulerpublisher` 上游仓库中修复（将 `bwa_test.sh` 转换为 Unix LF 换行符），或在 CI 流水线中增加 `dos2unix` / `sed -i 's/\r$//'` 处理。不在本 PR 仓库范围内，无需修改任何代码。
+根据分析报告建议，此问题应在 CI 基础设施侧修复（对 `eulerpublisher` 包中的 `bwa_test.sh` 执行 `dos2unix` 或 `sed -i 's/\r$//'` 转换）。CI 维护团队修复后重新触发构建即可通过。
 
 ## 潜在风险
-无。PR 代码本身没有问题，修复方向在 CI 基础设施侧，不影响本仓库任何功能。
+无
