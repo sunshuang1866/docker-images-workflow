@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。CI 失败为基础设施错误（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败属于基础设施故障（infra-error），BuildKit 容器创建阶段失败（`Could not find the file / in container`），与 PR 代码变更无关。
 
 ## 修改的文件
-无。此 PR 的所有代码变更（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`、`README.md`、`doc/image-info.yml`、`meta.yml`）均无需修改。
+无
 
 ## 修复逻辑
-CI 失败发生在 Docker BuildKit bootstrap 阶段（`booting buildkit`），在 CI 构建节点 `ecs-build-docker-x86-hk` 上 Docker daemon 创建 BuildKit 容器时报错 `Could not find the file /`，这是容器根文件系统元数据异常导致的基础设施瞬时故障，发生在任何 Dockerfile 指令被处理之前。PR 的前置检查步骤（依赖安装、仓库克隆、diff 识别、镜像规范校验）均成功通过，确认代码变更本身没有问题。修复方向应为触发 CI 重试或清理 CI 节点 Docker 存储，无需修改代码。
+CI 分析报告明确指出失败发生在 Docker BuildKit 容器创建阶段（`[internal] booting buildkit`），此时尚未进入任何 Dockerfile 构建步骤。错误 `Error response from daemon: Could not find the file / in container` 表明 runner 节点 `ecs-build-docker-x86-hk` 上的 Docker daemon 存在异常状态，属于 CI 基础设施问题，与 PR #2932 新增的 glibc Dockerfile 及元数据文件变更完全无关。
+
+建议操作：
+1. 联系 CI 运维团队检查 runner 节点的 Docker daemon 状态
+2. 清理残留的 buildx builder 实例（`docker buildx rm`）
+3. 重新触发 CI 构建（retry）
 
 ## 潜在风险
 无
