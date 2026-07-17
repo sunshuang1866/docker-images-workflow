@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 崩溃
-- 新模式症状关键词: graceful_stop, closing transport, connection error: EOF, no builder found, buildkit, rpc error: code = Unavailable
+- 新模式标题: BuildKit构建器意外终止
+- 新模式症状关键词: failed to receive status, closing transport, graceful_stop, no builder found, euler_builder
 
 ## 根因分析
 
@@ -19,26 +19,17 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: 构建步骤 `[2/4]`（dnf install 阶段，约第 38 秒处）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据时收到 `graceful_stop` 信号后意外终止，导致 gRPC 连接断开（`closing transport due to: connection error: EOF`），后续构建步骤无法找到该 builder。
+- 失败位置: Docker 构建步骤 `#7 [2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 下载 OS 包阶段被优雅终止（`graceful_stop`），导致构建 gRPC 连接断开，后续步骤无法执行。日志显示构建仅进行了约 38 秒，`dnf` 正在以 77 kB/s 的低速下载元数据（已下载 2.8 MB）。Builder 发送了 `NO_ERROR` 的 GOAWAY 帧后关闭连接，排除代码错误导致的崩溃。
 
-## 与 PR 变更的关联
-
-**与 PR 无关。** 该失败是 CI 基础设施层面的 BuildKit daemon 崩溃。
-
-- BuildKit builder 在正常执行 `RUN dnf install`（安装 gcc、gcc-c++、make、wget 等标准编译工具链）的过程中被 `graceful_stop` 信号终止。
-- PR 新增的 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）语法正确，所安装的包均为 openEuler 24.03-LTS-SP4 标准仓库中的合法软件包（gcc、gcc-c++、make、wget、openssl-devel、bzip2-devel、zlib-devel），不存在会导致 BuildKit 崩溃的非法指令或依赖错误。
-- 构建失败发生在第一步 `dnf install` 的元数据下载阶段（约第 38 秒），尚未到达 `wget Python`、`./configure && make` 或 `pip install scann` 等后续步骤，失败点早于任何与 PR 特有内容相关的逻辑。
+### 与 PR 变更的关联
+**与 PR 代码变更无关。** 失败发生在 `dnf install` 阶段，尚未执行到任何与 scann 或 Python 编译相关的步骤。PR 新增的 Dockerfile 安装依赖列表正确（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`），`pip install scann` 命令格式无误。该失败为 CI 基础设施层面的 BuildKit builder 异常终止，属于偶发性基础设施故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复。** 该失败为 CI 基础设施问题（BuildKit builder 意外终止），与 PR 代码变更无关。建议触发 CI 重试（re-run / re-trigger）以确认构建能否正常通过。若多次重试仍复现，需排查 CI 基础设施：
-- BuildKit daemon / Docker 宿主机是否存在资源压力（内存不足触发 OOM Kill）
-- CI 节点是否在构建期间发生驱逐或维护操作
-- 是否存在编排层超时配置过短导致 BuildKit builder 被提前回收
+重新触发 CI 运行。此失败是 BuildKit daemon 在构建中途被意外终止所致，与代码无关，预计重试即可通过。常见触发方式：在 PR 评论中发送 `/retest` 或在 CI 平台手动重新运行失败的 job。
 
 ## 需要进一步确认的点
-- BuildKit builder 进程被 `graceful_stop` 终止的具体原因：是否为 CI 编排层面的超时、资源限制触发 OOM Kill、或节点调度/驱逐。
-- 若重试后问题消失，则确认为临时性基础设施抖动，无需额外处理。
-- 若重试后持续失败，需获取 CI runner 宿主机的系统日志（dmesg/syslog）确认 OOM Killer 或 docker daemon 异常。
+- 如果重新触发后仍反复出现同类错误，需排查 CI runner 节点上 BuildKit 服务的稳定性，检查是否存在 OOMKill、磁盘满或 daemon 自动重启等问题。
+- 日志中 `dnf` 下载速度仅 77 kB/s，远低于正常水平。若重试后仍因相同步骤失败（如超时），需检查 runner 节点的网络状况或考虑为 `dnf` 配置更稳定的镜像源。
