@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit引导失败
-- 新模式症状关键词: Could not find the file / in container, booting buildkit, buildx_buildkit, Error response from daemon
+- 新模式标题: BuildKit容器启动失败
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, Error response from daemon, booting buildkit
 
 ## 根因分析
 
@@ -25,35 +25,19 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 引导阶段（`[internal] booting buildkit`），x86-64 构建节点 `ecs-build-docker-x86-hk`
-- 失败原因: Docker daemon 在创建 BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，无法在该容器中找到根文件系统 `/`，导致 BuildKit 初始化失败。该容器在 0.1 秒内被创建后立即出错，随后被自动清理（`euler_builder_20260709_205700 removed`）。
+- 失败位置: Docker BuildKit 构建器启动阶段（booting buildkit），非 Dockerfile 构建步骤内
+- 失败原因: Docker daemon 在创建 buildx 构建器容器（`buildx_buildkit_euler_builder_20260709_2057000`）后，无法访问该容器的根文件系统（`/`），导致 BuildKit 启动失败。这是宿主机 Docker 运行时层面的基础设施故障，可能由 buildkit 容器的 overlay/rootfs 损坏、docker 存储驱动异常或节点磁盘/内存问题引起。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 此次失败发生在 Docker buildx/BuildKit 的引导阶段（`[internal] booting buildkit`），远在实际 Dockerfile 构建步骤（`docker build`）执行之前。PR 新增的 Dockerfile（`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`）从未被执行到，无证据表明其内容存在任何问题。
-
-从日志可以看出：
-- CI 正确检测到了 PR 变更的 4 个文件（Dockerfile、README.md、image-info.yml、meta.yml）
-- 镜像规范检查已通过（`The image specification check for releasing on appstore has passed.`）
-- 失败仅发生在 BuildKit 容器引导阶段
+本次 PR 仅新增了 4 个文件：`Others/glibc/2.42/24.03-lts-sp4/Dockerfile`（新增 Dockerfile）、`Others/glibc/README.md`（表格新增一行）、`Others/glibc/doc/image-info.yml`（表格新增一行）、`Others/glibc/meta.yml`（新增镜像条目）。这些纯元数据和 Dockerfile 变更不会导致 Docker BuildKit 守护进程层面的容器根文件系统访问错误。**本次失败与 PR 代码变更无关**。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**CI 基础设施问题，非代码层面可修复。** 该错误是 Docker daemon 在节点 `ecs-build-docker-x86-hk` 上创建 BuildKit 容器时的运行时异常，常见原因包括：
-- Docker 存储驱动（overlay2/devicemapper）状态异常
-- 节点磁盘空间不足导致容器文件系统初始化失败
-- Docker daemon 与内核版本之间的兼容性问题
-
-**建议操作**：触发 CI 重试（re-run）。如果同一节点持续出现此错误，需由 CI 运维团队检查该构建节点的 Docker daemon 状态和存储空间。
-
-### 方向 2（置信度: 低）
-如果重试后仍然失败且错误变为其他信息，则需要进一步分析下游构建日志。当前仅有 BuildKit 引导阶段的错误信息，无法判断实际 Docker 构建是否会成功。
+这是一个 CI 基础设施偶发故障，无需修改 PR 代码。处理方式：
+- **重试 CI**：重新触发 CI 流水线运行，大概率可以正常通过。
+- 如果重试后仍然失败，需由 CI 运维人员检查构建节点（`ecs-build-docker-x86-hk`）的 Docker 存储驱动状态、磁盘空间或 buildkit 缓存是否损坏。
 
 ## 需要进一步确认的点
-1. CI 重试后是否在同节点或不同节点上复现此错误
-2. 构建节点 `ecs-build-docker-x86-hk` 的 Docker daemon 日志和磁盘空间状态
-3. 该节点上 `moby/buildkit:buildx-stable-1` 镜像是否存在（若镜像损坏也可能导致此异常）
-4. aarch64 架构对应的下游构建 job 是否也失败（本次提供的日志仅覆盖 x86-64 job）
-
-## 修复验证要求
-无。此次失败为 infra-error，PR 代码（Dockerfile、README.md、meta.yml、image-info.yml）无需修改。若重试后 CI 通过，则无需进一步动作；若重试后出现其他错误，需重新分析新的失败日志。
+1. 如果重试 CI 后仍然出现相同错误，需排查构建节点 `ecs-build-docker-x86-hk` 上 Docker daemon 日志，确认是否有 overlay2 存储驱动异常、磁盘空间不足或内核相关错误。
+2. 确认该节点上其他并发构建是否也出现类似错误，以判断是否为节点级故障。
