@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。此失败为 CI 基础设施网络问题（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施故障（infra-error）：aarch64 构建节点在从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 stream reset 和 SSL 连接重置等网络瞬态错误，导致 `vim-common` 包下载重试耗尽后失败。
 
 ## 修改的文件
-无。PR 代码（Dockerfile、README.md、image-info.yml、meta.yml）均正确，无需修改。
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-CI 分析报告确认失败根因是构建节点 `ecs-build-docker-aarch64-04-sp` 与 `repo.openeuler.org` 之间的网络连接不稳定，导致 `yum install` 下载 RPM 包时出现 HTTP/2 流错误（Curl error 92）和 SSL 读取失败（Curl error 56）。PR 仅新增了 brpc 1.16.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件，`yum install` 命令格式正确，包名合法，不存在代码层面的问题。
-
-建议操作：重新触发 CI 构建（retry），在网络状况良好的时间段重试通常可以成功。
+CI 分析报告判定失败类型为 `infra-error`，根因是 `repo.openeuler.org` 的 aarch64 仓库 CDN 节点发生瞬时网络故障。日志显示 173 个包中有 169 个最终成功下载（部分经历重试），仅 `vim-common` 重试耗尽后失败。Dockerfile 中的 `yum install` 包列表语法正确、包名有效，与 PR 改动无关。建议重新触发 CI 构建。
 
 ## 潜在风险
 无
