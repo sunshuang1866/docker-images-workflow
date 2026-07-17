@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: Check阶段缺少shunit2
-- 新模式症状关键词: shunit2: No such file or directory, eulerpublisher, Check test failed
+- 新模式标题: 测试框架shunit2缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
@@ -17,23 +17,22 @@
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
-- 失败原因: CI 编排工具 `eulerpublisher` 在执行 `[Check]` 阶段时，`common_funs.sh` 尝试 source `shunit2` 测试框架，但 `shunit2` 未安装在 CI runner 环境中。
+- 失败位置: CI [Check] 阶段，`common_funs.sh:13` 引用了 `shunit2`
+- 失败原因: CI 运行环境中未安装 shell 单元测试框架 `shunit2`，导致原应执行的 GO 容器功能检查测试直接因脚本依赖缺失而失败
 
 ### 与 PR 变更的关联
-**与本次 PR 变更无关。** 本次 PR 仅新增了一个 Go 1.25.6 的 Dockerfile（`Others/go/1.25.6/24.03-lts-sp4/Dockerfile`）及对应的 README、image-info.yml、meta.yml 条目。Docker 镜像构建和推送均已成功完成（日志中 `#7` 至 `#11` 全部 DONE，`[Build] finished`、`[Push] finished`），失败发生在 CI 工具自身的测试基础设施层，属于 CI 环境问题。
-
-日志中"Error lines"部分出现的 `#7 66.74 go/src/fmt/errors.go` 等行并非错误输出——它们是 `find ... -exec touch ...` 命令的正常文件列表输出，仅仅因为文件名包含 "error" 字符串被 CI 日志解析器误归为错误行。Docker 构建步骤 #7 明确标记为 `#7 DONE 67.8s`，构建成功。
+**与 PR 变更无关。** 证据如下：
+1. Docker 镜像构建（步骤 #6-#10）全部成功完成，无任何错误
+2. 镜像推送（步骤 #11）也成功完成：`[Build] finished`、`[Push] finished` 均在日志中出现
+3. 失败发生在构建完成之后的 `[Check]` 阶段——CI 编排工具 `eulerpublisher` 尝试运行容器功能测试脚本时，测试框架 `shunit2` 在 CI runner 上不可用
+4. PR 变更仅为：新增 Dockerfile、更新 README.md 文档、更新 image-info.yml 元数据、更新 meta.yml 镜像清单——这些改动不会影响 CI runner 上 `shunit2` 的可用性
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 环境中安装 `shunit2` shell 测试框架，确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 能够正常 source 该工具。例如在 runner 初始化脚本中添加 `dnf install -y shunit2` 或通过包管理器安装对应包。
-
-### 方向 2（置信度: 低）
-检查 `eulerpublisher` 的 `common_funs.sh` 中 `shunit2` 的 source 路径是否正确，可能需要调整为 CI runner 上的实际安装路径。
+此失败为 CI 基础设施问题（`infra-error`），与 PR 代码变更无关，Code Fixer 无需处理。需由 CI 运维人员在 executor/runner 环境中安装 `shunit2`（通常通过包管理器安装，如 `yum install shunit2` 或从 GitHub 克隆 `kward/shunit2` 到测试脚本可访问的路径）。
 
 ## 需要进一步确认的点
-- `shunit2` 在 openEuler 24.03-LTS-SP4 的 yum 仓库中对应的包名（可能是 `shunit2` 或其他名称）
-- 其他同类镜像（如 `Others/go/1.25.6/24.03-lts-sp3/Dockerfile` 等）的 CI [Check] 阶段是否也遇到相同问题，以确认是否为该 runner 节点的个例还是系统性缺失
-- 确认 CI runner 镜像模板中是否应预装 `shunit2`，或需在 CI pipeline 配置中新增安装步骤
+- 确认 `shunit2` 在其他 CI runner 节点（x86_64 runner、其他架构的 runner）上是否正常可用
+- 确认本次仅 aarch64 runner 上缺少 `shunit2`，还是所有 runner 均受影响
+- 确认 `shunit2` 是新近从 CI 环境中被意外移除，还是该镜像类型（Others/go）首次在此 CI 环境中触发 Check 流程时暴露的长期缺失
