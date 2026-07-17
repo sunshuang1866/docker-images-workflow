@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败由 openEuler 24.03-LTS-SP4 仓库镜像的 HTTP/2 传输层临时性故障（Curl error 92: INTERNAL_ERROR）导致，与 PR 变更无关。
+无需代码修复。CI 失败属于基础设施层面的瞬态网络错误（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`，根因为 openEuler 24.03-LTS-SP4 官方仓库镜像在 HTTP/2 传输层出现流错误，导致 `gcc-c++`、`cmake-data`、`git-core` 等 RPM 包下载时连接被服务端非正常关闭。Dockerfile 中 `dnf install` 命令语法正确、包名正确，PR 仅为新增 GrADS 2.2.3 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据。该失败与代码无关，属于外部基础设施临时性问题。建议触发 CI 重试。
+CI 失败分析报告已明确判定根因为 openEuler 24.03-LTS-SP4 仓库（repo.****.org）的 HTTP/2 流层内部错误（Curl error 92: INTERNAL_ERROR），属于 CI 构建期间的间歇性网络问题。PR 仅新增了 Dockerfile 和元数据文件，`dnf install` 命令语法正确，包列表完整无遗漏。`cmake-data` 和 `git-core` 在镜像重试后已成功下载，仅 `gcc-c++` 运气不佳导致构建失败。建议重新触发 CI 构建即可通过。
 
 ## 潜在风险
 无
