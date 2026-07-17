@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error，根因是 CI 工具 `eulerpublisher` 的 appstore 预检逻辑将根级文档文件 `README.md` 错误地纳入镜像路径格式校验，与 PR 代码无关。
+CI 基础设施误报：appstore 发布规范预检工具错误地将仓库根目录的 `README.md` 纳入校验范围，与 PR 代码变更无关。
 
 ## 修改的文件
-- 无
+无。本次 CI 失败属于 infra-error，不需要对任何源文件进行代码修改。
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`（置信度：中）。PR #2790 仅修改了根级 `README.md`（更新镜像 Tags 列表），属于纯文档变更。CI 工具 `eulerpublisher` 的 appstore 预检阶段对所有变更文件无条件执行 `{image-version}/{os-version}/Dockerfile` 格式校验，`README.md` 不匹配该模式导致校验返回 FAILURE。这是 CI 基础设施工具的缺陷，不是 PR 代码的问题，无需在源码库中进行任何代码修改。
+CI 失败直接原因为 `eulerpublisher/update/container/app/update.py:273` 中的 appstore 路径校验逻辑误将仓库根目录的 `README.md` 纳入检查范围。PR #2790 的变更仅限于更新根目录 `README.md` 中的镜像 Tag 列表，不涉及任何 Dockerfile、meta.yml 或应用镜像目录中的文件。该错误属于 CI 基础设施/工具层面的缺陷，应由 CI 维护团队修复工具校验逻辑（如将根目录文档排除在 appstore 路径检查列表之外）。
 
 ## 潜在风险
-无 — 未修改任何源码文件。
+无
