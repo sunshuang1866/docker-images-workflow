@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 `eulerpublisher` 工具的路径校验逻辑误报（infra-error），该工具对根目录下的 `README.md` 路径归一化存在缺陷，错误地报告 `Path Error: The expected path should be /README.md`。
+无需代码修改。此失败为 **infra-error**（CI 基础设施问题）。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告指出失败类型为 lint-error（置信度低），两个修复方向均指向 CI 基础设施问题：
-- 方向 1：`eulerpublisher` 路径校验未正确归一化路径前导 `/`（将 `README.md` 与 `/README.md` 视为不同路径），或对纯文档类 PR 存在未处理的情况。
-- 方向 2：CI 工具在检测变更文件时可能存在偏差（日志仅检测到 `README.md`，但实际 PR diff 包含两个文件）。
+CI 失败是由 `eulerpublisher` 工具的 appstore 发布规范预检引起的。该工具将仓库根目录的 `README.md` 误纳入 appstore 级路径规范校验（预期路径 `/README.md` vs 实际路径 `README.md` 的字符串比对失败）。
 
-PR #2790 仅修改了 `README.md` 中的基础镜像 Tags 列表（新增 `25.09`、`24.03-lts-sp3`、`24.03-lts-sp2` 条目并更新 `latest` 别名），内容合规、文件路径正确。错误来源于 CI 的 `eulerpublisher/update/container/app/update.py:273` 路径校验逻辑，该文件不在 PR 变更范围内。此问题需由 CI 维护者修复 `eulerpublisher` 工具的路径校验规则。
+PR #2790 仅修改了 `README.md`（更新 Tags 列表条目），不涉及任何 Dockerfile、meta.yml、image-list.yml 或应用镜像相关文件。仓库根级 README 不应受 app 级路径规范约束，这属于 CI 工具 `eulerpublisher/update/container/app/update.py:273` 对变更文件作用域判断的缺陷。
+
+修复应在 CI 基础设施侧完成（过滤掉非应用镜像目录下的文件），而非在源代码仓修改。
 
 ## 潜在风险
-无。PR 源码无需改动，风险在于 CI 工具可能对后续纯文档类 PR 继续产生误报，需 CI 维护者处理。
+无
