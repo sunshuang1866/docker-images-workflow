@@ -1,18 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 **infra-error**：CI runner 环境缺少 `shunit2` 测试框架，导致容器功能测试 [Check] 阶段无法执行，与 PR #2839 的代码变更无关。
+CI 基础设施问题（infra-error）：CI Runner 上缺少 `shunit2` 测试框架，导致 eulerpublisher 的 [Check] 阶段无法启动容器功能测试。此问题与 PR 代码变更无关，无需修改代码。
 
 ## 修改的文件
-无。PR 涉及的所有文件（Dockerfile、entrypoint.sh、README.md、meta.yml）均已在构建阶段成功通过，无编译错误或镜像构建错误。
+无
 
 ## 修复逻辑
 CI 分析报告明确指出：
-- PostgreSQL 17.6 源码编译通过，Docker 镜像构建成功并已推送
-- 失败仅发生在构建后的 [Check] 阶段，由 `eulerpublisher` 编排工具运行测试时找不到 `shunit2` 导致
-- 根因是 CI 基础设施问题（`shunit2` 未安装在当前 CI runner 上），而非 PR 代码问题
+- Docker 镜像构建（#8 DONE）和推送（#11 DONE）均成功完成。
+- 失败发生在构建/推送之后的 [Check] 阶段，根本原因是 CI Runner 环境中未安装 `shunit2`（Shell 单元测试框架）。
+- 根因属于 CI 基础设施配置缺失，与 PR 新增的 `postgres 17.6` 在 `openEuler 24.03-lts-sp4` 上的 Dockerfile、entrypoint.sh、meta.yml 和 README.md 变更无关。
 
-此问题需要在 CI runner 层面解决（安装 `shunit2` 包），或由 CI 平台维护者更新 runner 镜像清单，不涉及源代码修改。
+修复应由 CI 基础设施团队在 Runner 环境中安装 `shunit2`（如 `yum install shunit2` 或从 GitHub 获取），PR 代码本身无需也不应做任何修改。
 
 ## 潜在风险
-无。未作任何代码修改。
+无（未修改任何代码）
