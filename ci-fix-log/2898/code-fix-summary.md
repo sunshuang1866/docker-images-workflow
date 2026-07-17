@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于基础设施问题（`infra-error`）：CI Runner 环境中缺少 `shunit2` 测试框架，导致 eulerpublisher 的 [Check] 阶段无法执行容器验证测试。
+无需代码修复。CI 失败属于基础设施问题（infra-error）：CI 运行环境缺少 `shunit2` 测试框架，导致镜像验证 [Check] 阶段无法执行。PR 的镜像构建和推送阶段均已成功完成，代码变更本身没有问题。
 
 ## 修改的文件
-无。当前 PR 的代码变更（Dockerfile、README.md、image-info.yml、meta.yml）均与 CI 失败无关，Docker 镜像的构建和推送阶段已成功完成。
+无
 
 ## 修复逻辑
-分析报告明确指出失败发生在 CI 编排工具 `eulerpublisher` 的 [Check] 阶段，根因是 CI Runner 未安装 `shunit2`（Shell 单元测试框架），属于 CI 基础设施维护问题，不涉及本仓库代码修改。报告建议在 CI Runner 环境中通过 `dnf install shunit2 -y` 或手动部署 `shunit2` 脚本到 `PATH` 来解决。
+CI 分析报告明确指出此失败与 PR 变更无关：
+- Docker 镜像构建（#7-#11 步骤）和推送（push）均已成功完成
+- 失败发生在 [Check] 阶段的镜像验证测试环节，原因是 CI runner 环境缺少 `shunit2` 测试框架
+- PR 仅新增了 go:1.25.6 openEuler 24.03-LTS-SP4 的 Dockerfile 及配套文档，属于标准镜像注册操作
+
+修复方向（需运维介入）：在 CI 运行环境中通过包管理器安装 `shunit2`（如 `dnf install shunit2`），或将其加入 CI 基础环境镜像。
 
 ## 潜在风险
 无
