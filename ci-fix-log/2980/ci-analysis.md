@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: DNF镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, dnf install
+- 新模式标题: dnf镜像源HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
 
 ## 根因分析
 
@@ -22,23 +22,19 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 软件仓库镜像在下载 `gcc-c++` RPM 包时出现 HTTP/2 协议层流错误（Curl error 92），重试后所有镜像均失败，导致 DNF 安装退出码为 1。`cmake-data` 和 `git-core` 两个包也遭遇了同类 HTTP/2 错误但在重试后成功下载。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-15`（RUN dnf install 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件仓库镜像在本次构建期间存在 HTTP/2 流不稳定问题，导致 `cmake-data`、`git-core`、`gcc-c++` 三个 RPM 包在下载时均出现 `Curl error (92): Stream error in the HTTP/2 framing layer`。其中 `cmake-data` 和 `git-core` 经 DNF 自动重试后成功，`gcc-c++`（13 MB）两次重试均失败，最终 DNF 耗尽所有镜像重试次数后报错退出。
 
 ### 与 PR 变更的关联
-与 PR 变更**无关**。PR 新增的 Dockerfile 本身在语法和内容上没有问题——`dnf install` 列出的所有包名均为 openEuler 24.03-LTS-SP4 仓库中实际存在的标准包。失败是由于 CI 构建环境与 openEuler 软件仓库镜像之间的 HTTP/2 传输通道出现瞬态故障，属于基础设施层面的网络波动问题。
+**与 PR 代码无关**。本次 PR 仅新增了一个标准的 GrADS Dockerfile（安装依赖 + 编译构建），`dnf install` 命令本身和包列表均正确无误（gcc-c++ 等包在 openEuler 24.03-LTS-SP4 仓库中存在，日志第 724 行确认了 Dependencies resolved 且包列表完整）。失败完全由构建时段的仓库镜像 HTTP/2 传输异常引起，属于 CI 基础设施层面的偶发性网络问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复**。此失败为 `infra-error`（基础设施错误），与 PR 代码变更无关。应直接触发 CI 重跑（retrigger CI build），在网络状况恢复正常后构建即可通过。
-
-### 方向 2（置信度: 低）
-如果该镜像源持续出现 HTTP/2 流错误（非瞬态），可以考虑在 Dockerfile 的 `dnf install` 之前添加网络层面的容错措施，但通常不需要——这属于 CI 基础设施团队或 openEuler 镜像站运维方需要排查的问题。
+**无需修改代码，重新触发 CI 构建即可。** 该失败是 openEuler 软件仓库镜像的 HTTP/2 传输临时不稳定导致的偶发问题，Dockerfile 本身正确无误。在镜像仓库网络恢复后，相同 Dockerfile 可正常通过构建。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）在同时间段是否存在 HTTP/2 服务端故障或负载过高的问题。
-- 如多次重试均失败，可能需要排查 CI 构建节点到该仓库镜像之间的网络链路质量（如代理配置、MTU、HTTP/2 兼容性等）。
+无。日志证据充分，错误信息明确指向仓库镜像 HTTP/2 层传输中断，且与 PR 代码变更无逻辑关联。
 
 ## 修复验证要求
-无需验证。本报告判定为 `infra-error`，Code Fixer 无需处理。
+无需修复。若需验证，重新触发 CI 构建，确认 `dnf install` 步骤在仓库镜像正常时能够完整下载所有 258 个 RPM 包并成功完成即可。
