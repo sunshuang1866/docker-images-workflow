@@ -1,13 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施问题（infra-error）：CI runner 节点缺少 `shunit2` Shell 单元测试框架，导致 [Check] 阶段的容器验收测试无法加载 `shunit2` 依赖而失败。
+**infra-error**：CI [Check] 阶段失败，原因是 CI runner 上 `shunit2` shell 测试框架未安装，与 PR 代码变更无关。无需代码修改。
 
 ## 修改的文件
-无。PR 代码（Dockerfile、httpd-foreground、README.md、image-info.yml、meta.yml）均无问题，Docker 镜像构建和推送阶段均已成功完成。
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-分析报告明确指出：失败发生在 CI 编排层 `eulerpublisher` 的 [Check] 阶段，根因是 CI runner 主机上未安装 `shunit2` 包，与 PR 变更无关。根据任务指令"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"，本次不做任何代码修改。真正的修复应由 CI 基础设施团队在 runner 环境（镜像或节点）中安装 `shunit2` 包（openEuler 上可能为 `shunit2`）。
+CI 分析报告明确指出：
+1. Docker 镜像构建全部成功（`#10 DONE` ~ `#13 DONE`），镜像推送成功（`[Push] finished`）
+2. 错误仅发生在 `[Check]` 阶段 — `common_funs.sh:13` 尝试 `source shunit2` 但该框架未安装在当前 CI runner 上
+3. PR 新增/修改的文件（Dockerfile、httpd-foreground、meta.yml、README.md、image-info.yml）均为应用镜像相关文件，不涉及 CI 基础设施配置
+
+该问题需要由 CI 运维团队在运行 httpd 镜像 Check 测试的 runner 上安装 `shunit2` 包（或确保 `shunit2` 在 `PATH` 可访问），与本次 PR 提交的代码无关。
 
 ## 潜在风险
-无。PR 代码本身正确，Docker 构建和推送已验证通过。
+无
