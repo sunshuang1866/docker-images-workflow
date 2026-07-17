@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 infra-error：openEuler 24.03-LTS-SP4 软件仓库在 aarch64 架构上的 HTTP/2 CDN 流传输不稳定导致 RPM 包下载失败（Curl error 92: INTERNAL_ERROR），与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施错误（infra-error），由 `repo.openeuler.org` RPM 仓库在 aarch64 架构上的 HTTP/2 流传输不稳定（Curl error 92: INTERNAL_ERROR）导致，与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，无需修改任何代码）
+无代码修改。
 
 ## 修复逻辑
-根据 CI 失败分析报告，失败类型为 `infra-error`，置信度高。Dockerfile 内容本身正确无误，失败完全由 `repo.openeuler.org` 的 HTTP/2 流传输瞬时故障导致，多个 RPM 包（git-core、gcc-c++、guile）在 aarch64 runner 上下载时遭遇 `Curl error (92)`，dnf 重试所有镜像后仍失败。解决方案为在 CI 中重新触发构建（retry），或由 CI 基础设施团队排查 aarch64 runner 到 `repo.openeuler.org` 的网络链路。
+CI 分析报告确认此失败为 infra-error：构建节点 `ecs-build-docker-aarch64-04-sp` 在通过 `dnf install` 从 `repo.openeuler.org` 下载 RPM 包（git-core、gcc-c++、guile）时遭遇 HTTP/2 流错误，所有镜像源重试后仍无法完成下载。Dockerfile 内容本身正确无误，PR 仅新增了标准的基础编译工具安装 + vvenc 构建流程。
+
+建议在 CI 中重新触发一次构建（retry），大概率可以成功。
 
 ## 潜在风险
 无
