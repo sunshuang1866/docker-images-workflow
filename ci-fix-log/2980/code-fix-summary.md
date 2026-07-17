@@ -1,13 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败根因为 openEuler 24.03-LTS-SP4 RPM 仓库服务端 HTTP/2 流层错误（Curl error 92: INTERNAL_ERROR），属于 CI 基础设施瞬态故障，与 PR 代码变更无关。
+无需代码修改。此 CI 失败为 infra-error（基础设施错误），由 openEuler 镜像仓库 HTTP/2 流错误导致 `dnf install` 下载 `gcc-c++` 等 RPM 包失败。
 
 ## 修改的文件
-无。PR 变更的 4 个文件（`Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`、`Others/grads/README.md`、`Others/grads/doc/image-info.yml`、`Others/grads/meta.yml`）均为规范的纯增量变更，Dockerfile 中 `dnf install` 列出的所有包名在目标仓库中均确实存在，无需修改。
+无（未修改任何文件）
 
 ## 修复逻辑
-分析报告判定失败类型为 `infra-error`，置信度高。错误发生在 `RUN dnf install -y ...` 步骤中，`repo.****.org` 仓库服务器在处理 HTTP/2 帧时发生服务端内部错误，导致 `gcc-c++` 等 RPM 包下载失败且所有镜像重试耗尽。该问题与代码无关，应通过重新触发 CI 构建解决。若多次重试后仍持续失败，可考虑在 Dockerfile 的 `dnf install` 前添加 HTTP/2 禁用或下载重试逻辑，但当前阶段不建议修改代码。
+CI 分析报告明确指出：
+- 失败类型为 `infra-error`，置信度中
+- 根因是 Docker 构建过程中 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库下载 RPM 包时遭遇 HTTP/2 流错误（Curl error 92），涉及 `cmake-data`、`git-core`、`gcc-c++` 三个包，其中 `gcc-c++` 重试耗尽后安装失败
+- 与 PR 变更无关：Dockerfile 中的 `dnf install` 命令语法和包名均正确，属于 CI 基础设施侧的网络/服务端问题
+- 修复方向建议：重新触发 CI job 重试构建即可恢复
+
+根据工作流程规定，infra-error 不应通过修改代码来修复，无需强行改动源文件。
 
 ## 潜在风险
-无。
+无
