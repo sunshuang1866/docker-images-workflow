@@ -1,20 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 基础设施问题（false positive）。
+**无需代码修改**。CI 失败为 infra-error，根因是 eulerpublisher 工具的 appstore 发布规范预检脚本（`update.py:273`）对仓库根目录 README.md 的路径校验逻辑存在缺陷（可能对 git diff 输出的路径前缀如 `a/` 与期望的 `/README.md` 进行了过于严格的字符串比对），导致误报 FAILURE。PR #2790 仅包含合法的文档维护操作（在 README.md 中新增可用镜像 Tags 条目 `25.09`、`24.03-lts-sp3`、`24.03-lts-sp2`），与 CI 失败无关。
 
 ## 修改的文件
-无
+- 无（infra-error，无需修改 PR 代码）
 
 ## 修复逻辑
-
-CI 失败根因是 CI 预检工具 `eulerpublisher/update/container/app/update.py` 在扫描 PR 变更文件时，将仓库根目录的 `README.md`（项目级整体说明文档）错误地纳入了 appstore 镜像 README 规范校验，导致 `[Path Error] The expected path should be /README.md`。
-
-根目录 `README.md` 是仓库整体说明文档，其内容结构和存放路径与 appstore 要求的镜像级 README（`{category}/{image}/{version}/README.md`）完全不同，不应受 appstore 发布规范约束。
-
-**正确的修复位置**：CI 工具 `update.py` 中的文件过滤逻辑需要增加对仓库根目录 README 文件的排除规则（如 `README.md`、`README.en.md`），而非在 `README.md` 中做任何修改。
-
-**当前 PR 可修改范围限制**：`pr.changed_files` 仅包含 `README.md`，无法触及 CI 编排工具代码。根据"修复原则"中关于 infra-error 的规定，此场景下无需对源码做任何代码修改。
+CI 分析报告明确判定该失败为 infra-error，置信度中，失败位置在 CI 基础设施工具 eulerpublisher 内部，而非本仓库的任何文件。PR 的变更文件（README.md）内容正确，无需任何改动。此问题应由 CI 团队修复 eulerpublisher 的路径比对逻辑，或添加"仅 README 变更"跳过 appstore 检查的豁免规则。
 
 ## 潜在风险
-无 — 未对代码做任何修改，不影响任何功能。该错误需由 CI 团队在 `eulerpublisher` 工具的 `update.py` 中修复。
+无（未修改任何代码）
