@@ -1,16 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 **infra-error**，根因是 `repo.openeuler.org` 镜像站在构建期间的 HTTP/2 网络波动导致 `yum install` 下载 `vim-common` RPM 包时 Curl error (92) 超时失败，与 PR 代码变更无关。
+无需代码修改。CI 失败属于 **infra-error**，根因是 openEuler 官方 RPM 仓库 (`repo.openeuler.org`) 在 aarch64 架构上的 HTTP/2 传输层间歇性中断，导致 `vim-common` 包下载失败（`Curl error (92): Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`）。
 
 ## 修改的文件
-无。本次 CI 失败属于基础设施问题，不在代码层面修复。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- 失败发生在 `yum install` 从 `repo.openeuler.org` 下载 RPM 包的过程中，属于 openEuler 官方镜像站的临时网络波动。
-- 失败与 PR 新增的 Dockerfile、README 等文件内容无关。
-- 建议操作：等待镜像站网络恢复后重试 CI（Jenkins rebuild）。
+分析报告明确指出失败与 PR 代码变更无关。PR 仅新增了一个标准的 Dockerfile，包含常规的 `yum install` 依赖安装步骤，语法正确、包名有效，与同仓库 `24.03-lts-sp3` 版本逻辑一致。同一次构建中 173 个包有 169 个正常下载，仅 4 个触发网络错误（其中 3 个重试后成功）。建议在 CI 中重新触发构建（retrigger）即可。
 
 ## 潜在风险
 无
