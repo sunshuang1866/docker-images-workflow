@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler 仓库 HTTP/2 流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, HTTP/2 stream, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 镜像站HTTP/2协议异常
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -23,20 +23,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 软件包仓库镜像在 CI 构建期间出现 HTTP/2 协议层面的流中断错误（Curl error 92），导致 `gcc-c++` 13 MB RPM 包经过两次重试后仍下载失败，`dnf install` 整体退出。`cmake-data` 和 `git-core` 也遇到了同样的流错误，但重试后成功下载。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 软件源镜像站在服务端 HTTP/2 协议层面出现异常（`INTERNAL_ERROR (err 2)`），多个包下载时遭遇 `Stream error in the HTTP/2 framing layer`（Curl error 92）。部分包（如 git-core）在重试后下载成功，但 gcc-c++ 在所有镜像重试耗尽后仍然失败，导致 `dnf install` 整体退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 GrADS 2.2.3 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及相关元数据文件。Dockerfile 的 `dnf install` 命令包列表语法正确，与同项目已有的 sp3 版本 Dockerfile 模式一致。失败完全是由 openEuler 官方软件仓库镜像的网络层 HTTP/2 协议问题触发——3 个不同 RPM 包（`cmake-data`、`git-core`、`gcc-c++`）在下载过程中各自遭遇了独立的 HTTP/2 stream 中断，说明是镜像站端的协议处理异常，而非 PR 代码缺陷。
+**此次失败与 PR 代码变更无关。** PR 仅新增了一个 Dockerfile（及其元数据文件），Dockerfile 中 `dnf install` 命令的语法和包名完全正确（已验证：258 个包均通过依赖解析，下载阶段才开始报错）。失败的根本原因是 openEuler 24.03-LTS-SP4 的 RPM 软件源镜像站发生了 HTTP/2 协议层间歇性故障，属于 CI 基础设施问题（infra-error）。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** 这是典型的 `infra-error`——openEuler 24.03-LTS-SP4 仓库镜像在特定时段的 HTTP/2 流处理不稳定，与代码无关。Code Fixer 无需修改任何文件。等待镜像站恢复后重新运行 CI 流水线即可通过。
+**无需修改代码，等待镜像站恢复后重试构建。** 这是典型的 CI 基础设施网络/协议层瞬时故障。至少 3 个不同包（cmake-data、git-core、gcc-c++）在下载时遭遇了相同的 HTTP/2 stream INTERNAL_ERROR，说明问题出在服务端而非客户端或 Dockerfile。其中 git-core 重试后成功，gcc-c++ 多次重试后耗尽镜像失败。建议在镜像站恢复后触发 re-run。
 
-### 方向 2（置信度: 低）
-如果问题持续反复出现（同一镜像站多次触发同类 HTTP/2 错误），可考虑在 Dockerfile 的 `dnf install` 命令中添加 `--retries 5` 或 `--setopt=timeout=120` 参数增强网络容错能力。但鉴于当前日志显示为偶发性的基础设施协议层错误，暂不推荐此类改动。
+### 方向 2（置信度: 低，若镜像站持续故障可考虑）
+若该镜像站长期不可用，可考虑在 Dockerfile 的 `dnf install` 之前修改 `/etc/yum.repos.d/` 中的 repo 配置，将 `repo.openeuler.org` 替换为其他可用镜像站。但当前日志中所有失败 URL 主机名均为 `repo.****.org`（已被脱敏），无法确认具体是哪个镜像托管站点。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 软件仓库镜像（`repo.****.org`）的 HTTP/2 服务在 CI 失败时段是否存在已知故障或维护窗口。
-- 若该镜像持续出现 HTTP/2 流错误，排查 CI 构建节点与镜像站之间的网络代理/负载均衡器是否存在 HTTP/2 协议兼容性问题。
+1. 日志中的 `repo.****.org` 原始域名是什么？是否是 `repo.openeuler.org` 或其他内部镜像站？
+2. 该镜像站的 HTTP/2 故障是间歇性还是持续性？可通过手动 curl 测试特定 RPM 包 URL 的 HTTP/2 连接稳定性确认。
+3. 在相同时间窗口内，其他依赖 openEuler 24.03-LTS-SP4 源做 `dnf install` 的 PR 是否也出现相同错误？（若有多案例可佐证平台级故障）
