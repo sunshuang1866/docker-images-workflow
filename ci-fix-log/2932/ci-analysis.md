@@ -3,17 +3,15 @@
 ## 基本信息
 - PR: #2932 — chore(glibc): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit引导阶段崩溃
-- 新模式症状关键词: Error response from daemon, Could not find the file /, buildx_buildkit, booting buildkit
+- 新模式标题: BuildKit容器启动失败
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit
 
 ## 根因分析
 
 ### 直接错误
 ```
-#0 building with "euler_builder_20260709_205700" instance using docker-container driver
-
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -23,31 +21,28 @@
  > [internal] booting buildkit:
 ------
 ERROR: Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000
-euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 引导阶段（`[internal] booting buildkit`），非任何 Dockerfile 构建步骤
-- 失败原因: Docker daemon 在 buildx 创建 BuildKit 容器后，报告 `Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`，这是一个 Docker 守护进程内部错误，发生在实际构建指令（FROM/RUN/COPY 等）执行之前
+- 失败位置: CI runner `ecs-build-docker-x86-hk` 上 Docker buildx builder 的 `booting buildkit` 阶段
+- 失败原因: Docker daemon 在创建 buildx builder 容器后无法访问其根文件系统 (`/`)，容器启动阶段即失败。这通常是 Docker daemon 存储驱动异常、内核 cgroup/namespace 配置问题或 buildkit 镜像拉取后容器运行时崩溃导致的。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该错误发生在 BuildKit 容器启动/初始化阶段（buildx internal 步骤 `#1`），尚未解析或执行 Dockerfile 中的任何指令。PR 新增的 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`、README.md、image-info.yml、meta.yml 均与此无关。CI 流水线的前置检查（镜像规范校验）已通过，证明元数据文件格式正确。
-
-该错误指向 Docker daemon 或 BuildKit builder（`euler_builder_20260709_205700`）在 runner `ecs-build-docker-x86-hk` 上的容器文件系统初始化异常，可能原因包括：
-- Docker 存储驱动瞬时故障
-- runner 节点磁盘或 inode 耗尽
-- buildx `docker-container` driver 与 Docker daemon 版本兼容性问题
-- BuildKit 容器创建后文件系统未正确挂载
+**与 PR 变更无关。** PR 仅新增了 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 并更新了 README、image-info.yml、meta.yml 等文档文件。Docker buildx builder 容器在 `booting buildkit` 阶段即崩溃，尚未进入 Dockerfile 构建流程——任何 Dockerfile 在此 runner 上都会以相同方式失败。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**重新触发 CI 流水线。** 该错误为 Docker BuildKit 基础设施瞬时故障，与代码变更无关。建议在 CI 系统中对该 PR 重新触发构建（retry/re-run），大概率可以成功通过。
+### 方向 1（置信度: 高）
+**重建/重置 CI runner 上的 Docker buildx builder**。该 runner (`ecs-build-docker-x86-hk`) 上的 buildx builder 实例（`euler_builder_*`）状态异常。操作方式：
+- 登录 CI runner 节点，执行 `docker buildx rm euler_builder_*` 清理残留 builder，随后重新触发 build（CI 会自动重新创建 builder）
+- 或重启 Docker daemon（`systemctl restart docker`）以清理潜在的容器运行时/storage driver 异常状态
 
-### 方向 2（置信度: 低）
-**检查 runner 节点健康状态。** 如果重试后仍反复出现同类错误（`Could not find the file / in container`），应检查 `ecs-build-docker-x86-hk` runner 节点的 Docker daemon 状态、磁盘剩余空间及 inode 使用量，必要时清理 BuildKit 残留容器（`docker buildx prune`）或重启 Docker daemon。
+### 方向 2（可选）
+若方向 1 无效，检查 runner 上 Docker daemon 的存储驱动配置和磁盘空间。`Could not find the file / in container` 可能由 overlay2 存储层损坏或磁盘满导致。
 
 ## 需要进一步确认的点
-1. runner `ecs-build-docker-x86-hk` 在该时间点的 Docker daemon 日志，确认是否有存储驱动异常或 OOM 事件
-2. 同一时间段该 runner 上其他 PR 构建是否也遭遇同类 BuildKit 引导失败，以判断是节点级别还是全局问题
-3. 重试 CI 后观察是否复现，若不再复现则确认为瞬时 infra-error
+- CI runner `ecs-build-docker-x86-hk` 上 Docker daemon 日志（`journalctl -u docker`）中是否有对应时间的存储驱动或 cgroup 错误
+- 该 runner 是否在近期其他 PR 中也出现了相同的 buildx 启动失败（若仅此 PR 受影响，可能是临时性故障，重试即可）
+
+## 修复验证要求
+无需 code-fixer 处理。此为 CI 基础设施故障，需运维介入排查 runner 状态。Code Fixer Agent 应直接跳过此 PR，标记为 infra-error。
