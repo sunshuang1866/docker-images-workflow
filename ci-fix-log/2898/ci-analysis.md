@@ -4,9 +4,9 @@
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39（类似，具体缺失组件不同）
-- 新模式标题: -
-- 新模式症状关键词: -
+- 知识库匹配: 新模式（与模式39「CI工具依赖缺失」同类，但缺失组件不同）
+- 新模式标题: CI测试框架shunit2缺失
+- 新模式症状关键词: shunit2: No such file or directory, common_funs.sh, Check test failed, eulerpublisher
 
 ## 根因分析
 
@@ -20,22 +20,29 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
-- 失败原因: CI 检查阶段的测试框架依赖 `shunit2`（shell 单元测试库）在 CI runner 上不存在，导致 `common_funs.sh` 第 13 行 source 该库时失败。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（CI 测试框架）
+- 失败原因: `eulerpublisher` 工具在 [Check] 阶段对已构建的镜像 `openeulertest/go:1.25.6-oe2403sp4-aarch64` 执行检查时，其测试脚本 `common_funs.sh` 第 13 行尝试加载 `shunit2`（Bash 单元测试框架），但该文件在 CI runner 上不存在，导致测试框架初始化失败，整个构建流程被标记为 FAILURE。
+
+### Docker 镜像构建和推送均成功
+日志中 Docker build 的 5 个步骤（Step 1/5 至 5/5）全部执行成功（`DONE`），镜像导出、推送也全部完成（`[Build] finished`、`[Push] finished`）。失败仅发生在构建完成后的 [Check] 测试阶段，该阶段由 `eulerpublisher` 编排工具驱动，与 Dockerfile 中定义的镜像内容无关。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** Docker 镜像的构建（`#7` ~ `#10` 全部 DONE）和推送（`[Push] finished`）均成功完成，`[Build] finished` 也已确认。失败仅发生在 eulerpublisher 的 `[Check]` 后处理阶段——该阶段尝试运行容器健康检查测试脚本，但 CI runner 宿主机上缺少 `shunit2` 测试框架，属于 CI 基础设施问题，与 PR 新增的 Go 1.25.6 / openEuler 24.03-LTS-SP4 Dockerfile 无关。
+**无关**。PR 变更仅涉及：
+- 新增 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile`（Go 1.25.6 镜像定义）
+- 更新 `Others/go/README.md`（文档表格新增一行）
+- 更新 `Others/go/doc/image-info.yml`（元数据表格新增一行）
+- 更新 `Others/go/meta.yml`（新增版本条目）
+
+这些变更属于标准的新镜像版本添加操作，不涉及 CI 测试框架、`shunit2` 安装脚本或测试配置文件。`shunit2` 是 CI runner 环境上的工具依赖，PR 代码无法影响其可用性。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 的 eulerpublisher 测试运行环境中安装 `shunit2`。`shunit2` 是一个标准的 shell 单元测试框架，可通过系统包管理器或直接下载安装：
-- 确认 `shunit2` 是否应随 eulerpublisher 安装脚本一起部署
-- 或在 CI runner 初始化阶段预先安装 `shunit2`
+在 CI runner 环境上安装 `shunit2`（Bash 单元测试框架）。`shunit2` 通常可通过系统包管理器（`dnf install shunit2`）或从 GitHub releases 获取。安装后确认路径 `/usr/share/shunit2/shunit2` 或 `/usr/local/bin/shunit2` 可被 `common_funs.sh` 的 source 语句正确引用。
 
-此为非代码修复，属于 CI 运维操作，Code Fixer 无需处理。
+### 方向 2（置信度: 低）
+如果 `shunit2` 实际已安装但路径不正确，检查 `common_funs.sh` 第 13 行的 source 路径配置是否需要调整为 CI runner 上的实际 `shunit2` 安装路径。
 
 ## 需要进一步确认的点
-- `shunit2` 是否在其他 CI runner 节点（如 x86_64 构建节点）上同样缺失
-- eulerpublisher 的部署脚本或 requirements 是否遗漏了 `shunit2` 依赖声明
-- 同类 Go 镜像（如 `1.25.6-oe2403sp3`）的检查阶段是否也触发同样的 `shunit2` 缺失错误，以确定这是新环境特有问题还是普遍性基础设施缺陷
+- 确认该 CI runner 节点之前是否成功执行过其他镜像的 [Check] 阶段。如果之前也失败，则 `shunit2` 为全局缺失；如果仅本次失败，可能是该 runner 为新建/重建节点、环境未完整初始化。
+- 检查 `common_funs.sh` 的 source 语句期望的 `shunit2` 路径是多少，确认是否与系统实际安装路径一致。
