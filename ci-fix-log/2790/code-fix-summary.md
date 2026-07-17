@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-CI appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py`）将根级 `README.md` 标记为路径错误（Path Error），导致纯文档 PR 被误判为检查失败。此问题属于 CI 基础设施问题（infra-error），无需在源码仓库中修改代码。
+无需代码修改。CI appstore 发布规范预检脚本（`eulerpublisher/update/container/app/update.py`）对仅包含根级 README.md 变更的纯文档 PR 误触发了 appstore 目录结构校验，属于 CI 基础设施误报（infra-error）。
 
 ## 修改的文件
-无。`README.md` 内容为有效的文档更新（Tags 列表维护），不存在代码 bug 需要修复。
+无
 
 ## 修复逻辑
-- 根因：CI 的 appstore 预检工具扫描 PR diff 中的所有文件，将根级 `README.md`（仓库级别文档）误认为需要符合应用镜像发布规范的制品文件。根级 README 不包含 Dockerfile、meta.yml、image-info.yml 等发布制品，不应受 appstore 路径规范约束。
-- 此问题的修复需要修改 CI 编排层（Jenkins pipeline），在 appstore 预检 job 触发前增加判断逻辑：若 PR diff 中仅包含 `*.md` 文件且无 `Dockerfile`/`meta.yml`/`image-info.yml`/`image-list.yml`，则跳过 appstore 预检。
-- 由于 `eulerpublisher/update/container/app/update.py` 不在 `pr.changed_files` 列表中，且仅在源码仓库层面无法解决此 CI 基础设施问题，因此不进行代码修改。
+- PR #2790 仅更新了 `README.md` 中 Tags 列表的条目（添加 `24.03-lts-sp3`、`25.09` 等），不涉及任何 Dockerfile 或应用镜像目录的新增/修改。
+- 已验证新增 tag 对应的上游镜像站 URL 均可正常访问：
+  - `https://repo.openeuler.org/openEuler-25.09/docker_img/` — HTTP 200，目录列表正常
+  - `https://repo.openeuler.org/openEuler-24.03-LTS-SP3/docker_img/` — HTTP 200，目录列表正常
+- CI 的 appstore 规范检查器检测到 `README.md` 变更后将其纳入校验流程，但根级 README.md 不属于任何 appstore 镜像目录单元（如 `AI/xxx/`），导致路径检查误报 FAILURE。
+- 此 CI 流水线的 appstore 规范检查不适用于纯文档类 PR，真正的修复应在 `update.py` 的 `Difference` 检测逻辑中增加对仅含根级 README 变更 PR 的跳过逻辑。但由于该文件不在 `pr.changed_files` 列表中，且 README.md 本身内容无任何错误，本次无需对源码做任何修改。
 
 ## 潜在风险
-无。未对任何源码文件进行修改，不引入新风险。
+无。README.md 内容变更正确，新增 tag 对应的上游镜像仓库均已就绪可访问。
