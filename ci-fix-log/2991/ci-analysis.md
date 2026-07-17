@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, repo.openeuler.org, dnf install
+- 新模式标题: DNF仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
 
 ## 根因分析
 
@@ -23,18 +23,27 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
-- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上构建时，`repo.openeuler.org` 的 HTTP/2 CDN 服务发生流错误，多个 RPM 包（`git-core`、`gcc-c++`、`guile`）下载均出现 `Curl error (92): Stream error in the HTTP/2 framing layer`。其中 `git-core` 和 `gcc-c++` 经重试后下载成功，但 `guile` 尝试了所有镜像均失败，导致 `dnf install` 整体失败。
+- 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`
+- 失败原因: 在 aarch64 runner 上执行 `dnf install` 时，`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 仓库在 HTTP/2 下载多个 RPM 包时持续发生流错误（Curl error 92），最终 `guile` 包耗尽所有镜像重试次数后下载失败，导致整个 `dnf install` 命令退出码为 1。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 此次 PR 仅新增了一个标准化的 Dockerfile（13 行），其中 `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 是项目中大量 Dockerfile 共同使用的通用依赖安装模式。失败根因为 `repo.openeuler.org` 仓库在 aarch64 架构上的 HTTP/2 服务端流错误，属于 CI 基础设施/网络问题，非代码缺陷。`git-core` 和 `gcc-c++` 也遭遇了同样的 HTTP/2 流错误（仅因重试才成功），进一步佐证这是仓库服务端问题而非单个包的版本或可用性问题。
+**与 PR 变更无关。** 本次 PR 只做了以下操作：
+1. 新增 `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile`（13 行，标准构建流程）
+2. 更新 `README.md`、`doc/image-info.yml`、`meta.yml` 中的元数据条目
+
+Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake` 是标准且正确的写法，失败原因是 `repo.openeuler.org` 仓库服务器在 aarch64 架构构建期间出现 HTTP/2 传输层间歇性故障，导致多个包下载被中断，与 PR 代码变更完全无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复。** 这是一个临时性的 `repo.openeuler.org` 仓库 HTTP/2 基础设施故障。应在 CI 构建环境网络恢复后重试构建（re-trigger CI），预期可通过。如果该问题持续出现，可考虑在 Dockerfile 中配置 dnf 的 HTTP/2 行为（如通过 `/etc/dnf/dnf.conf` 设置 `http2=false` 降级到 HTTP/1.1）或添加备用镜像源，但这属于对仓库基础设施问题的规避性措施，而非对 PR 代码的修复。
+**无需代码修复。** 这是 CI 基础设施问题——openEuler 官方仓库 `repo.openeuler.org` 在构建期间出现 HTTP/2 流错误，属于临时的网络/服务端问题。CI 系统管理员应：
+- 重新触发 CI 构建（retry），在仓库服务恢复正常后应能通过。
+- 如果持续复现，考虑在 CI runner 上配置 dnf 重试策略（如设置 `retries=10` 或 `timeout=300`），或切换到备用镜像源。
+
+### 方向 2（置信度: 低）
+如果该问题在多次 retry 后持续出现在 `24.03-lts-sp4` 仓库上，可能需要在 Dockerfile 的 `dnf install` 前增加镜像源切换逻辑（如先尝试华为云镜像站 `repo.huaweicloud.com/openeuler`），但当前证据不支持此方向——日志中 `git-core` 经过重试后成功下载，说明仓库本身是可用的，只是间歇性网络抖动。
 
 ## 需要进一步确认的点
-- `repo.openeuler.org` 的 OpenEuler-24.03-LTS-SP4/aarch64 仓库 CDN 是否在此期间存在已知故障或维护窗口。
-- 该故障是偶发性还是持续性：可通过 re-trigger CI 或同时段其他 aarch64 构建 job 的成败情况来验证。
-- 若问题持续，可能需要联系 openEuler 基础设施团队排查 `repo.openeuler.org` 的 HTTP/2 CDN 配置。
+- 确认 `repo.openeuler.org` 在构建时段（2026-07-09 14:09 UTC 之后约 28 分钟）是否存在已知的服务降级或 CDN 节点故障。
+- 确认同一时段其他 PR 的 aarch64 构建是否也遇到了相同的 HTTP/2 流错误（如为系统性故障，则无需任何 PR 层面的修复）。
+- 确认 retry 后是否通过——如果 retry 仍然失败且仅限 SP4 仓库，则需要调查 SP4 仓库镜像节点的健康状况。
