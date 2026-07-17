@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败根因为 `repo.openeuler.org` 镜像源下载 RPM 包时出现 HTTP/2 流传输中断（Curl error 92）和 SSL 连接断开（Curl error 56），属于 openEuler 官方镜像源的临时网络故障（infra-error），与 PR 代码变更无关。
+无需代码修复。CI 失败类型为 `infra-error`，根因是 `repo.openeuler.org` 镜像站在构建时段出现临时性网络故障（HTTP/2 stream error、SSL 连接中断），导致 `vim-common` 等 RPM 包下载失败。与 PR #2977 新增的 Dockerfile 代码无关。
 
 ## 修改的文件
-无
+无（infra-error，不涉及代码修改）
 
 ## 修复逻辑
-CI 分析报告判定为 `infra-error`（置信度：高），失败位置在 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11` 的 `yum install` 步骤，但根因是 `repo.openeuler.org` 镜像源网络不稳定，Dockerfile 本身语法和依赖列表均正确（与同类 `24.03-lts-sp3` Dockerfile 一致）。按照规范，infra-error 不应强行修改代码，重新触发 CI 流水线即可解决。
-
-如多次重试 CI 仍持续失败，可考虑在 Dockerfile 中为 `yum install` 添加 `--setopt=retries=10` 等重试参数以提高容错性，但这属于可选的增强措施，非本次修复范围。
+分析报告指出：
+- 失败发生在 `yum install` 从 openEuler 官方仓库下载系统包阶段，属于 CI 基础设施层面的网络问题
+- Dockerfile 中安装的包列表与同仓库已有 SP3 版本一致，包名本身不存在错误
+- 建议重试 CI 构建（trigger rebuild），网络恢复正常后预期能通过
 
 ## 潜在风险
 无
