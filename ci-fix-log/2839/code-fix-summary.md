@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-此 CI 失败为 **infra-error**，无需代码修改。
+CI 基础设施故障：CI runner 环境缺少 `shunit2` 测试框架，导致 [Check] 镜像验证阶段失败。与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出失败类型为 `infra-error`，根因是 CI 测试节点缺少 `shunit2`（Shell 单元测试框架），导致 `eulerpublisher` 的 `[Check]` 阶段无法执行。PR 的 Docker 构建和镜像推送均已成功（`[Build]` 和 `[Push]` 阶段正常完成），失败发生在 CI 基础设施层面，与 PR #2839 的代码变更无关。
-
-该问题需要在 CI runner 的测试节点上安装 `shunit2` 包（如通过 `yum install shunit2`），属于 CI 运维团队负责的基础设施问题，Code Fixer 不应修改任何 PR 代码。
+CI 分析报告明确指出：
+- 失败类型为 **infra-error**（基础设施错误）
+- 根因与 PR 变更**无关**：Docker 镜像构建和推送均成功，失败仅发生在后续的 `[Check]` 验证阶段，原因是 CI runner 环境中不存在 `shunit2` 可执行文件（`common_funs.sh:13: shunit2: No such file or directory`）
+- 修复方向：由 CI 运维人员在 runner 环境中安装 `shunit2` 测试框架，无需对 PR 涉及的代码文件（Dockerfile、entrypoint.sh、README.md、meta.yml）做任何修改
 
 ## 潜在风险
-无
+无。无需修改任何代码文件。
