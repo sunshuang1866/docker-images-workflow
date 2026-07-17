@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施瞬时故障，无需修改 PR 代码。
+CI 失败为基础设施错误（infra-error），无需代码修改。
 
 ## 修改的文件
-无
+无。本次失败为 CI Runner 上 Docker BuildKit builder 容器初始化时的瞬时故障：`Could not find the file / in container buildx_buildkit_euler_builder_*`。该错误发生在 Dockerfile 解析和执行之前，与 PR 代码变更无关。
 
 ## 修复逻辑
-CI 失败分析报告判定为 `infra-error`，置信度: 高。错误发生在 Docker buildx 启动 builder 实例（`buildx_buildkit_euler_builder_20260709_2057000`）的 bootstrapping 阶段（`[internal] booting buildkit`），报 `Could not find the file / in container`。这是 Docker daemon 存储驱动/文件系统层面的瞬时故障（容器创建后 rootfs 不可达），此时 Dockerfile 中的任何指令尚未被调度执行。
-
-该错误与 PR #2932 的代码变更（新增 glibc openEuler 24.03-LTS-SP4 Dockerfile 及文档）无关。建议重试 CI job（re-trigger）。
+CI 分析报告（置信度: 高）指出根因为 BuildKit 内部容器启动失败，属于 Docker daemon 基础设施层的问题。PR 的 Dockerfile 语法检查已通过（eulerpublisher 验证通过），且 PR 仅新增 glibc 2.42/24.03-lts-sp4 的标准构建文件和文档条目。建议在 CI 平台上重新触发该 workflow 运行即可。
 
 ## 潜在风险
-无
+无。未修改任何代码。
