@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器优雅终止
-- 新模式症状关键词: graceful_stop, no builder found, closing transport due to: connection error, rpc error
+- 新模式标题: BuildKit Builder 崩溃
+- 新模式症状关键词: graceful_stop, closing transport, connection error: EOF, no builder found, buildkit, rpc error: code = Unavailable
 
 ## 根因分析
 
@@ -19,21 +19,26 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4]`，即 `dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel` 执行过程中
-- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 DNF 包安装时被优雅终止（GOAWAY 帧 `debug_data: "graceful_stop"`），导致 RPC 连接断开，后续尝试访问该 builder 时回报 `no builder found`。此为 CI 基础设施层面问题，与 PR 代码变更无关。
+- 失败位置: 构建步骤 `[2/4]`（dnf install 阶段，约第 38 秒处）
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据时收到 `graceful_stop` 信号后意外终止，导致 gRPC 连接断开（`closing transport due to: connection error: EOF`），后续构建步骤无法找到该 builder。
 
-### 与 PR 变更的关联
-**无关**。PR 仅新增了一个标准的 Dockerfile（安装基础编译工具 → 编译安装 Python 3.9.19 → pip 安装 scann）以及对应的 README / meta.yml / image-info.yml 元数据文件。Dockerfile 的前几行（`dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）是该仓库中最常见、被数百个其他 Dockerfile 使用的基础包安装命令，不存在语法错误或逻辑问题。构建在进行到 DNF 下载元数据阶段（约 39 秒）时，BuildKit builder 被外部机制关闭，属于基础设施故障。
+## 与 PR 变更的关联
+
+**与 PR 无关。** 该失败是 CI 基础设施层面的 BuildKit daemon 崩溃。
+
+- BuildKit builder 在正常执行 `RUN dnf install`（安装 gcc、gcc-c++、make、wget 等标准编译工具链）的过程中被 `graceful_stop` 信号终止。
+- PR 新增的 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）语法正确，所安装的包均为 openEuler 24.03-LTS-SP4 标准仓库中的合法软件包（gcc、gcc-c++、make、wget、openssl-devel、bzip2-devel、zlib-devel），不存在会导致 BuildKit 崩溃的非法指令或依赖错误。
+- 构建失败发生在第一步 `dnf install` 的元数据下载阶段（约第 38 秒），尚未到达 `wget Python`、`./configure && make` 或 `pip install scann` 等后续步骤，失败点早于任何与 PR 特有内容相关的逻辑。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。BuildKit builder 优雅终止（`graceful_stop`）通常由以下原因之一导致：
-- builder 所在节点资源不足（内存/磁盘耗尽触发 OOM killer 或节点驱逐）
-- builder 实例因节点维护/缩容被调度系统主动回收
-- builder 命中了 pod/容器级别的存活时间限制
-
-PR 代码本身无问题，仅需在基础设施稳定后重新运行 CI 流水线。若重试后仍然失败，需由 CI 运维团队排查 `euler_builder_*` 实例所在节点的资源状况。
+**无需代码修复。** 该失败为 CI 基础设施问题（BuildKit builder 意外终止），与 PR 代码变更无关。建议触发 CI 重试（re-run / re-trigger）以确认构建能否正常通过。若多次重试仍复现，需排查 CI 基础设施：
+- BuildKit daemon / Docker 宿主机是否存在资源压力（内存不足触发 OOM Kill）
+- CI 节点是否在构建期间发生驱逐或维护操作
+- 是否存在编排层超时配置过短导致 BuildKit builder 被提前回收
 
 ## 需要进一步确认的点
-- 无需进一步确认。错误信息明确指向 BuildKit builder 实例在外部被终止，PR 代码变更未进入实际编译/安装阶段即已中断，不存在代码层面的根因。
+- BuildKit builder 进程被 `graceful_stop` 终止的具体原因：是否为 CI 编排层面的超时、资源限制触发 OOM Kill、或节点调度/驱逐。
+- 若重试后问题消失，则确认为临时性基础设施抖动，无需额外处理。
+- 若重试后持续失败，需获取 CI runner 宿主机的系统日志（dmesg/syslog）确认 OOM Killer 或 docker daemon 异常。
