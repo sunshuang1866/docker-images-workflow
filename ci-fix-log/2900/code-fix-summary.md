@@ -1,17 +1,21 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：CI runner 上缺少 `shunit2` shell 测试框架，导致测试阶段 `[Check]` 失败。与 PR 代码变更无关，无需修改源代码。
+无需代码修改 — CI 失败为基础设施问题（`infra-error`），与 PR 变更无关。
 
 ## 修改的文件
-无。本次 CI 失败属于 infra-error，不在源码修改范围内。
+无
 
 ## 修复逻辑
-- CI 分析报告指出失败根因为 CI runner 环境缺少 `shunit2` 测试框架包，属于 CI 基础设施问题。
-- Docker 镜像构建（步骤 #1–#7）全部成功，镜像推送也已完成。
-- 失败仅发生在构建后的 `[Check]` 测试阶段，原因是 `common_funs.sh` 无法加载 `shunit2`。
-- PR #2900 仅新增了 `Others/httpd/2.4.66/24.03-lts-sp4/` 下的 Dockerfile、启动脚本以及元数据文件，与 CI 测试框架配置无关。
-- 按照指令规定："如果分析报告指出是 `infra-error`，在 output_file 中说明无需代码修改，不要强行改代码"。
+CI 失败分析报告明确指出：失败类型为 `infra-error`，根因是 CI 运行器（`eulerpublisher`）在执行容器功能检查阶段缺少 `shunit2`（Shell 单元测试框架），导致 `common_funs.sh:13` 无法 `source shunit2`，测试框架初始化失败。
+
+该失败与 PR #2900 新增的 Dockerfile、httpd-foreground 脚本及元数据文件完全无关。Docker 镜像的 7 个构建步骤全部成功通过，镜像已正常推送至目标仓库。`[Build] finished` 和 `[Push] finished` 均正常。
+
+根据修复原则中的规定：**infra-error 类失败无需代码修改，不应强行改代码**。
+
+## 修复方向（供 CI 管理员参考）
+1. 在 CI 运行器环境上安装 `shunit2` 包（openEuler 上可通过 `yum install shunit2` 安装，或从 GitHub 获取）
+2. 检查 CI 运行器镜像是否近期升级导致 `shunit2` 被移除，若如此需在环境准备阶段显式重新安装
 
 ## 潜在风险
-无。修复方向为 CI infrastructure 运维操作（在 CI runner 上安装 `shunit2` 包），不涉及任何代码改动。
+无 — 未修改任何代码，无风险。
