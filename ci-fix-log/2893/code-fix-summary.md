@@ -1,17 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败属于基础设施问题（infra-error），与 PR 代码变更无关。
+CI 基础设施问题：CI runner 缺少 `shunit2` Shell 测试框架，无需修改任何 PR 代码文件。
 
 ## 修改的文件
-无
+无。此失败为 infra-error，Docker 镜像构建（12/12 步骤全部成功）和推送均已完成，失败仅发生在构建完成后的 CI 工具链 `eulerpublisher` 的 `[Check]` 阶段。
 
 ## 修复逻辑
-CI 失败分析报告明确指出：Docker 镜像构建（meson 编译 422/422 目标全部成功）和推送均已完成，失败发生在 CI 后处理阶段（[Check] 阶段），原因是 CI Runner 上缺少 `shunit2` Shell 单元测试框架。错误信息为 `common_funs.sh: line 13: .: shunit2: file not found`。
+CI 失败分析报告确认：
+- 失败位置：`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`，source `shunit2` 时文件未找到
+- 失败原因：CI runner（aarch64 架构节点）上缺少 `shunit2` Shell 测试框架
+- 与 PR 代码变更的关系：**无关**。PR 新增的 bind9 Dockerfile 构建完全成功（422/422 个 meson 编译目标通过，镜像已成功推送到 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`）
 
-这不是代码层面的问题，而是 CI Runner（特别是 aarch64 执行节点）的环境依赖缺失。修复需要在 CI Runner 镜像或初始化脚本中安装 `shunit2` 包（例如 `dnf install shunit2`），而非修改本次 PR 中的 Dockerfile、配置文件或元数据文件。
-
-PR 中变更的 5 个文件（Dockerfile、named.conf、README.md、image-info.yml、meta.yml）均无问题，无需进行任何代码修改。
+正确的修复方向是在 CI runner 环境中安装 `shunit2` 测试框架，属于 CI 基础设施维护工作，不在 PR 代码范围内。
 
 ## 潜在风险
-无
+无。未修改任何代码文件。
