@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。CI 失败为基础设施错误（infra-error）：CI runner 环境中缺少 `shunit2` shell 测试框架，导致 `eulerpublisher` 的 `[Check]` 阶段无法执行。
+无需代码修复。CI 失败为基础设施问题（`infra-error`），CI runner 环境缺少 `shunit2` shell 单元测试框架，与 PR 代码变更无关。
 
 ## 修改的文件
-无需修改任何代码文件。Docker 镜像构建和推送均已成功（日志中 `[Build] finished`、`[Push] finished`），本次 PR 的 Dockerfile 及配置变更无问题。
+无。PR 涉及的文件（Dockerfile、README.md、image-info.yml、meta.yml）均无需修改。
 
 ## 修复逻辑
-此 PR 仅新增 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile` 及相关配置条目，属于常规的应用镜像新增。CI 失败发生在 `eulerpublisher` 编排工具的 `[Check]` 阶段——`common_funs.sh` 尝试 source `shunit2` 但该工具未安装在 CI runner 上，与本次 PR 代码变更完全无关。
-
-需要运维侧在 CI runner 环境中安装 `shunit2`（如通过 `dnf install -y shunit2`），或在 CI pipeline 配置中新增 shunit2 安装步骤。
+1. Docker 镜像构建（步骤 #6-#10）全部成功，镜像推送（步骤 #11）也成功。
+2. 失败发生在构建完成后的 `[Check]` 阶段，`eulerpublisher` 调用 `common_funs.sh` 脚本时因 `shunit2` 不可用而失败。
+3. 该错误与 PR 新增的 Go 1.25.6 / openEuler 24.03-LTS-SP4 Dockerfile 及配套元数据文件完全无关。
+4. 需由 CI 运维人员在 executor/runner 环境中安装 `shunit2`（如 `yum install shunit2` 或从 GitHub 克隆 `kward/shunit2`）。
 
 ## 潜在风险
-无
+无。未进行任何代码修改。
