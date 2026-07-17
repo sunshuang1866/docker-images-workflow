@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施问题（infra-error）：BuildKit builder `euler_builder_20260709_224657` 在构建过程中被外部 graceful_stop 关闭，导致 RPC 连接断开。
+无需代码修改。CI 失败为基础设施问题（infra-error），与 PR 代码无关。
 
 ## 修改的文件
-无（基础设施问题，与 PR 代码无关）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出失败类型为 `infra-error`，根因是 BuildKit 构建器节点在执行 `dnf install` 阶段被运维操作/资源回收/节点故障主动关闭（发送 GOAWAY 帧），与 PR 新增的 Dockerfile、README、meta.yml 等文件内容无关。Docker build 已成功拉取基础镜像并开始 dnf 安装步骤，无语法或内容错误。修复方向为重新触发 CI 流水线，无需修改任何代码。
+CI 失败分析报告确认该失败为 BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被优雅关闭（`graceful_stop`），导致 RPC 连接中断。PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及配套的 README.md、image-info.yml、meta.yml 更新，Dockerfile 语法正确，失败发生在基础设施层，属于 CI 平台侧的瞬时故障，与本次 PR 的任何代码变更均无关联。
+
+**修复方式**: 重新触发 CI 构建即可。
 
 ## 潜在风险
 无
