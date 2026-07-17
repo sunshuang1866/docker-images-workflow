@@ -4,8 +4,8 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式（与模式39"CI工具依赖缺失"概念相似）
-- 新模式标题: shunit2测试框架缺失
+- 知识库匹配: 新模式
+- 新模式标题: shunit2 测试框架缺失
 - 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
@@ -19,27 +19,23 @@
 | Check Items | Description | Check Result |
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
+Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13
-- 失败原因: CI 运行环境中缺少 `shunit2`（Shell 单元测试框架），导致 `eulerpublisher` 的 [Check] 阶段无法执行镜像验证测试，所有测试项结果为空（如上表所示）
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI Runner 环境中缺少 `shunit2` Shell 测试框架，导致 [Check] 阶段无法执行 PostgreSQL 镜像的启动/功能验证测试。Docker 镜像的构建和推送均已完成且成功（日志中 `[Build] finished`、`[Push] finished` 及 `#11 DONE 58.0s` 均为成功标志）。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 证据如下：
-1. Docker 镜像**构建成功**（`#8 DONE 268.4s`，所有 `make install` 步骤均正常完成）
-2. Docker 镜像**推送成功**（`#11 pushing layers 43.0s done`，`[Push] finished`）
-3. 失败仅发生在 CI 工具链的 [Check] 阶段——`eulerpublisher` 测试框架试图 source `shunit2` 时发现该工具在 CI runner 上未安装
-4. PR 仅新增了 Dockerfile、entrypoint.sh 及更新 meta.yml/README.md，不涉及任何 CI 基础设施配置变更
+**与 PR 无关**。PR 新增了 postgres 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和 entrypoint.sh，镜像构建阶段（`./configure && make -j "$(nproc)" && make install` 及后续 `COPY`/`RUN chmod` 步骤）全部顺利通过，镜像已成功推送到 docker.io。失败发生在 CI 流水线工具 `eulerpublisher` 的 [Check] 阶段，该阶段调用 `common_funs.sh` 脚本行 `source shunit2` 时因 CI Runner 未安装该 Shell 测试框架而报错。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-此为 **CI 基础设施问题**，需由 CI 运维团队在 runner 上安装 `shunit2` 包后重试。Code Fixer 无需处理，PR 的 Dockerfile 代码无需修改。
+在 CI Runner 环境中安装 `shunit2` Shell 测试框架（如通过 `dnf install shunit2` 或 `yum install shunit2`），使 `common_funs.sh` 能正确 source 该库并执行 PostgreSQL 镜像的冒烟测试。此为纯 CI 基础设施问题，无需修改 PR 中的 Dockerfile 或 entrypoint.sh。
 
 ## 需要进一步确认的点
-- 确认 CI runner 环境中 `shunit2` 的安装方式（通过系统包管理器安装或作为 eulerpublisher 的依赖安装）
-- 确认同一 CI 环境中其他 postgres 镜像的 [Check] 阶段是否同样受此影响，以判断是全局 runner 问题还是特定镜像配置触发的问题
-
-## 修复验证要求
-无需 code-fixer 介入。此失败为 infra-error，修复方向为 CI 环境运维层面（安装 shunit2），不涉及代码变更。
+- 该 CI Runner 上是否应该预装 `shunit2`？是本次构建节点未正确配置，还是此节点的标准环境就不包含 `shunit2`？
+- 同类仓库中其他 PR 的 [Check] 阶段是否也因同样原因失败？若为全局性问题，则需在 CI Runner 镜像/置备脚本中补充 `shunit2` 的安装步骤。
