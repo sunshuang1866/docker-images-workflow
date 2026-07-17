@@ -1,13 +1,23 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复 — 本次 CI 失败为基础设施错误（infra-error），与 PR 代码变更无关。
+无需代码修改 — 此失败为 CI 基础设施瞬时故障（infra-error）。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认失败类型为 `infra-error`，根因是 Docker BuildKit 构建器 `euler_builder_20260709_224657` 在镜像构建进行到第 2/4 步（`dnf install` 下载仓库元数据期间）被主动优雅关闭（`graceful_stop`），构建器实例随后被移除。该错误与 PR #2994 新增 openEuler 24.03-LTS-SP4 支持（Dockerfile、README.md、image-info.yml、meta.yml）完全无关，属于 CI 基础设施层面的构建器生命周期管理问题（可能由资源回收、超时或节点调度策略触发）。建议重新触发 CI 运行（retry）。若多次重试后仍反复出现，需排查 CI 节点的 BuildKit 构建器资源配额、超时配置或节点健康状态。
+CI 失败分析报告确认根因为 BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被意外 `graceful_stop`（gRPC 连接丢失），而非 Dockerfile 或 PR 代码变更引入的问题。
+
+具体错误：
+```
+ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
+ERROR: no builder "euler_builder_20260709_224657" found
+```
+
+该错误发生在 `RUN dnf install -y ...` 步骤下载 OS 仓库元数据中途（约 38 秒），与 Dockerfile 中 `dnf install` 的依赖包列表正确性无关。PR 新增的 Dockerfile 语法和元数据文件均正确无误。
+
+**建议操作**：重新触发 CI 构建。若新构建在相同步骤成功完成，即可确认本次为瞬时基础设施故障。
 
 ## 潜在风险
-无 — 未修改任何代码。
+无
