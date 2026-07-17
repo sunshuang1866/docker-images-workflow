@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：`repo.openeuler.org` 镜像站 aarch64 节点 HTTP/2 传输层不稳定导致 `yum install` 下载 RPM 包失败（Curl error 92/56），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施错误（infra-error）：`repo.openeuler.org` 在 aarch64 runner 上出现 HTTP/2 协议层间歇性故障（Curl error 92: INTERNAL_ERROR, Curl error 56: SSL_ERROR_SYSCALL），导致 `vim-common` 包下载耗尽重试次数而失败。
 
 ## 修改的文件
-无代码修改。此为 infra-error，Dockerfile 语法和包名均正确，无需改动任何源文件。
+无。PR 代码（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，无需修改。
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`，置信度"高"。Dockerfile 中的 `RUN yum install -y` 命令及其依赖包列表均为有效内容，失败完全由远端镜像站 `repo.openeuler.org` 在构建时段的网络波动（HTTP/2 流内部错误、SSL 连接中断）导致。`vim-common` 包耗尽所有镜像重试后最终失败。此为临时性基础设施问题，建议重新触发 CI 构建。
+分析报告指出：此失败与 PR 代码变更无关。PR 仅新增了标准的 Dockerfile，`yum install` 依赖包名称正确且与 `oe2403sp4` 版本匹配。日志中 `gcc`、`kernel-headers`、`perl-MIME-Base64` 三个包同样遭遇 curl error 92/56 但重试后均下载成功，说明这是远程仓库的间歇性网络问题，`vim-common` 仅因重试次数耗尽而最终失败。**重新触发 CI 构建即可。**
 
 ## 潜在风险
-无
+无。
