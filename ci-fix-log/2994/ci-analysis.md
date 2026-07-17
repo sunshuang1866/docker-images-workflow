@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 被终止
-- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, Unavailable
+- 新模式标题: BuildKit Builder 异常终止
+- 新模式症状关键词: graceful_stop, closing transport, no builder found, buildkit, rpc error
 
 ## 根因分析
 
@@ -19,20 +19,17 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 #7（`dnf install` 系统包安装阶段）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在实际构建启动仅约 39 秒后被外部终止（收到 `graceful_stop` 的 gRPC GOAWAY 信号），随后构建客户端失去 builder 连接，构建中断。
+- 失败位置: Docker build 步骤 `#7 [2/4]`，`dnf install` 命令执行期间
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载 openEuler 24.03-LTS-SP4 的 RPM 元数据过程中（约 38 秒后）被异常终止。错误信息中的 `goaway: code: NO_ERROR, debug data: "graceful_stop"` 表明构建器收到了正常的停止信号（可能是节点回收、资源配额触发或调度器主动终止），导致连接中断，随后构建器实例被完全移除，Docker build 无法继续。
 
 ### 与 PR 变更的关联
-**无关**。PR 仅新增了一个 Dockerfile（为标准 `scann 1.4.2` 镜像添加 `24.03-lts-sp4` 变体）及配套的 README、image-info.yml、meta.yml 更新。构建在 DNF 安装基础系统包阶段即失败，远未到达运行 PR 特有任何自定义逻辑的阶段。该错误是 CI 基础设施侧的 BuildKit builder 资源被回收/超时/节点漂移导致的，与 PR 代码内容无因果关系。
+**与 PR 无关。** 本次 PR 新增的 Dockerfile 内容语法正确，CI 的镜像规格预检也已通过（`The image specification check for releasing on appstore has passed`）。构建失败发生在 BuildKit 基础设施层面——构建器实例在 dnf 安装软件包的过程中被外部力量异常终止，属于 CI 运行环境的偶发性不稳定问题，与代码变更无关。`dnf install` 步骤正在正常工作（下载 OS 仓库元数据，速率 77 kB/s），并未出现任何代码逻辑错误或编译失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建即可**。该失败属于 CI 基础设施的偶发性 builder 回收问题，无需修改任何 Dockerfile 或代码。在 CI 界面重新触发该 job 即可，多数情况下重试后能正常通过。
-
-### 方向 2（置信度: 低）
-若多次重试后仍在同一阶段（`dnf install` 下载 repo metadata）超时失败，可能是 `dlcdn.apache.org` 源或其他 openEuler 仓库在当前 builder 节点的网络连通性存在问题，可考虑临时换源处理。
+**无需修复代码。** 这是 CI 基础设施的偶发性问题（BuildKit builder 被异常回收），与 PR 变更无关。建议重新触发 CI 构建，通常重试即可通过。
 
 ## 需要进一步确认的点
-- 检查该 CI job 是否有构建超时限制（日志中 `dnf install` 步骤从启动到 builder 被终止约 39 秒），若超时阈值设置过低也可能触发 builder 回收。
-- 若该 builder 节点频繁出现 `graceful_stop`，建议排查 CI 集群的资源调度策略（如 builder 闲置时间阈值、节点抢占策略等）。
+- 本次 CI 运行所在的节点 `ecs-build-docker-x86-hk` 是否在此期间发生了节点调度变更或资源回收。
+- 构建器 `euler_builder_20260709_224657` 的终止原因是否为 CI 平台的资源限制（如构建超时、内存 OOM、磁盘不足等），可通过查看 CI 平台的节点事件日志进一步确认。
