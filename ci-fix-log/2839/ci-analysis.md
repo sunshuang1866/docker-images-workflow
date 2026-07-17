@@ -4,32 +4,42 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: shunit2 测试框架缺失
-- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
+- 知识库匹配: 模式39（同类——CI 工具依赖缺失）
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-09 09:40:24,013 - INFO - [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-2026-07-09 09:40:24,021-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
++-------------+-------------+--------------+
+| Check Items | Description | Check Result |
++-------------+-------------+--------------+
++-------------+-------------+--------------+
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI [Check] 阶段引用的测试框架 `shunit2` 在运行环境中不存在，`common_funs.sh` 第 13 行尝试 source/调用 `shunit2` 时失败。Docker 镜像构建和推送均已成功完成（`#8 DONE 268.4s`、`#11 DONE 58.0s`，日志明确显示 `[Build] finished` 和 `[Push] finished`），失败仅发生在构建后的容器功能检查阶段。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（CI 测试框架通用函数脚本，非 PR 代码）
+- 失败原因: CI Runner 上缺少 `shunit2`（Shell 单元测试框架），`eulerpublisher` 的 [Check] 阶段无法运行容器测试。
 
 ### 与 PR 变更的关联
-与本次 PR 的代码变更**完全无关**。PR 仅新增了 PostgreSQL 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和 entrypoint.sh，Docker 构建和推送环节全部成功。`shunit2: No such file or directory` 是 CI Runner 上 `eulerpublisher` 测试框架自身的环境问题，不是 Dockerfile 或构建逻辑导致的。
+**无关**。PR 仅新增了 postgres 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 和 entrypoint.sh，并更新了 README.md 和 meta.yml。Docker 构建和镜像推送均已成功完成（`[Build] finished`、`[Push] finished`、镜像成功推送至 registry）。失败发生在 CI 工具链 `eulerpublisher` 的 [Check] 后测试阶段，与 PR 代码变更无任何关联。
+
+日志中的两个 BuildKit 警告（`LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 26, 30)`）仅涉及 `ENV PGDATA /var/lib/pgsql/data` 和 `ENV PATH ${PATH}:/usr/local/pgsql/bin` 的写法风格，为非致命信息，不是失败原因。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-确认 `eulerpublisher` 测试框架所依赖的 `shunit2` 安装路径是否存在于执行 [Check] 的 CI Runner 上。若缺失，需由 CI 管理员在 Runner 镜像中安装 `shunit2` 或将 `shunit2` 脚本部署到 `common_funs.sh` 期望的路径下。此问题非代码层面可修复，Code Fixer 无需操作。
+CI Runner 缺少 `shunit2` 工具。需要在 CI Runner 环境中安装 `shunit2`（可通过 `dnf install shunit2` 或 `git clone` 安装），或确保 CI 测试框架的依赖完整。此为纯基础设施问题，**Code Fixer 无需对 PR 代码做任何修改**。
 
 ## 需要进一步确认的点
-1. `common_funs.sh` 中第 13 行对 `shunit2` 的引用方式（是绝对路径、相对路径，还是 `PATH` 查找），以确定安装的目标位置。
-2. 该 CI Runner 上是否其他应用镜像（Database 或其他类别）的 [Check] 阶段也因同样原因失败，还是仅此 Runner 环境有异常。
-3. `shunit2` 是否曾经被部署过但因 Runner 镜像更新而丢失。
+- CI Runner 上是否应预装 `shunit2`，还是测试框架应自行提供？检查同类成功仓库（如其他 postgres 版本同仓库的其他 PR）的 CI Runner 配置。
+- `shunit2` 是否在特定的 Runner 标签/节点上可用，而当前构建被调度到了一个未安装 `shunit2` 的节点？
+
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+（不适用——无需修改代码）
