@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 失联
-- 新模式症状关键词: failed to receive status, rpc error, closing transport, graceful_stop, no builder found
+- 新模式标题: 构建器异常终止
+- 新模式症状关键词: `failed to receive status`, `rpc error`, `Unavailable`, `graceful_stop`, `no builder found`
 
 ## 根因分析
 
@@ -19,20 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `#7 [2/4]`，即 `dnf install` 安装系统编译依赖阶段
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf` 下载 OS 仓库元数据（2.8 MB，下载速度仅 77 kB/s，耗时 ~37 秒）过程中意外失联。日志中的 `graceful_stop` 表明 builder 被主动或被动关闭，导致 Docker 构建 RPC 连接中断，构建终止
+- 失败位置: Docker buildx 构建阶段，步骤 `#7 [2/4]`（dnf install），无具体 Dockerfile 行号
+- 失败原因: CI 使用的 buildkit 构建器实例 `euler_builder_20260709_224657` 在 Docker 镜像构建过程中异常终止（`graceful_stop`），导致 RPC 连接中断。该构建器实例在 `dnf install` 下载软件包阶段被关闭，随后查无此实例（`no builder found`）
 
 ### 与 PR 变更的关联
-**无关**。PR 新增的 Dockerfile 内容为标准的 openEuler 镜像构建流程（安装 gcc/make/wget 等编译工具 → 编译 Python 3.9.19 → pip 安装 scann），DNB 安装命令语法正确、参数有效。构建在 `dnf install` 阶段因 BuildKit builder 连接丢失而崩溃，属于 CI 基础设施层面的问题，与 PR 代码变更无任何关联。
+**与 PR 代码变更无关。** 该 PR 仅新增了一个标准的 Dockerfile（安装编译依赖 → 编译 Python 3.9 → pip 安装 scann）、更新了 README.md、image-info.yml 和 meta.yml。所有变更均遵循项目既有模板，不包含任何可能触发构建器崩溃的非标准操作。故障发生在 BuildKit 基础设施层（构建器实例被终止），而非 Dockerfile 执行层（无语法错误、无依赖缺失、无编译失败）。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复**。该失败是 CI 基础设施问题（BuildKit builder 意外失联），Code Fixer 不需要对 Dockerfile 或任何源文件做修改。重新触发 CI 构建即可（若 builder 恢复正常，构建预计能成功通过）。
-
-### 方向 2（置信度: 低，备选）
-如果该 builder 失联问题在同一个 runner（`ecs-build-docker-x86-hk`）上持续复现，可能需要运维排查该节点的 BuildKit daemon 稳定性、网络连接质量（日志中 77 kB/s 的包下载速度异常偏慢，可能暗示网络瓶颈）或 builder 超时/回收策略。
+**触发 CI 重试。** 这是典型的构建基础设施短暂故障（runner 上的 buildkit 守护进程被重启、资源不足导致构建器被驱逐、或网络抖动导致 RPC 连接断开）。PR 代码无需任何修改，重新触发 CI 流水线即可。
 
 ## 需要进一步确认的点
-- 若 CI 重跑后仍然失败在同一位置，需运维确认 `ecs-build-docker-x86-hk` runner 上 BuildKit daemon 的健康状态和资源使用情况
-- `dnf` 下载元数据仅 77 kB/s，远低于正常速度，建议确认 runner 到 openEuler 仓库镜像源之间的网络连通性
+- 确认 CI runner `ecs-build-docker-x86-hk` 在构建时段是否有资源压力（内存/磁盘不足导致 buildkit 容器被 OOM-kill 或驱逐）
+- 确认 buildkit 构建器实例 `euler_builder_20260709_224657` 是否为该 runner 上的共享资源，是否被其他并发构建任务影响
+- 如果重试后仍然失败，需要获取 buildkit 守护进程端日志（而非客户端 RPC 错误）以确定 `graceful_stop` 的根本原因
