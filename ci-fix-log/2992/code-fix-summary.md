@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败根因为 openEuler 24.03-LTS-SP4 repo 镜像服务器的 HTTP/2 协议实现缺陷，属于 CI 基础设施问题（infra-error），与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施问题（infra-error）：openEuler 24.03-LTS-SP4 repo 镜像服务器在处理 HTTP/2 请求时频繁返回 `INTERNAL_ERROR (err 2)`，导致 `dnf install` 下载大型 RPM 包（gcc 34MB）失败。
 
 ## 修改的文件
-无代码文件被修改。
+无。PR 新增的 Dockerfile 语法和内容均正确，无需修改。
 
 ## 修复逻辑
-分析报告明确指出：
-- 失败类型为 `infra-error`（CI 基础设施问题）
-- 直接错误为 `Curl error (92): Stream error in the HTTP/2 framing layer` — openEuler repo 镜像服务器在处理 HTTP/2 请求时频繁返回 `INTERNAL_ERROR (err 2)`，导致大型 RPM 包下载失败
-- 失败与 PR 代码变更无关，Dockerfile 语法和内容完全正确
-- 构建环境中的 Stage-1 阶段也遇到了完全相同的 `Curl error (92)` 错误，进一步证明这是 repo 镜像端的系统性故障
-
-**建议操作**：等待 repo 镜像服务器恢复后重新触发 CI 构建即可。若该错误持续出现，需联系 openEuler 镜像站运维确认 HTTP/2 配置问题。
+根据 CI 失败分析报告，该错误与 PR 代码变更无关。失败根因是 openEuler 24.03-LTS-SP4 的 repo 镜像服务器端 HTTP/2 协议实现缺陷。报告建议的两条修复方向（重试构建 / 降级 HTTP/1.1）置信度均为"低"，且属于基础设施层面的规避方案，不适合在 Dockerfile 中进行代码级修改。应联系镜像站运维确认并修复 HTTP/2 配置问题后重新触发 CI 构建。
 
 ## 潜在风险
 无
