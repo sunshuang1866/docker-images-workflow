@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 被终止
-- 新模式症状关键词: graceful_stop, no builder, closing transport, Unavailable, goaway, connection error, EOF
+- 新模式标题: BuildKit构建器异常终止
+- 新模式症状关键词: graceful_stop, no builder, closing transport, rpc error, Unavailable, euler_builder, docker-container driver
 
 ## 根因分析
 
@@ -19,19 +19,20 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建阶段，步骤 `#7 [2/4]`（`dnf install` 正在下载 OS 元数据时）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被提前终止（GOAWAY 帧携带 `graceful_stop` + `NO_ERROR`）。连接断开后，客户端无法找到该 builder，构建被迫中止。`graceful_stop` 表明这是一次计划内的优雅关闭（如超时、资源回收、调度器清理），而非 builder 自身崩溃。
-
-日志中 `dnf install` 下载速度极慢（77 kB/s，2.8 MB 耗时 37+ 秒），可能是 builder 所在节点网络状况不佳，进而触发了 CI 调度器的超时回收机制。
+- 失败位置: Docker 构建第 2/4 步（`dnf install` 步骤），在下载仓库元数据过程中
+- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 在构建过程中被优雅终止（`graceful_stop`），导致 Docker 客户端与 buildkitd 之间的 gRPC 连接断开，构建中断。该问题属于 CI 基础设施异常，与本次 PR 的代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及相应的元数据文件变更（README.md、image-info.yml、meta.yml），均为常规的添加新 OS 版本支持操作。Dockerfile 内容无语法错误或依赖缺失问题。失败的直接原因是 CI 基础设施层 BuildKit builder 实例被终止，属于 Jenkins + BuildKit 调度环境的稳定性问题。
+无关。本次 PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 以及相应的 README、image-info.yml、meta.yml 更新，均为常规的镜像版本新增操作。构建失败发生在 `dnf install` 系统包安装阶段（下载 openEuler 24.03-lts-sp4 基础镜像的仓库元数据时），尚未执行到 Dockerfile 中任何项目特定的 `RUN` 指令，失败原因完全由 CI 基础设施侧 BuildKit 构建器异常终止导致。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 运行。** 这是典型的 CI 基础设施瞬时故障（builder 被提前回收），与 PR 代码无关。重新运行 CI Job 大概率可以通过。如果反复出现同一问题，则需排查 CI 环境中 `euler_builder_*` 实例的超时配置或网络质量。
+**重试 CI 构建**。该失败为 BuildKit 构建器意外终止，属于不可复现的 CI 基础设施不稳定问题。无需修改任何代码，重新触发 CI pipeline 即可。如果反复出现，需联系 CI 运维团队排查 BuildKit builder 的稳定性（如是否存在内存/磁盘资源不足、构建器超时自动回收、节点维护等）。
 
 ## 需要进一步确认的点
-- `dnf install` 下载速度仅 77 kB/s，需确认 CI builder 节点的网络出口是否存在带宽瓶颈或镜像站连通性问题。
-- 确认 `euler_builder_*` builder 实例的存活时间（TTL）配置是否过短，导致长耗时构建（如从源码编译 Python 3.9.19）在完成前就被回收。
+- 日志中 dnf 下载仓库元数据耗时 38 秒以上（77 kB/s，较慢），建议确认 CI 构建节点到 openEuler 仓库的网络状况是否稳定，不稳定的网络可能导致 buildkitd 因心跳超时被编排层终止。
+- 如需排除网络因素，可查看同一时间段其他 PR 的 x86-64 构建 job 是否也出现类似问题。
+
+## 修复验证要求
+不适用。本失败为 infra-error，无需对代码做任何修改。
