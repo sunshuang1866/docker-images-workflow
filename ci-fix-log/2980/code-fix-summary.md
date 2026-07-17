@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error：openEuler 24.03-LTS-SP4 RPM 仓库镜像在构建时出现 HTTP/2 流错误（Curl error 92），属于远端基础设施短暂故障，与 PR 代码变更无关。
+无需代码修复。CI 失败为基础设施临时故障（openEuler 24.03-LTS-SP4 RPM 仓库镜像 HTTP/2 流协议错误），与 PR #2980 代码变更无关。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 `infra-error`，直接错误为 `dnf install` 过程中多个 RPM 包因 `HTTP/2 stream was not closed cleanly: INTERNAL_ERROR` 下载失败。Dockerfile 本身的语法和包名均正确——日志中 dnf 已成功解析依赖并开始下载 258 个包，40 个包已成功下载，失败完全由远端仓库 HTTP/2 协议层错误引起。按照 infra-error 处理规则，不进行代码修改，建议重新触发 CI 构建。
+CI 失败的直接原因是 `dnf install` 从 `repo.****.org` 下载 `gcc-c++` 包时，仓库服务器返回 HTTP/2 流错误（`INTERNAL_ERROR (err 2)`），两次重试均失败，所有镜像耗尽。同一构建中 `cmake-data` 和 `git-core` 也遭遇相同错误但重试成功。
+
+PR #2980 仅新增了 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`（标准 Dockerfile）及更新了 3 个元数据文件（README.md、image-info.yml、meta.yml），这些变更均不涉及网络配置或仓库源修改，不可能导致 HTTP/2 协议错误。
+
+此问题属于 `infra-error`，建议 re-trigger CI 构建。如果该仓库持续不稳定，可考虑在 Dockerfile 的 `dnf install` 命令中添加 `--setopt=retries=10` 等重试参数以增加容错率，但这不是当前必须的修改。
 
 ## 潜在风险
-无
+无。
