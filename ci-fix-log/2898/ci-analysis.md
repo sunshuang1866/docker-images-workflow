@@ -4,38 +4,47 @@
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39（变体）
-- 新模式标题: （不适用）
-- 新模式症状关键词: （不适用）
+- 知识库匹配: 新模式
+- 新模式标题: shunit2测试框架缺失
+- 新模式症状关键词: shunit2: No such file or directory, common_funs.sh, [Check] test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-09 12:32:49,909 - INFO - [Build] finished
-2026-07-09 12:32:49,909 - INFO - [Push] finished
-2026-07-09 12:32:51,073 - INFO - [Check] checking openeulertest/go:1.25.6-oe2403sp4-aarch64 ...
+#7 DONE 67.8s
+#8 DONE 40.5s
+#9 DONE 1.5s
+#11 DONE 41.9s
+[Build] finished
+[Push] finished
+[Check] checking openeulertest/go:1.25.6-oe2403sp4-aarch64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-2026-07-09 12:32:51,082 - CRITICAL - [Check] test failed
+[Check] test failed
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（CI 测试框架脚本）
-- 失败原因: CI 检查阶段（`[Check]`）的测试脚本 `common_funs.sh` 在 line 13 尝试 source 或调用 `shunit2`（Shell 单元测试框架），但 CI runner 环境中未安装 `shunit2`。Docker 镜像构建（`[Build]`）和推送（`[Push]`）均已完成并成功，失败仅发生在后续的容器功能验证阶段，属于 CI 基础设施环境问题。
+- 失败位置: CI runner（aarch64）上的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI 测试脚本 `common_funs.sh` 第 13 行尝试 `source` 或执行 `shunit2`，但 `shunit2` 测试框架在 aarch64 CI runner 上未安装或不在 `PATH` 中，导致 `[Check]` 阶段直接崩溃
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，以及更新了 README.md、doc/image-info.yml、meta.yml 三个元数据文件。Docker 构建全过程（安装依赖→下载 Go→配置环境→推送镜像）全部成功完成（日志中 #2 到 #11 所有构建步骤均标记为 DONE，Build/Push 阶段均输出 `finished`）。失败发生在 eulerpublisher 工具的容器健康检查脚本中，因 CI runner 缺少 `shunit2` 测试依赖所致。
-
-### 补充说明
-日志开头 "Error lines" 部分的大量 `go/src/.../errors.go` 类输出并非真实错误——这些是 `tar -xvf` 解压 Go 源码包时的文件名列表输出，因路径包含 "error" 关键词被日志收集器误判为错误行。
+PR 变更与 CI 失败**无关**。PR 的改动为纯增量：新增 Go 1.25.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile，及对应的 README、image-info.yml、meta.yml 条目。Docker 镜像的构建（Build）和推送（Push）阶段均已成功完成（#7～#11 全部 DONE），失败仅发生在 `eulerpublisher` 容器测试工具链的 `[Check]` 阶段，该阶段依赖的 `shunit2` 是 CI runner 环境级别的依赖，不受 Dockerfile 内容影响。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 环境中安装 `shunit2`（Shell 单元测试框架）。`shunit2` 通常可通过系统的包管理器安装（如 `dnf install shunit2` 或从源码安装），安装后该 PR 的检查阶段应能正常通过。**此修复属于 CI 运维操作，Code Fixer 无需处理。**
+在 aarch64 CI runner（`ecs-build-docker-aarch64-01-sp`）上安装 `shunit2` 测试框架，或确保其所在路径已被加入 `$PATH`。`shunit2` 是 shell 单元测试框架（通常位于 `/usr/share/shunit2/shunit2` 或类似路径），需要在 runner 层面由 CI 管理员安装配置。类似地将 `shunit2` 包安装命令添加到 aarch64 runner 的 provisioning/初始化脚本中。
+
+### 方向 2（置信度: 低）
+若 `shunit2` 应为 `eulerpublisher` Python 包自带的依赖，检查 `eulerpublisher` 在 aarch64 runner 上的安装是否完整，`pip install eulerpublisher` 是否遗漏了 shell 层面的 `shunit2` 依赖。
 
 ## 需要进一步确认的点
-- 确认同一时间段内其他 PR 是否也因同一 CI runner 缺少 `shunit2` 而失败（判断是单 runner 问题还是全局环境变更）
-- 确认 `shunit2` 是否曾在 CI runner 上安装过但因镜像/环境更新被移除
+1. 同 PR 的 x86_64 架构构建 job 是否也因同样原因失败？还是只有 aarch64 失败？（当前日志仅提供了 aarch64 runner 的输出）
+2. 其他 SP4 镜像（非 Go）的 `[Check]` 阶段在 aarch64 runner 上是否也失败？——这可用于判断问题是本 runner 特有问题还是 SP4 镜像测试的普遍问题
+3. `shunit2` 是 eulerpublisher CI 框架的标准依赖还是需要额外手动安装？在 x86_64 runner 上 `shunit2` 是否已存在？
+4. `common_funs.sh` 中 `shunit2` 的预期安装路径是什么？（如 `/usr/share/shunit2/shunit2` 或 `/usr/bin/shunit2`）
+
+## 修复验证要求
+若修复方向 1 被采纳（CI 管理员安装 shunit2），验证方式：在 aarch64 runner 上重新触发该 PR 的 CI 构建，确认 `[Check]` 阶段不再报 `shunit2: No such file or directory` 且整体 pipeline 通过。
