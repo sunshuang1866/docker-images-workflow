@@ -1,21 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），非代码缺陷。
+无需代码修改。CI 失败为 `infra-error`，根因是 openEuler 24.03-LTS-SP4 镜像站（`repo.****.org`）的 HTTP/2 协议层间歇性故障，导致 `dnf install` 时部分 RPM 包（cmake-data、git-core、gcc-c++等）下载失败。
 
 ## 修改的文件
-无
+无。本次失败不涉及代码问题。
 
 ## 修复逻辑
-CI 失败分析报告确认为 **infra-error**：构建过程中 DNF 从 openEuler 24.03-LTS-SP4 RPM 仓库下载 `gcc-c++` 等包时遭遇 HTTP/2 流层错误（Curl error 92），导致 `dnf install` 失败。
+分析报告已明确指出该失败与 PR 变更无关：PR 仅新增 Dockerfile、README 条目、image-info.yml 条目和 meta.yml 条目，Dockerfile 中 `dnf install` 命令语法正确，包列表与同项目其他已成功构建的 Dockerfile 一致。失败原因是镜像站服务端 HTTP/2 协议层 bug（返回 INTERNAL_ERROR），属于 CI 基础设施问题。
 
-该错误与 PR 代码变更无关：
-- Dockerfile 语法和依赖声明均正确
-- `dnf install` 中的包名均在 openEuler 24.03-LTS-SP4 仓库中真实存在（`Dependencies resolved` 阶段已成功解析全部 258 个包及依赖）
-
-失败根因是 CI runner 与 openEuler RPM 仓库镜像之间的网络传输问题（HTTP/2 协议层瞬时故障）。
-
-**建议操作**：重试 CI 构建即可。若多次重试仍失败，需排查 CI runner 到目标仓库的网络连接质量。
+## 建议操作
+1. 重新触发 CI 构建，等待镜像站恢复
+2. 若多次重试仍持续失败，可考虑在 Dockerfile 的 `RUN dnf install` 前添加 `RUN echo "http2=false" >> /etc/yum.conf` 作为临时绕过方案
+3. 联系 openEuler 基础设施团队确认 `repo.****.org` 镜像站的可用性状态
 
 ## 潜在风险
 无
