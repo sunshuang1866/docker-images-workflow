@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error），由 openEuler 软件源 `repo.openeuler.org` 的 HTTP/2 服务端间歇性流错误（`INTERNAL_ERROR`）和 SSL 连接中断（`SSL_ERROR_SYSCALL`）导致 aarch64 构建节点下载 RPM 包失败。
+CI 基础设施故障：`repo.openeuler.org` 镜像站 aarch64 节点 HTTP/2 传输层不稳定导致 `yum install` 下载 RPM 包失败（Curl error 92/56），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无代码修改。此为 infra-error，Dockerfile 语法和包名均正确，无需改动任何源文件。
 
 ## 修复逻辑
-分析报告判定失败类型为 `infra-error`，根因是 CI aarch64 runner 从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 协议层传输错误，与 PR 代码变更无关。Dockerfile 语法正确、依赖声明完整。建议重试 CI 构建即可，上游镜像站服务恢复后构建将自动通过。
+CI 分析报告判定失败类型为 `infra-error`，置信度"高"。Dockerfile 中的 `RUN yum install -y` 命令及其依赖包列表均为有效内容，失败完全由远端镜像站 `repo.openeuler.org` 在构建时段的网络波动（HTTP/2 流内部错误、SSL 连接中断）导致。`vim-common` 包耗尽所有镜像重试后最终失败。此为临时性基础设施问题，建议重新触发 CI 构建。
 
 ## 潜在风险
 无
