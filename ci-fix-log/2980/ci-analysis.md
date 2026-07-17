@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, MIRROR, dnf install, gcc-c++
+- 新模式标题: 仓库镜像 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -18,25 +18,20 @@
 #7 1970.5 [MIRROR] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-c%2b%2b-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 83 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
-#7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
 #7 ERROR: process "/bin/sh -c dnf install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
 - 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 仓库镜像（`repo.****.org`）在 dnf 下载 RPM 包时出现 HTTP/2 协议层流错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），多个包（cmake-data、git-core、gcc-c++）受影响。`gcc-c++` 在重试耗尽所有镜像后最终下载失败，导致整个 `dnf install` 命令退出码为 1，Docker 构建失败。
+- 失败原因: CI 构建环境中，openEuler 24.03-LTS-SP4 的 RPM 镜像仓库（`repo.****.org`）在 HTTP/2 传输层频繁出现流中断错误（Curl error 92: INTERNAL_ERROR），导致 `gcc-c++` 等多个包下载失败。其中 `cmake-data` 和 `git-core` 在重试后成功，但 `gcc-c++` 重试两次（stream 65、stream 83）后耗尽所有镜像源，`dnf install` 以 exit code 1 退出。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 GrADS 2.2.3 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套 README、meta.yml、image-info.yml 更新。Dockerfile 中的 `dnf install` 命令语法正确、包列表合理，失败完全源于构建时 openEuler 仓库镜像的 HTTP/2 基础设施临时故障。
+**与 PR 变更无关**。PR 仅新增了一个合法的 Dockerfile（包含标准 `dnf install` 命令）及配套元数据文件（README.md、image-info.yml、meta.yml）。`dnf install` 所请求的 258 个包名和依赖关系均被 DNF 正确解析（"Dependencies resolved"），失败纯粹发生在 RPM 包的网络下载阶段，属于构建基础设施/镜像仓库的网络稳定性问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改 PR 代码。** 这是 CI 基础设施临时故障（openEuler 24.03-LTS-SP4 仓库镜像 HTTP/2 流异常），应重新触发 CI 构建。如果重试后仍然失败，需联系 openEuler 基础设施团队排查 `repo.****.org` 镜像服务的 HTTP/2 代理状态。
+**重新触发 CI 构建**。该失败为 openEuler 镜像仓库的瞬时网络/HTTP/2 连接不稳定导致，是典型的 `infra-error`。`gcc-c++` 包本身在仓库中存在（DNF 已解析其元数据），只是下载过程中 HTTP/2 流异常中断。此类问题通常会随时间自行恢复，重新运行 CI Job 大概率通过。Code Fixer 无需修改任何代码。
 
 ## 需要进一步确认的点
-- 确认 `repo.****.org` 镜像服务在当前时间段是否存在已知的 HTTP/2 协议层故障或维护窗口
-- 确认其他使用 `openeuler:24.03-lts-sp4` 基础镜像的 CI job 是否也出现了类似的 `Curl error (92)` 模式，以排除是单次偶发还是持续性故障
-
-## 修复验证要求
-（无需填写——此为 infra-error，无需代码修复）
+- 无。日志证据充分，错误类型明确为网络基础设施问题。若多次重试 CI 后仍然失败，则需要联系 openEuler 镜像仓库运维排查 HTTP/2 服务端配置或 CDN 节点健康状态。
