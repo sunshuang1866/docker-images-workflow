@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 BuildKit 基础设施异常（builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 阶段被 `graceful_stop` 终止），与本次 PR 代码变更无关。
+无需代码修改。此 CI 失败为基础设施层面问题——BuildKit 构建器 `euler_builder_20260709_224657` 在 Docker 构建的 `dnf install` 阶段（步骤 [2/4]，执行约 38.6 秒时）被意外终止（`graceful_stop`），导致 RPC 连接断开。与 PR #2994 的新增文件（Dockerfile、README.md、image-info.yml、meta.yml）无关，构建远未触及 PR 改动的业务逻辑。
 
 ## 修改的文件
-无
+无。未修改任何文件。
 
 ## 修复逻辑
-CI 分析报告定性失败类型为 **infra-error**。Dockerfile 内容为标准 `dnf install`、Python 源码编译、pip 安装，无语法错误或逻辑问题。构建在 `dnf install` 下载系统包阶段（尚未执行到 PR 特有的 Python 编译或 pip 安装步骤）因 BuildKit builder 被基础设施层优雅关闭而中断。该问题需通过**重新触发 CI** 解决，预期重试后构建可正常通过。
+分析报告结论为 `infra-error`，置信度中。失败由 BuildKit 构建器 Pod/实例意外终止引起，可能原因包括 CI 节点资源不足（OOM）、构建器 TTL 超时、或基础设施计划内维护。按照修复原则，`infra-error` 类型不应强行修改代码。
+
+建议操作：在 CI 系统中重新触发该 job，若重试后通过则确认为偶发性基础设施问题。若反复在相同步骤失败，再考虑调整 `dnf` 超时参数。
 
 ## 潜在风险
-无
+无。未修改任何代码。
