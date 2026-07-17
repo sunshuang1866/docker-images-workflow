@@ -2,57 +2,50 @@
 
 ## 基本信息
 - PR: #3201 — 增加maca-sdk镜像
-- 失败类型: dependency-error
-- 置信度: 高
+- 失败类型: infra-error
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: RPM源元数据GPG签名缺失
-- 新模式症状关键词: repo_gpgcheck, GPG signature is not available, copr, repomd.xml.asc, 404
+- 新模式标题: 第三方仓库下载超时
+- 新模式症状关键词: Curl error (28), Timeout was reached, Operation too slow, Curl error (18), Transferred a partial file, eur.openeuler.openatom.cn
 
 ## 根因分析
 
 ### 直接错误
 ```
-#10 2.579 Errors during downloading metadata for repository 'copr:eur.****.openatom.cn:ObjectNotFound:maca-sdk':
-#10 2.579   - Status code: 404 for https://eur.****.openatom.cn/results/ObjectNotFound/maca-sdk/****-24.03_LTS_SP2-x86_64/repodata/repomd.xml.asc (IP: 121.36.2.159)
-#10 2.579 Error: Failed to download metadata for repo 'copr:eur.****.openatom.cn:ObjectNotFound:maca-sdk': GPG verification is enabled, but GPG signature is not available. This may be an error or the repository does not support GPG verification: Status code: 404 for https://eur.****.openatom.cn/results/ObjectNotFound/maca-sdk/****-24.03_LTS_SP2-x86_64/repodata/repomd.xml.asc (IP: 121.36.2.159)
-#10 288.7 Ignoring repositories: copr:eur.****.openatom.cn:ObjectNotFound:maca-sdk
-#10 289.6 No match for argument: maca-sdk-x86_64
-#10 289.7 Error: Unable to find a match: maca-sdk-x86_64
+#10 558.8 [MIRROR] mccl-3.7.0.38-1.aarch64.rpm: Curl error (18): Transferred a partial file for https://eur.openeuler.openatom.cn/results/ObjectNotFound/maca-sdk/openeuler-24.03_LTS_SP2-aarch64/00111760-maca-sdk-aarch64/mccl-3.7.0.38-1.aarch64.rpm [transfer closed with 44151766 bytes remaining to read]
+#10 692.4 [MIRROR] mcblaslt-3.7.0.38-1.aarch64.rpm: Curl error (28): Timeout was reached for https://eur.openeuler.openatom.cn/results/ObjectNotFound/maca-sdk/openeuler-24.03_LTS_SP2-aarch64/00111760-maca-sdk-aarch64/mcblaslt-3.7.0.38-1.aarch64.rpm [Operation too slow. Less than 1000 bytes/sec transferred the last 30 seconds]
+#10 728.4 [MIRROR] mccl-3.7.0.38-1.aarch64.rpm: Curl error (28): Timeout was reached for https://eur.openeuler.openatom.cn/results/ObjectNotFound/maca-sdk/openeuler-24.03_LTS_SP2-aarch64/00111760-maca-sdk-aarch64/mccl-3.7.0.38-1.aarch64.rpm [Operation too slow. Less than 1000 bytes/sec transferred the last 30 seconds]
+#10 1061.7 [MIRROR] mcblas-3.7.0.38-1.aarch64.rpm: Curl error (28): Timeout was reached for https://eur.openeuler.openatom.cn/results/ObjectNotFound/maca-sdk/openeuler-24.03_LTS_SP2-aarch64/00111760-maca-sdk-aarch64/mcblas-3.7.0.38-1.aarch64.rpm [Operation too slow. Less than 1000 bytes/sec transferred the last 30 seconds]
+#10 1061.7 [FAILED] mcblas-3.7.0.38-1.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
+#10 1061.7 Error: Error downloading packages:
+#10 ERROR: process "/bin/sh -c ARCH=..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `AI/maca-sdk/3.7/24.03-lts-sp3/EUR.repo:5`（`repo_gpgcheck=1` 行）
-- 失败原因: `EUR.repo` 中设置了 `repo_gpgcheck=1`，要求 dnf 验证仓库元数据（`repomd.xml`）的 GPG 签名。但上游 Copr 仓库未提供元数据签名文件（`repomd.xml.asc` 返回 HTTP 404），导致 dnf 拒绝信任该仓库并将其忽略。仓库被忽略后，`maca-sdk-x86_64` 包无法被检索到，`dnf install` 因无匹配包而失败（exit code: 1）。
-
-**完整失败链路**:
-1. `EUR.repo` 中 `repo_gpgcheck=1` 启用仓库元数据 GPG 签名验证
-2. `dnf makecache --refresh` 尝试下载 `repomd.xml.asc`，上游返回 404
-3. dnf 报 "GPG signature is not available"，将仓库标记为忽略
-4. 随后 `dnf install maca-sdk-x86_64` 在所有已启用仓库中找不到该包（"No match for argument"）
-5. 构建失败
-
-注：`gpgcheck=1`（第 5 行的包级 GPG 检查）和 GPG key 的下载导入均正常（日志中可见 "Importing GPG key 0x8E1718BB" 成功），问题仅在于 `repo_gpgcheck=1`（第 8 行的仓库元数据级 GPG 检查）。
+- 失败位置: `AI/maca-sdk/3.7/24.03-lts-sp3/Dockerfile:13`（`dnf install -y --allowerasing maca-sdk-${ARCH}` 步骤）
+- 失败原因: CI 构建环境在 aarch64 runner 上从 `eur.openeuler.openatom.cn`（EUR/Copr 仓库）下载 MACA SDK 组件 RPM 包时，多个大型包（mcblaslt 400MB、mcfft 264MB、mccl 48MB、mcblas 45MB，总下载量 2.4 GB）出现网络超时（Curl error 28）和传输中断（Curl error 18），最终 `mcblas-3.7.0.38-1.aarch64.rpm` 在所有镜像尝试失败后，dnf 报错退出。
 
 ### 与 PR 变更的关联
-**直接关联**：本次 PR 新增了 `AI/maca-sdk/3.7/24.03-lts-sp3/EUR.repo` 文件，其中错误的 `repo_gpgcheck=1` 设置是此次 CI 失败的唯一原因。Dockerfile、meta.yml、README.md 等其余新增文件无问题。`#8` 步骤中出现的 `[MIRROR] Curl error (28): Timeout` 是 openEuler 官方源的瞬态网络波动，已被镜像站 failover 自动恢复，不影响最终构建。
+PR 新增了 `AI/maca-sdk/3.7/24.03-lts-sp3/Dockerfile`，其 `dnf install` 步骤依赖 EUR Copr 仓库（`eur.openeuler.openatom.cn`）提供的 MACA SDK RPM 包。Dockerfile 和仓库配置文件本身语法正确，shell case 语句也正确将 `TARGETPLATFORM=linux/arm64` 解析为 `aarch64`。失败完全由第三方仓库的网络传输质量导致，与 Dockerfile 编写逻辑无直接关联。
 
-### 次要风险（待修复后验证）
-`EUR.repo` 中的 `baseurl` 为 `openeuler-24.03_LTS_SP2-$basearch`，但基础镜像为 `openeuler:24.03-lts-sp3`。虽然 Copr 仓库的包通常不强制绑定特定的 SP 小版本，但如果修复 GPG 问题后 `maca-sdk-x86_64` 能成功安装但运行时出现依赖冲突，需考虑将 baseurl 对应更新为 SP3 路径（前提是上游 Copr 仓库提供了 SP3 构建）。
+额外注意点：`EUR.repo` 中 baseurl 使用的是 `openeuler-24.03_LTS_SP2-$basearch` 路径，但 Dockerfile 基础镜像为 `openeuler/openeuler:24.03-lts-sp3`（SP3），而 repo 路径指向 SP2。当前失败阶段网络错误掩盖了此版本错配问题，但如果后续网络恢复后包依赖与 SP3 基础系统不兼容，可能会引发二次失败。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-将 `AI/maca-sdk/3.7/24.03-lts-sp3/EUR.repo` 第 8 行的 `repo_gpgcheck=1` 改为 `repo_gpgcheck=0`。上游 Copr 仓库未对仓库元数据做 GPG 签名（`repomd.xml.asc` 不存在），禁用仓库级 GPG 检查即可让 dnf 正常读取该仓库的包列表。包级 GPG 检查（`gpgcheck=1`）应保留，因为 `pubkey.gpg` 是可用的。
+### 方向 1（置信度: 中）
+**更换下载源或添加重试机制**。EUR Copr 仓库对大型文件（>100MB）的传输稳定性不足。可尝试：
+- 在 `dnf install` 命令中添加 `--retries 5` 提高下载容忍度
+- 在 `dnf` 配置中增加超时时间（`timeout`、`minrate` 等参数）
+- 调查 MACA SDK 是否有其他官方镜像源或国内镜像可供替代
 
-### 方向 2（置信度: 中）
-如果方向 1 修复后构建仍失败（例如因 SP2 与 SP3 包版本不兼容），则需要联系上游 Copr 仓库维护者（ObjectNotFound）确认是否有针对 openEuler 24.03-LTS-SP3 的专用仓库路径，并将 `baseurl` 中的 `openeuler-24.03_LTS_SP2` 更新为 `openeuler-24.03_LTS_SP3`。
+### 方向 2（置信度: 低）
+**修正 EUR.repo 中的 openEuler 版本号**。当前 `EUR.repo` 引用 SP2 路径（`openeuler-24.03_LTS_SP2`），而 Dockerfile 基于 SP3 镜像构建。如果 MACA SDK 针对 SP3 发布了对应的 repo 路径，应切换为 SP3 对应的仓库（如 `openeuler-24.03_LTS_SP3-$basearch`），以减少潜在的包依赖冲突。
 
 ## 需要进一步确认的点
-1. 上游 Copr 仓库 `eur.openeuler.openatom.cn/results/ObjectNotFound/maca-sdk/` 是否有针对 openEuler 24.03-LTS-SP3 的构建（即 `openeuler-24.03_LTS_SP3-$basearch/` 目录是否存在且包含相同包），若无则当前 SP2 baseurl 已是正确选择。
-2. 确认 `maca-sdk` 包在 Copr 仓库中的实际包名是否为 `maca-sdk`（而非如 `maca-sdk-musa` 等变体名），以验证 `dnf install -y maca-sdk-${ARCH}` 的包名拼写无误。
+1. EUR Copr 仓库（`eur.openeuler.openatom.cn`）对 CI runner 网络是否确实可达但带宽受限？需确认是否 runner 的出口带宽或防火墙规则限制了大文件下载。
+2. 该仓库是否有 SP3 版本的 repo 路径？当前 repo 指向 SP2，而镜像基座是 SP3，存在版本错配风险。
+3. `mxgpu_llvm`（225MB）、`mcflashattn`（849MB）、`mcfft`（264MB）等超大型包的下载在日志中未出现（可能尚未轮到它们下载即已失败），网络恢复后这些包也可能触发同样的超时问题。
+4. 需要确认上游 MACA SDK 包是否支持直接 wget/curl 预下载到构建上下文内，通过 `COPY` 方式绕过 dnf 的网络依赖。
 
 ## 修复验证要求
-修复后，code-fixer 应确认：
-1. dnf 能成功下载 Copr 仓库的元数据（不再出现 "GPG signature is not available" 或 "Ignoring repositories" 日志行）
-2. `dnf install -y --allowerasing maca-sdk-${ARCH}` 能成功找到并安装包
-3. 容器能正常启动并进入 `/bin/bash`（验证 ENTRYPOINT 生效）
+无需特殊验证。若选择修复方向 2（切换 SP2 → SP3 路径），需先确认 `eur.openeuler.openatom.cn` 上是否存在 `openeuler-24.03_LTS_SP3-aarch64` 对应的仓库目录及 RPM 包。
