@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败由 openEuler 24.03-LTS-SP4 上游软件仓库 HTTP/2 连接不稳定导致（Curl error 92: Stream error in the HTTP/2 framing layer），属于 CI 基础设施瞬时故障（infra-error）。
+CI 基础设施问题：openEuler 24.03-LTS-SP4 官方仓库 HTTP/2 连接不稳定，导致 dnf 下载 RPM 包失败。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-分析报告确认：
-- PR 新增的 Dockerfile 语法正确，`dnf install` 包名均有效
-- 失败与 PR 代码变更无关
-- 根因是 openEuler 24.03-LTS-SP4 的 x86_64 OS 软件仓库服务端 HTTP/2 连接间歇性中断，导致多个 RPM 包下载失败
+CI 失败分析报告明确将此归类为 `infra-error`，根因为 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）服务端的 HTTP/2 连接层间歇性中断（HTTP/2 stream 异常关闭 `INTERNAL_ERROR`），与 PR 代码变更无关。PR 仅新增了一个标准格式的 Dockerfile，语法和包名均正确。
 
-**推荐操作**：在 Jenkins 中对该 PR 重新触发 CI 构建即可。若多次重试后仍然失败，再考虑在 Dockerfile 的 `dnf install` 命令中添加 `--setopt=retries=10` 增加容错。
+根据修复原则，当分析报告指出是 `infra-error` 时，不应强行修改代码。建议措施：**重试 CI**（rerun the failed job）。
 
 ## 潜在风险
-无。本次无需修改任何代码。
+无（未修改任何代码）
