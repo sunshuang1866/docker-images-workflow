@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复 —— 该 CI 失败属于 **infra-error**，由 Docker buildx 构建器实例被提前回收（graceful_stop）导致，与 PR 代码变更无关。
+无需代码修复。CI 失败原因为基础设施问题：BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 下载 OS 元数据阶段被服务端主动关闭（`graceful_stop`），与 PR #2994 的代码变更无关。
 
 ## 修改的文件
-- 无（所有 PR 文件均未修改）
+无
 
 ## 修复逻辑
-分析报告明确指出：失败发生在 Dockerfile 第 8 行 `RUN dnf install ...` 步骤，构建进行约 39 秒后构建器实例 `euler_builder_20260709_224657` 被主动关闭（graceful_stop），gRPC 连接断开。这是 CI 基础设施层面的偶发性问题，非代码错误。Dockerfile 中的依赖包列表均为 openEuler 仓库标准包，无异常。建议重新触发 CI 构建。
+CI 分析报告明确判定为 **infra-error**，置信度高。失败发生在 Docker 构建步骤 `#7 [2/4] RUN dnf install`，此时尚未执行任何与 scann 或 Python 编译相关的操作。PR #2994 仅新增 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及配套元数据文件，不会触发 BuildKit builder 的 `graceful_stop`。修复方向：重试 CI 构建即可。
 
 ## 潜在风险
 无
