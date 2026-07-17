@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: RPM仓库HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
+- 新模式标题: 镜像站HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -23,24 +23,21 @@
 
 ### 根因定位
 - 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: CI 构建环境在通过 DNF 从 openEuler 24.03-LTS-SP4 RPM 仓库下载 `gcc-c++`（约 13MB）时，多次遭遇 HTTP/2 流层错误（`Curl error 92: Stream error in the HTTP/2 framing layer`），DNF 重试所有可用镜像后仍无法下载该包，导致 `dnf install` 失败。日志中另有 3 个包（`cmake-data`、`git-core`、`gcc-c++` 首次尝试）也遇到同类 HTTP/2 流错误，但前两者重试后成功，仅 `gcc-c++` 在所有镜像均失败。
+- 失败原因: openEuler 24.03-LTS-SP4 的 yum/dnf 软件源镜像服务器（`repo.****.org`）在处理 HTTP/2 请求时多次出现流层错误（Stream error, INTERNAL_ERROR），导致 `cmake-data`、`git-core`、`gcc-c++` 等多个 RPM 包下载中断。其中 `gcc-c++`` 包在 3 次重试后仍全部失败，最终 `dnf install` 因无可用镜像源而终止（exit code: 1）。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** PR 新增的 Dockerfile 语法和依赖声明均正确，`dnf install` 命令中的包名均在 openEuler 24.03-LTS-SP4 仓库中真实存在（`Dependencies resolved` 阶段已列出完整的 258 个安装包及依赖）。失败纯粹由 CI runner 与 openEuler 24.03-LTS-SP4 RPM 仓库镜像之间的网络传输问题（HTTP/2 RFC 9113 中的 `GOAWAY` 或 `RST_STREAM` 帧处理异常）导致，属于基础设施不稳定。
+**与 PR 无关**。PR 仅新增了 GrADS 2.2.3 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、README 条目、image-info.yml 条目和 meta.yml 条目。新增的 Dockerfile 中 `dnf install` 命令语法正确，包列表与同项目其他已成功构建的 Dockerfile 一致。失败是 openEuler 24.03-LTS-SP4 镜像站侧的 HTTP/2 协议层间歇性故障导致的，属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-**重试构建**。HTTP/2 流错误通常是仓库端或网络中间件的**瞬时故障**，可尝试重新触发 CI 运行。若重试后依然失败，则需要排查 CI runner 到目标仓库的网络连接质量。
+**重试构建**。该失败是镜像站 HTTP/2 协议层间歇性故障，非代码问题。等待镜像站恢复后重新触发 CI 构建即可。若多次重试仍持续失败，考虑在 dnf 命令前临时禁用 HTTP/2 或降低 curl 的连接协议版本（如在 Dockerfile 的 `RUN dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 或 `echo "http2=false" >> /etc/yum.conf`），但这是临时绕过方案，不推荐作为长期修复。
 
-### 方向 2（置信度: 低）
-若反复重试仍失败，可尝试在 Dockerfile 构建前禁用 HTTP/2 或强制使用 HTTP/1.1 进行 DNF 下载（通过修改 `/etc/dnf/dnf.conf` 添加代理设置或 curl 配置）。但这通常是临时规避手段，长期应排查仓库端 HTTP/2 服务配置。
-
-### 方向 3（置信度: 低）
-若问题持续且仅影响 24.03-LTS-SP4 仓库，可在 Dockerfile 第一行前添加 `RUN echo "http2=false" >> /etc/dnf/dnf.conf` 绕过 HTTP/2，但这属于规避而非修复。
+### 方向 2（置信度: 中）
+**联系 openEuler 基础设施团队**。`repo.****.org` 镜像站在 2026-07-13 07:04 UTC 前后存在 HTTP/2 服务端 bug（返回 INTERNAL_ERROR），影响了多个并发下载流。这是镜像站服务器端问题，应向 openEuler 基础设施团队报告该时段的服务异常，确认镜像站是否已恢复稳定。
 
 ## 需要进一步确认的点
-1. 该错误是否在同时段内的其他 PR（针对 24.03-LTS-SP4 的构建）中也出现？如果是，说明 openEuler 24.03-LTS-SP4 仓库当时存在全局性问题。
-2. 重试 CI 后问题是否自行消失？若消失则可确认是瞬时网络故障。
-3. aarch64 架构 runner 上是否也出现了同类错误？日志中仅有 x86_64 构建信息，如 aarch64 通过则进一步说明是 x86_64 runner 到仓库的局部网络问题。
-4. 目标仓库 `repo.****.org` 的 HTTP/2 服务端是否配置了过短的 `SETTINGS_MAX_CONCURRENT_STREAMS` 或丢包率较高导致 `GOAWAY` 帧频繁传输？
+1. 重新触发 CI 构建（不修改任何代码），确认镜像站是否已恢复。若重试后仍失败，且错误同为本报告中 HTTP/2 流错误，则需确认镜像站的持续可用性状态。
+2. 确认 `repo.****.org` 镜像站近期是否有维护或已知的 HTTP/2 服务端问题公告。
+3. 若重试后失败但错误不同（如新的依赖缺失、编译错误），需重新分析新的日志。
+4. 确认 aarch64 (arm64) 架构节点的构建结果是否也遇到了同样的镜像站问题。当前日志仅包含 x86_64 节点日志。
