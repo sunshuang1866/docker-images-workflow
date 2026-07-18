@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2 测试框架缺失
-- 新模式症状关键词: shunit2, No such file or directory, eulerpublisher, [Check] test failed
+- 新模式标题: CI测试框架shunit2缺失
+- 新模式症状关键词: shunit2: No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
@@ -20,30 +20,31 @@
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
 Build step 'Execute shell' marked build as failure
-Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI 运行环境，非 PR 代码内
-- 失败原因: `eulerpublisher` 在 [Check] 阶段执行容器镜像检查脚本时，`common_funs.sh` 尝试加载 `shunit2` 测试框架但该框架未安装在 CI runner 上，导致检查脚本运行失败。Docker 镜像的构建（编译+安装）和推送均已成功完成。
+- 失败位置: CI Runner 宿主环境的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI Runner 执行环境中缺少 `shunit2` 测试框架（shell 单元测试工具），`common_funs.sh` 脚本第 13 行尝试加载 `shunit2` 时失败，导致 [Check] 阶段的容器功能验证测试无法运行。
 
 ### 与 PR 变更的关联
-**无关**。PR 仅新增 `Database/postgres/17.6/24.03-lts-sp4/Dockerfile`、`entrypoint.sh`，以及更新 `README.md` 和 `meta.yml` 中的镜像索引信息。Docker 构建阶段完全成功（日志显示 postgres 17.6 从源码编译通过、`make install` 完成、镜像打包并成功推送至 Docker Hub），失败发生在 eulerpublisher CI 工具自身的 [Check] 后处理阶段——该阶段缺少 `shunit2` 测试框架依赖，属于 CI 基础设施问题，与 PR 代码变更无关。
+**与 PR 代码变更无关。** 证据如下：
 
-关键日志证据：
-- `[Build] finished` — 构建成功
-- `[Push] finished` — 推送成功
-- `#11 DONE 58.0s` — 镜像导出和推送完成
-- `#8 DONE 268.4s` — 编译和安装阶段成功完成
+1. Docker 镜像构建阶段完全成功：`#8 DONE 268.4s`，PostgreSQL 17.6 从源码编译到 `make install` 全部通过，`[Build] finished` 和 `[Push] finished` 均正常输出。
+2. PR 变更仅包含 Dockerfile、entrypoint.sh、README.md 和 meta.yml 的新增/修改，不涉及 CI 基础设施配置。
+3. 失败发生在 eulerpublisher 框架的 [Check] 阶段，该阶段使用 `shunit2` 对已构建完成的容器镜像进行运行时功能验证（如启动、连接测试），而非代码编译阶段。
+4. `shunit2` 缺失是 CI Runner 环境问题，任何需要 [Check] 阶段验证的镜像构建都会触发相同错误。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI 运维人员需在 `eulerpublisher` 所在的 runner 环境中安装 `shunit2` 测试框架（如 `dnf install shunit2` 或 `pip install shunit2`）。此问题不影响 PR 代码本身，Code Fixer 无需对 Dockerfile 或任何 PR 文件做任何修改。
+在 CI Runner 环境中安装 `shunit2` 测试框架。`shunit2` 是一个 shell 脚本单元测试库，可通过以下方式安装（任选其一）：
+- 通过包管理器安装（如在 openEuler 上 `dnf install shunit2` 或 `pip install shunit2`）
+- 从 upstream 仓库手动部署到 CI Runner 的 `PATH` 中
+
+### 方向 2（置信度: 低）
+如果 `shunit2` 是 eulerpublisher 测试框架的内置依赖，则需排查 eulerpublisher 的安装流程是否完整，确认 `shunit2` 是否应从 eulerpublisher 的分发包中自带。
 
 ## 需要进一步确认的点
-无。日志证据充分，Docker 构建和推送均成功，失败原因明确为 CI runner 缺少 `shunit2` 测试框架。
-
-## 修复验证要求
-无需验证。此失败为 CI 基础设施问题（runner 缺少 `shunit2`），与 PR 代码变更无关，Code Fixer 无需执行任何代码修复。
+- `shunit2` 是 CI Runner 镜像的预装依赖还是 eulerpublisher 的运行时依赖？需确认 CI Runner 镜像的构建配置以及 eulerpublisher 的安装/部署流程。
+- 同一 CI Runner 上其他同类镜像（如 postgres 的其他版本或其他 Database 镜像）的 [Check] 阶段是否同样失败？如果也在相同阶段失败，则确认是 Runner 级别的基础设施问题。
