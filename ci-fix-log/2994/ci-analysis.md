@@ -5,31 +5,32 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器被终止
-- 新模式症状关键词: graceful_stop, no builder, closing transport, connection error, EOF, rpc error
+- 新模式标题: BuildKit Builder 被终止
+- 新模式症状关键词: goaway, graceful_stop, no builder, rpc error, Unavailable, closing transport, connection error, EOF
 
 ## 根因分析
 
 ### 直接错误
 ```
 #7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
+#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: BuildKit 构建步骤 `#7 [2/4] RUN dnf install ...`，dnf 正在下载仓库元数据时
-- 失败原因: CI 基础设施的 BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行过程中被服务端主动关闭（`graceful_stop` goaway 帧），导致 gRPC 连接中断、构建器实例消失，docker build 进程无法继续
+- 失败位置: Docker 构建步骤 `#7 [2/4]`（`dnf install` 安装系统依赖），正在下载 `OS` 仓库元数据时（约 38.59 秒处）
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 被 CI 基础设施端主动优雅终止（`goaway: code: NO_ERROR, debug data: "graceful_stop"`），导致正在进行的构建连接断开、builder 实例消失
 
 ### 与 PR 变更的关联
-**与 PR 改动无关**。PR 新增的 Dockerfile 内容（安装编译依赖、编译 Python、pip 安装 scann）是标准操作，失败发生在 dnf 下载仓库元数据的第 38.59 秒，此时尚未进入任何与 PR 特有逻辑相关的步骤（Python 编译在步骤 [3/4]、scann 安装在步骤 [4/4]）。构建器实例被 CI 平台侧回收/重启导致了此次失败，属基础设施问题。
+**与 PR 变更无关**。PR 仅新增了一个标准结构的 Dockerfile（安装系统包、编译 Python 3.9.19、pip install scann）及配套文档。构建在 `dnf install` 下载仓库元数据的中间阶段被基础设施中断，该阶段尚未执行到任何可能由 Dockerfile 内容引起的错误。`graceful_stop` 的 goaway 信号明确表明是 BuildKit daemon 侧主动终止，属于 CI 基础设施的瞬时问题（如 runner 资源回收、超时、节点伸缩等），与代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI 基础设施问题，代码无需修改。应重新触发 CI 构建（retry），如果同一个节点 `ecs-build-docker-x86-hk` 反复出现此类问题，需由 CI 运维排查该节点的 BuildKit builder 是否因资源不足（内存/磁盘）或配置问题被频繁回收。
+**无需修改代码**。这是 CI 基础设施的瞬时故障（BuildKit builder 被基础设施层终止）。建议直接重新触发 CI 构建。若问题持续复现，需要 CI 运维团队排查 BuildKit builder 的生命周期管理策略（是否有构建超时限制过短、runner 资源不足导致 builder 被驱逐等问题）。
 
 ## 需要进一步确认的点
-- 同一时间段其他 PR 是否也在该节点 (`ecs-build-docker-x86-hk`) 上出现类似的 `graceful_stop` / `no builder found` 错误，以确认是否为节点级故障
-- CI 平台是否有构建超时策略导致 long-running build 被主动终止（dnf 下载 2.8 MB 元数据耗时 38.59 秒可能较慢，但不致触发超时）
+
+1. 该失败是否为可复现问题（在多次 re-run 中是否都发生），如果仅此一次则为瞬时 infra 故障，无需任何代码修改。
+2. 如果多次 re-run 均在同一阶段（`dnf install`）失败，则需排查 CI runner 是否有对单次构建步骤的时间限制，导致 `dnf` 下载大元数据时超时被 kill。
