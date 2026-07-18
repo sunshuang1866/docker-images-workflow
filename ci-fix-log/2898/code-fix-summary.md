@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施错误（infra-error），CI runner 环境中缺少 `shunit2` 单元测试框架，导致 [Check] 阶段的容器测试脚本 `common_funs.sh` 执行失败。
+无需代码修改。失败为 CI 基础设施问题（infra-error）：CI runner（aarch64）上缺少 `shunit2` shell 单元测试框架，导致容器 Check 测试阶段失败。
 
 ## 修改的文件
-无（本次失败与 PR 代码变更无关，无需修改任何代码文件）
+无。
 
 ## 修复逻辑
-CI 分析报告确认：PR 仅新增了 Go 1.25.6 / openEuler 24.03-LTS-SP4 的 Dockerfile 及元数据文件，Docker 镜像的 Build 和 Push 阶段均成功完成。失败发生在构建后的 [Check] 阶段，根因是 CI runner 环境中 `shunit2` 未安装/不在 PATH 中，属于 CI 基础设施配置问题。应在 CI runner 环境中安装 `shunit2` 依赖来解决。
+本次 CI 失败与 PR #2898 的代码变更完全无关。Docker 构建和推送阶段均已成功完成，镜像 `openeulertest/go:1.25.6-oe2403sp4-aarch64` 已生成并推送。失败发生在 CI 工具 `eulerpublisher` 的内置容器测试阶段——`common_funs.sh` 第 13 行尝试 source `shunit2`，但该框架未安装在 aarch64 CI runner 的 PATH 中。
+
+此问题需由 CI 基础设施管理员在对应 runner 上安装 `shunit2`（如 `dnf install shunit2`）解决，无法通过修改 PR 代码修复。
 
 ## 潜在风险
-无
+无。
