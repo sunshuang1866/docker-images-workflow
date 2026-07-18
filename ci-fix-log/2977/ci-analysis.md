@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler镜像站网络波动
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, repo.openeuler.org
+- 新模式标题: 镜像站HTTP2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, MIRROR, No more mirrors to try, repo.openeuler.org
 
 ## 根因分析
 
@@ -23,17 +23,17 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（yum install 步骤）
-- 失败原因: aarch64 构建节点在通过 yum 从 `repo.openeuler.org` 下载 RPM 包时，经历了多次 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56）等网络波动，大部分包在重试后下载成功，但 `vim-common` 在重试耗尽后仍失败，导致整个 yum 事务失败。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install` 步骤）
+- 失败原因: openEuler 官方镜像站 `repo.openeuler.org` 在处理 HTTP/2 请求时多次出现流层协议错误（`Curl error (92)`）和 SSL 连接中断（`Curl error (56)`），涉及 gcc、kernel-headers、perl-MIME-Base64、vim-common 等 4+ 个软件包。yum 在耗尽所有镜像重试后仍无法成功下载 `vim-common`，导致 173 个软件包的安装任务整体失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该 PR 仅新增了一个标准的 brpc 1.16.0 Dockerfile（及其元数据文件），Dockerfile 中的 `yum install` 命令语法和包名均正确无误。失败发生在 Docker 构建的第一步（`yum install` 下载阶段），属于 openEuler 官方镜像仓库 `repo.openeuler.org` 的临时性网络不稳定问题。构建环境为 aarch64（`ecs-build-docker-aarch64-04-sp`），下载的 173 个 RPM 包中绝大多数成功（如 gcc、kernel-headers 均在重试后下载成功），只有最终一个 vim-common 在镜像源重试耗尽后失败。
+与 PR 变更无关。PR 新增的 Dockerfile 结构正确，`yum install` 包列表完整且合理（包含了构建 brpc 所需的 gcc、cmake、openssl-devel、gflags-devel、protobuf-devel、leveldb-devel 等）。失败完全由 `repo.openeuler.org` 镜像站的网络/HTTP2 协议层问题引起，属于 CI 基础设施故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**等待基础镜像站恢复后重试 CI。** 这是典型的 infra-error，根源是 `repo.openeuler.org` 的临时性网络波动导致 HTTP/2 流异常中断。Dockerfile 本身无需任何修改。建议在 openEuler 镜像站网络稳定后重新触发 CI 构建（retry job）。
+此为 CI 基础设施问题（`repo.openeuler.org` HTTP/2 服务端异常），无需修改 PR 代码。触发 CI 重试（re-run）即可。若该镜像站持续出现同类错误，需由 openEuler 基础设施团队排查 `repo.openeuler.org` 的 HTTP/2 协议栈或负载均衡器配置。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 当前服务状态是否正常（可尝试从外部手动 wget 测试 aarch64 仓库的 RPM 包下载）
-- 如果同一 PR 多次重试 CI 均失败且错误一致，则需考虑是否为 openEuler 24.03-LTS-SP4 aarch64 仓库中 `vim-common-9.0.2092-36` 包本身存在问题（如 RPM 元数据损坏导致 HTTP/2 传输异常），此时应向 openEuler 镜像站维护团队报告
+- 确认 `repo.openeuler.org` 在构建时段（2026-07-09 13:44-14:09 UTC）是否存在已知的 HTTP/2 服务端异常或 CDN 节点故障。
+- 确认重试后问题是否复现：若重试仍失败且错误模式一致，需上报至 openEuler 基础设施团队。
