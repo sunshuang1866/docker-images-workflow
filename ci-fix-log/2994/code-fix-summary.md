@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障（infra-error）：BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 时被服务端主动关闭（`graceful_stop` goaway 帧），导致 gRPC 连接中断、构建失败。该问题与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施瞬时故障（infra-error），BuildKit builder 实例被 CI 基础设施层主动优雅终止。
 
 ## 修改的文件
-无。此失败为 CI 基础设施问题，不需要修改任何源代码。
+无（infra-error，无需代码修改）
 
 ## 修复逻辑
-CI 分析报告确认失败类型为 `infra-error`，失败发生在 dnf 下载仓库元数据的第 38.59 秒，此时尚未进入 PR 相关的代码逻辑（Python 编译和 scann 安装分别在后续步骤 [3/4] 和 [4/4]）。构建器被 CI 平台侧回收/重启是根因，属于基础设施层面问题，应重新触发 CI 构建（retry）解决。无需也不可能通过代码修改修复此问题。
+CI 失败分析报告明确诊断为 `infra-error`，置信度 **高**。根因为 BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据时（约 38.59 秒处）被 CI 基础设施端主动优雅终止（`goaway: code: NO_ERROR, debug data: "graceful_stop"`）。该失败发生在 `dnf` 下载阶段，尚未执行到任何可能由 Dockerfile 内容引起的错误，与 PR 代码变更无关。
+
+**修复方向**：直接重新触发 CI 构建。若问题持续复现，需要 CI 运维团队排查 BuildKit builder 的生命周期管理策略。
 
 ## 潜在风险
-无。未修改任何代码。
+无
