@@ -3,33 +3,39 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 丢失
-- 新模式症状关键词: no builder, graceful_stop, closing transport, rpc error, buildx
+- 新模式标题: 构建器连接中断
+- 新模式症状关键词: failed to receive status, rpc error, closing transport, EOF, graceful_stop, no builder found, buildx
 
 ## 根因分析
 
 ### 直接错误
 ```
 #7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
-#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
+#7 38.59 OS                                               77 kB/s | 2.8 MB     00:37    
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 构建阶段，步骤 #7（dnf 安装系统包）
-- 失败原因: CI 使用的 `docker-container` 驱动 BuildKit builder（`euler_builder_20260709_224657`）在构建过程中被意外终止，导致 BuildKit 客户端与 builder 之间的 gRPC 连接断开（graceful_stop），后续步骤无法找到该 builder 实例。
+- 失败位置: Docker build 步骤 `[2/4] RUN dnf install`（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile:10-13`）
+- 失败原因: Docker buildx 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 下载元数据过程中（运行约 38 秒后被优雅关闭（graceful_stop），导致 BuildKit RPC 连接断开（EOF），后续无法找到该构建器。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关**。PR 新增了一个标准结构的 Dockerfile（安装基础编译工具链、编译 Python 3.9.19、pip 安装 scann），并更新了 README.md、image-info.yml、meta.yml 三个元数据文件。所有文件均为常规 boilerplate 变更，不可能导致 BuildKit builder 崩溃。此外，CI 的镜像规范检查阶段（"The image specification check for releasing on appstore has passed."）已通过，说明元数据格式无误。
+**与 PR 改动无关**。该失败属于 CI 基础设施问题（BuildKit builder 实例被提前回收/关闭），不是 Dockerfile 代码错误。PR 仅新增了 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 和相关元数据文件，Dockerfile 语法和 `dnf install` 命令本身均无问题——基础镜像已成功加载，`dnf install` 在正常下载 RPM 仓库元数据时因构建器连接丢失而中断。
+
+证据：
+1. 基础镜像拉取成功（`#6 DONE 2.9s`）
+2. CI 元数据预检通过（`The image specification check for releasing on appstore has passed.`）
+3. `dnf install` 正在正常下载 OS 仓库元数据（77 kB/s, 已下载 2.8 MB）
+4. 错误为 gRPC 传输层错误（`closing transport`, `EOF`, `graceful_stop`），非构建逻辑错误
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试 CI 构建**。这是 Docker BuildKit builder 因 CI 基础设施不稳定（runner 资源不足、builder 容器被 OOM Killer 终止、网络波动等）而意外断开连接。PR 代码本身无需修改，Code Fixer 无需处理，重新触发 CI 流水线即可。
+**重试 CI**。该失败为 BuildKit builder 实例被意外回收导致的基础设施问题，Dockerfile 本身无错误。直接重新触发 CI pipeline 大概率可成功通过。
 
 ## 需要进一步确认的点
-1. CI runner（`ecs-build-docker-x86-hk`）是否存在资源不足或 OOM 问题导致 builder 容器被终止。
-2. 如多次重试后仍出现同类 "no builder" 错误，需排查 BuildKit daemon 或 docker-container driver 在 CI 环境中的稳定性。
+- 若重试后仍失败，需检查 CI 环境中 `euler_builder` 实例的生命周期配置（是否有超时自动回收机制），以及构建节点的资源状况（内存/磁盘是否充足）。
+- 若重试后在相同步骤（`dnf install`）卡住或超时，可能是 openEuler 24.03-lts-sp4 的 dnf 仓库源在 CI 构建节点上网络访问慢或不可达，需检查网络连通性。
