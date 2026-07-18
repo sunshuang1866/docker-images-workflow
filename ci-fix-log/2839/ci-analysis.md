@@ -4,44 +4,39 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: shunit2测试框架缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-09 09:40:24,013 - INFO - [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
+2026-07-09 09:40:24,013-INFO: [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-2026-07-09 09:40:24,021-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
-2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
-+-------------+-------------+--------------+
-| Check Items | Description | Check Result |
-+-------------+-------------+--------------+
-+-------------+-------------+--------------+
+2026-07-09 09:40:24,021-CRITICAL: [Check] test failed
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13
-- 失败原因: CI 流水线 [Check] 阶段中 `eulerpublisher` 测试框架的 `common_funs.sh` 脚本尝试 source `shunit2`（Shell 单元测试框架），但 CI runner 环境中未安装 `shunit2`，导致测试脚本本身启动失败，无法执行任何镜像校验。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13（CI runner 上的 eulerpublisher 测试框架脚本）
+- 失败原因: CI runner 环境中的 `eulerpublisher` 测试脚本 `common_funs.sh` 第 13 行尝试加载 `shunit2` shell 单元测试框架，但该依赖未安装在 runner 上，导致 [Check] 阶段测试无法执行而失败。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关**。PR 仅新增了以下文件：
-- `Database/postgres/17.6/24.03-lts-sp4/Dockerfile`（新增）
-- `Database/postgres/17.6/24.03-lts-sp4/entrypoint.sh`（新增）
-- `Database/postgres/README.md`（新增 1 行表格条目）
-- `Database/postgres/meta.yml`（新增 2 行镜像配置）
+**与 PR 变更无关。** PR 新增的 Dockerfile 和 entrypoint.sh 在 [Build] 和 [Push] 阶段均成功完成：
+- Docker 构建（`make -j "$(nproc)" && make install`）正常完成（#8 DONE 268.4s）
+- 镜像导出与推送正常完成（#11 DONE 58.0s）
+- 日志明确显示 `[Build] finished` 和 `[Push] finished`
 
-Docker 镜像构建和推送均已完成且成功（日志中 `#8 DONE 268.4s`、`[Build] finished`、`[Push] finished`、manifest 推送成功），PostgreSQL 17.6 源码编译 `./configure && make -j "$(nproc)" && make install` 无任何编译错误。失败完全发生在 CI 自身的 [Check] 后处理阶段，因 runner 缺少 `shunit2` 依赖所致。
+失败发生在 CI 自身的测试基础设施层面——runner 缺少 `shunit2` 依赖，与 Dockerfile 或 entrypoint.sh 的内容无关。Code Fixer 无需处理。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 环境中安装 `shunit2`。`shunit2` 是一个标准 Shell 单元测试框架，通常在 openEuler 上可通过包管理器安装（如 `dnf install shunit2`），或从 GitHub releases 下载后放入 `PATH`。此修复由 CI 运维团队执行，Code Fixer 无需处理 Dockerfile 或任何 PR 代码。
+无需修改 PR 代码。需要在 CI runner 环境中安装 `shunit2`（可通过 `dnf install shunit2` 或 `pip install shunit2`，具体取决于 eulerpublisher 期望的安装方式），然后重新触发 CI 流水线。
 
 ## 需要进一步确认的点
-- 确认 CI runner 的 [Check] 阶段是否本应预装 `shunit2`，以及是否因 runner 镜像版本或其他因素导致该依赖缺失。
-- 确认同类 24.03-lts-sp4 平台的其他镜像（如其他 Database 镜像）的 [Check] 阶段是否同样因缺少 `shunit2` 而失败，以判断是通性问题还是仅影响该 job。
+1. 确认 `shunit2` 在 openEuler 24.03-LTS-SP4 上的正确安装方式（RPM 包名 vs pip 包名）
+2. 确认是否只有该 runner 缺少 `shunit2`，还是所有 x86_64 runner 均缺失（可通过查看同一 runner 上其他镜像的 [Check] 阶段日志来验证）
+3. 确认 eulerpublisher 框架对 `shunit2` 的依赖声明是否完整（是否在 `setup.py`/`pyproject.toml` 中列为依赖）
