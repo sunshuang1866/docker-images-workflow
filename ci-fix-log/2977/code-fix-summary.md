@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 **infra-error**（基础设施错误），根因是 openEuler 24.03-LTS-SP4 官方 yum 仓库 `repo.openeuler.org` 在 aarch64 构建节点上出现 HTTP/2 流传输错误（`Curl error (92): INTERNAL_ERROR`）和 SSL 读取异常（`Curl error (56): SSL_ERROR_SYSCALL`），导致 `vim-common`（`git` 的传递依赖）下载失败，进而使 `yum install` 命令整体中止。
+无代码修复。本次 CI 失败为基础设施问题（infra-error），由 openEuler 官方镜像仓库 `repo.openeuler.org` 的网络瞬态故障（HTTP/2 流错误：Curl error 92、Curl error 56）导致 `yum install` 下载 RPM 包失败。
 
 ## 修改的文件
-无。所有原始 PR 文件（Dockerfile、README.md、image-info.yml、meta.yml）均正确无误，无需修改。
+无
 
 ## 修复逻辑
-根据 CI Failure Analyst 的分析报告，该失败是仓库服务器的暂时性网络/HTTP 层面问题，与 PR 代码逻辑无关。Dockerfile 中列出的 `yum install` 软件包均为构建 brpc 的合理依赖，语法和逻辑无错误。报告中 `gcc`、`kernel-headers`、`perl-MIME-Base64` 三个包在 yum 自动重试后均成功下载，进一步证明这是偶发性网络抖动问题。建议等待仓库服务器恢复稳定后重新触发 CI 构建即可。
+分析报告明确指出：失败与 PR 代码变更无关。Dockerfile 中的 `yum install` 命令所列的包名均为 openEuler 24.03-LTS-SP4 仓库中的合法包名，`Dockerfile` 本身无需任何修改。失败原因是在 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）上构建时，从 `repo.openeuler.org` 下载 RPM 包过程中遭遇多次 HTTP/2 流中断（INTERNAL_ERROR）和 SSL 读取错误（SSL_ERROR_SYSCALL），属于 openEuler 官方镜像仓库的服务端基础设施问题。
 
 ## 潜在风险
-无。未对代码做任何修改，不存在引入新问题的风险。
+修复方向为重新触发 CI 构建，等待 openEuler 镜像仓库服务恢复后重试即可。若同一 runner 上反复出现同类 Curl error (92)，建议排查该节点到 `repo.openeuler.org` 的网络路径。
