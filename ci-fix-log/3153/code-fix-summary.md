@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error：CI appstore 发布规范校验流水线被纯文档 PR 错误触发，校验工具期望 PR 包含 Dockerfile / meta.yml 等镜像文件变更，而 PR #3153 仅修改了 README.md（文档更新），导致路径校验失败。
+无需代码修改。CI 失败为 infra-error（基础设施问题），由 CI 工具 `eulerpublisher/update/container/app/update.py` 中 appstore 发布规范校验的路径比对逻辑缺陷导致，对根目录级文件 `README.md` 的路径校验产生了误报。该错误与 PR 的文档内容变更无实质关联。
 
 ## 修改的文件
-无。`README.md` 的文档内容本身没有问题，无需修改。
+无
 
 ## 修复逻辑
-分析报告明确指出该 CI 失败属于**基础设施配置问题**，非 PR 代码缺陷：
-- 失败位置在 CI 编排工具 `eulerpublisher/update/container/app/update.py:273`，不在 PR 变更文件中
-- 根因为 CI appstore 发布校验触发条件未排除纯文档 PR，需由 CI 维护方调整流水线触发规则
-
-根据修复原则中的规定："如果分析报告指出是 `infra-error`（CI 基础设施问题），不强行改代码"。
+分析报告认定失败类型为 `infra-error`，根因是 CI 工具 `update.py` 第 273 行附近的路径标准化/前缀拼接逻辑在处理仓库根目录文件时存在缺陷：当变更文件位于 `/README.md` 时，工具内部计算出的路径与期望路径 `/README.md` 不一致。PR #3153 仅对 `README.md` 进行了文档内容更新，文件内容正确、路径正确，不存在需要修复的代码问题。根据修复原则中"infra-error 无需代码修改"的规定，不进行任何代码改动。
 
 ## 潜在风险
-无。当前不修改任何代码，不会引入新问题。需由 CI 维护方处理流水线触发条件配置。
+无
