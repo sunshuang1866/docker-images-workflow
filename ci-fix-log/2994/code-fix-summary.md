@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（BuildKit 构建器异常终止），无需代码修改。
+无需代码修改。CI 失败原因为基础设施故障（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告判定失败类型为 **infra-error**，根因是 BuildKit 构建器 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被 `graceful_stop`，导致 gRPC 连接断开。该问题与 PR 新增的 Dockerfile 内容无关，所有文件（Dockerfile、README.md、image-info.yml、meta.yml）格式正确且无语法错误。
-
-应重新触发 CI 流水线（re-run/re-trigger）。若反复出现同一错误，需 CI 运维团队排查 BuildKit 构建器节点的超时配置或稳定性问题。
+CI 分析报告明确指出：构建在 `dnf install` 基础编译工具链阶段因 BuildKit builder 节点 `euler_builder_20260709_224657` 宕机/连接中断而失败（gRPC transport 报 "closing transport" + "graceful_stop"），属于 CI 基础设施问题。尚未执行到任何与 PR 代码变更相关的步骤。Dockerfile 语法正确，`FROM` 镜像拉取成功，包安装命令本身无错误。建议重试该 CI job 或由 CI 运维检查 builder 节点健康状况。
 
 ## 潜在风险
 无
