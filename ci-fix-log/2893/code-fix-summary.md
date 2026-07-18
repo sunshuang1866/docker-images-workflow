@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施错误（infra-error），CI Runner 环境缺少 `shunit2` 测试框架，与本次 PR 代码变更无关。
+无需代码修改。CI 失败是基础设施问题（infra-error），非 PR 代码变更导致。
 
 ## 修改的文件
-无（无需修改任何文件）
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：
+CI 失败分析报告明确指出：Docker 镜像的构建（Build）和推送（Push）阶段均已成功完成，失败仅发生在 eulerpublisher 工具的 Check（容器启动测试）阶段。失败原因是 aarch64 CI Runner 上缺少 `shunit2` shell 测试框架，导致 `common_funs.sh` 无法通过 `source` 加载该库。
 
-1. Docker 构建全流程（meson setup → meson compile → meson install → docker build → docker push）均已成功完成。
-2. 失败仅发生在构建后 `[Check]` 阶段的测试框架初始化环节：`common_funs.sh:13` 尝试 source 加载 `shunit2`，但该文件在 CI Runner 上不存在。
-3. 本次 PR 仅新增 bind9 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、named.conf 和元数据文件，不涉及 CI Runner 测试基础设施的任何修改。
-4. 修复方向：需由 CI 运维人员在 Runner 节点上安装 `shunit2`（EPEL 仓库中的 `shunit2` RPM 包），或确保 `shunit2` 脚本位于 `/usr/local/etc/eulerpublisher/tests/container/common/` 目录下。这不是 PR 代码层面的问题。
+本次 PR 仅新增/修改了 bind9 的 Dockerfile、named.conf、README、image-info.yml 和 meta.yml，这些变更与 shunit2 安装、CI 测试脚本或 Runner 环境配置均无关联。此问题需由 CI 运维侧在 aarch64 Runner 上安装 shunit2 解决，源代码层面无需且不应做任何修改。
 
 ## 潜在风险
 无
