@@ -1,16 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。CI 失败为 openEuler 24.03-LTS-SP4 仓库镜像 HTTP/2 协议层故障导致的临时性基础设施问题（infra-error），与 PR #2992 的代码变更无关。
+无需代码修复 — CI 失败为 infra-error（基础设施/网络瞬态故障），非代码缺陷。
 
 ## 修改的文件
-无。本次失败属于 infra-error，无需修改任何源代码文件。
+无
 
 ## 修复逻辑
-CI 构建日志显示多个 RPM 包（gcc、gcc-gfortran、glibc-devel、guile）从 `repo.****.org` 下载时出现 Curl error (92): Stream error in the HTTP/2 framing layer: INTERNAL_ERROR。两个并行构建阶段（#7 和 #8）均遭遇同一仓库的 HTTP/2 流错误，证实问题出在仓库端而非 Dockerfile 配置。Dockerfile 的 `dnf install` 命令语法和包名均正确，与已有的 sp3 版本 Dockerfile 模式一致。
+CI 失败分析报告判定失败类型为 `infra-error`，置信度 **高**。根因是 openEuler 24.03-LTS-SP4 上游仓库在构建时刻出现 HTTP/2 协议层流错误（Curl error 92），导致多个 RPM 包（gcc-gfortran、glibc-devel、guile、gcc）下载失败，重试耗尽所有镜像后 `dnf install` 退出码为 1。
 
-## 修复方向
-等待 CI 基础设施恢复后重新触发构建。若多次重试后仍然失败，可在 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 临时禁用 HTTP/2 作为规避手段。
+该错误与 PR #2992 的代码变更完全无关：Dockerfile 语法和依赖声明均正确，所有声明的包均为 openEuler SP4 仓库中实际存在的包。失败纯粹是上游仓库镜像的网络传输问题。
+
+**建议操作**：重新触发 CI 构建（retry），等待仓库 HTTP/2 服务恢复正常后构建应可通过。
 
 ## 潜在风险
 无
