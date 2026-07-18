@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error）：在 aarch64 runner 上构建时，`repo.openeuler.org` 仓库源出现 HTTP/2 流错误（Curl error 92）和 SSL 读取失败（Curl error 56），导致 `vim-common` 包下载失败。
+无需代码修复。CI 失败为 `infra-error`，根因是 `repo.openeuler.org` 在 aarch64 runner 构建期间出现临时性 HTTP/2 网络抖动，导致 RPM 包 `vim-common` 下载失败。PR 中的 Dockerfile 和所有元数据文件均无问题。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告（置信度：高）明确指出：
-
-1. 失败与 PR 代码变更**无关**——Dockerfile 在语法和包名选择上均正确，yum 在 Transaction Summary 阶段成功识别了全部 173 个待安装包。
-2. 失败纯粹由构建环境到 `repo.openeuler.org` 的网络不稳定导致，属于 CI 基础设施瞬时故障。
-3. 无需修改任何 Dockerfile 代码，等待 CI 基础设施网络恢复后重新触发构建即可。
+根据 CI 失败分析报告，本次失败与 PR 变更完全无关。Dockerfile 中 `yum install` 指定的所有包名均正确，前 172 个包已成功下载，仅因 openEuler 官方仓库间歇性网络故障导致最后一个包 `vim-common` 下载失败。分析报告置信度"高"，推荐修复方向为**直接重试 CI 构建**，无需修改任何代码。
 
 ## 潜在风险
 无
