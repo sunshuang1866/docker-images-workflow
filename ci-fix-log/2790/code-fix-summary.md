@@ -1,15 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 此 CI 失败为基础设施错误（infra-error），与 PR 代码变更无关。
+CI 基础设施错误（infra-error），无需代码修改。
 
 ## 修改的文件
-无
+- 无需修改。PR #2790 仅更新了 `README.md` 的镜像 Tags 列表，属于纯文档维护变更，内容本身无问题。
 
 ## 修复逻辑
-CI 分析报告明确指出：失败类型为 `infra-error`，根因是 CI 的 appstore 发布规范校验工具（`eulerpublisher/update/container/app/update.py`）错误地将仓库根目录下的 `README.md` 视为 appstore 镜像提交进行路径校验。PR #2790 仅修改了仓库级文档文件（`README.md` 和 `README.en.md`），未新增任何镜像 Dockerfile、meta.yml 或 image-info.yml，不属于 appstore 镜像提交范畴。
+CI 失败由 `eulerpublisher` 工具的 appstore 发布规范预检流程缺陷导致。该工具将根目录文档文件 `README.md` 错误地纳入 appstore 路径校验范围，检测到的 diff 输出路径 `README.md`（不带前导 `/`）与校验器期望的 `/README.md`（带前导 `/`）不匹配，触发误报。
 
-**结论：此失败属于 CI 工具校验范围过宽的问题，需要在 CI 工具侧修复（在 update.py 中过滤掉不属于镜像目录的文件），并非 PR 代码错误。** 按照任务规范要求，infra-error 不应对源码进行修改。
+分析报告明确指出：
+- 失败类型：**infra-error**
+- 根因：CI 工具校验逻辑缺陷，非 PR 代码问题
+- 修复方向：需在 CI 基础设施工具 `eulerpublisher/update/container/app/update.py` 中实施修复，而非修改本仓库的任何文件
+
+本仓库无需、也不应进行任何代码修改。PR 中 `README.md` 的文档更新变更完全合法。
 
 ## 潜在风险
-无（未修改任何代码）
+无。未对任何源代码文件做修改，不存在引入新问题的风险。
