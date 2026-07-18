@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），BuildKit builder 容器在 bootstrap 阶段崩溃（`Could not find the file / in container`），与 PR 提交的 Dockerfile 及元数据文件无关。
+无需代码修复 — CI 失败为基础设施故障（infra-error）。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告确认：失败发生在 `[internal] booting buildkit` 阶段，即 Docker BuildKit 守护进程层，尚未进入任何 Dockerfile 的构建步骤。错误信息 `Error response from daemon: Could not find the file / in container` 表明 runner 节点 `ecs-build-docker-x86-hk` 上的 Docker daemon / BuildKit builder 实例启动异常，可能由磁盘空间不足、overlay2 存储驱动故障或 `moby/buildkit:buildx-stable-1` 镜像拉取不完整导致。属于 CI 基础设施瞬时性故障，建议重试 CI 任务。
+CI 失败发生在 BuildKit 容器启动阶段（`[internal] booting buildkit`），Docker daemon 在创建 BuildKit 容器后无法访问容器文件系统根路径 `/`，报错 `Could not find the file / in container`。该故障发生在 Dockerfile 解析之前，与本次 PR 新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 等文件无任何因果关系。
+
+本次 PR 的变更纯属文档和构建文件的新增，不涉及任何可能导致 Docker daemon 内部故障的代码改动。
+
+**建议操作**：在 Jenkins 上重新触发构建（re-run）。若多次重试仍然失败，需检查 CI runner 节点 `ecs-build-docker-x86-hk` 的 Docker daemon 状态、overlay2 存储驱动健康度以及磁盘空间。
 
 ## 潜在风险
-无
+无（未修改任何代码）
