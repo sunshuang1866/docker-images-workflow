@@ -5,15 +5,13 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit启动容器失败
-- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, booting buildkit, Error response from daemon
+- 新模式标题: BuildKit容器启动失败
+- 新模式症状关键词: Could not find the file / in container, buildx_buildkit, docker-container driver, booting buildkit
 
 ## 根因分析
 
 ### 直接错误
 ```
-#0 building with "euler_builder_20260709_205700" instance using docker-container driver
-
 #1 [internal] booting buildkit
 #1 pulling image moby/buildkit:buildx-stable-1
 #1 pulling image moby/buildkit:buildx-stable-1 1.7s done
@@ -27,22 +25,18 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 守护进程层（非 Dockerfile 构建步骤）
-- 失败原因: CI 的 BuildKit builder（`buildx`）在启动 builder 容器 `buildx_buildkit_euler_builder_20260709_2057000` 时，Docker 守护进程报错 `Could not find the file / in container`，builder 容器创建后立即失败并被移除。这属于 Docker/BuildKit 基础设施层面的异常，与 PR 提交的 Dockerfile 内容完全无关。
+- 失败位置: CI 构建环境 Docker daemon / BuildKit 初始化阶段（发生在 Dockerfile 解析之前）
+- 失败原因: Docker daemon 在创建 BuildKit 容器 `buildx_buildkit_euler_builder_20260709_2057000` 后，尝试访问容器内文件系统根路径 `/` 时失败（"Could not find the file / in container"），导致 BuildKit 无法完成 boot 阶段。这是 Docker daemon 内部故障，可能原因包括容器文件系统损坏、overlay2 存储驱动异常或 Docker daemon 竞态条件。
 
 ### 与 PR 变更的关联
-**无关。** PR 仅新增了一个 glibc 2.42 的 Dockerfile 及更新了 meta.yml、README.md、image-info.yml 三个元数据文件。CI 在 BuildKit builder 容器启动阶段（`[internal] booting buildkit`）就已失败，尚未进入任何 Dockerfile 的构建步骤。CI 的组件更新系统已正确识别了变更文件（日志中 `Difference: [...] Others/glibc/2.42/24.03-lts-sp4/Dockerfile`），镜像规范检查也通过了，但 buildx 的 builder 实例在 bootstrap 阶段崩溃。
+本次 PR 的变更为新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`（以及配套的 README.md、image-info.yml、meta.yml 更新），纯属文档和构建文件的新增，不涉及任何可能导致 Docker daemon 内部故障的改动。CI 失败发生在 BuildKit 容器创建阶段，此时 Dockerfile 尚未被解析，PR 代码变更与该失败无任何因果关系。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-这是一个 CI 基础设施故障，无需修改任何代码。应由 CI 运维团队检查 Docker daemon / BuildKit 和 `buildx` builder 在 runner 节点 `ecs-build-docker-x86-hk` 上的状态：
-- 检查 builder 节点磁盘空间是否充足（`Could not find the file /` 可能是磁盘满或 overlay2 存储驱动异常）
-- 检查 `moby/buildkit:buildx-stable-1` 镜像拉取的完整性
-- 确认 `docker-container` driver 的 builder 实例是否能正常创建
-- **重试 CI 任务**：此类错误通常是瞬时性的基础设施抖动，重新触发 CI 大概率成功。
+这是 CI 基础设施故障，非 PR 代码问题。建议在 Jenkins 上重新触发构建（re-run）。若多次重试仍然失败，需检查 CI runner 节点（`ecs-build-docker-x86-hk`）的 Docker daemon 状态、overlay2 存储驱动健康度以及磁盘空间。
 
 ## 需要进一步确认的点
-- Runner 节点 `ecs-build-docker-x86-hk` 的磁盘使用率和 Docker 存储驱动状态。
-- 该节点在失败时间段（2026-07-09 20:57 UTC+8）是否有其他异常（系统日志、Docker daemon 日志）。
-- 该 BuildKit 错误是否在其他 CI run 中复现，还是偶发性故障。
+- 确认 CI runner `ecs-build-docker-x86-hk` 上 Docker daemon 日志中是否有 overlay2 或文件系统相关错误
+- 确认同一时间段内该 runner 上其他 job 是否也出现类似 `Could not find the file / in container` 错误
+- 如果重试后仍然失败，检查 runner 的 Docker 版本和 buildx 版本是否存在已知 bug
