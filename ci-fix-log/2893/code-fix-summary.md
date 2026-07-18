@@ -1,18 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为基础设施问题：aarch64 runner 缺少 `shunit2` 测试框架。
+无需代码修改 — CI 失败为基础设施问题（infra-error），与 PR 变更无关。
 
 ## 修改的文件
-无（infra-error，不涉及代码修改）
+无（分析报告判定为 infra-error，不需要代码修复）
 
 ## 修复逻辑
-CI 分析报告确认：
-- Docker 镜像构建、编译、推送均已成功完成（[Build] finished → [Push] finished）
-- 失败仅发生在构建完成后的容器健康检查阶段（[Check]），根因是 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 第 13 行 `source shunit2` 找不到文件
-- 此失败与 PR #2893 的代码变更无关，属于 CI 基础设施问题
+根据 CI 分析报告，该失败属于 `infra-error`：
+- Docker 镜像的 **Build 和 Push 阶段均已完成并成功**（422/422 编译目标通过，镜像已推送至 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`）
+- 失败发生在 CI runner 的测试后处理阶段：`common_funs.sh` 尝试加载 `shunit2` 测试框架时找不到该文件
+- 根因是 CI aarch64 runner 上缺少 `shunit2` 测试框架，与 PR 新增的 Dockerfile 及配置文件无关
 
-**需要的修复措施**：CI 管理员需要在 aarch64 runner 上安装 `shunit2` 测试框架。
+**此问题应在 CI 基础设施层面解决**（在 runner 上安装 `shunit2`），不需要修改代码。
 
 ## 潜在风险
-无（未修改任何代码）
+无 — 已确认构建和推送均成功，无需代码修改。
