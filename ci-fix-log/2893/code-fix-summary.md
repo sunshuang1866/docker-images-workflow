@@ -1,19 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需修复 — 本次 CI 失败为基础设施错误（infra-error），Docker 镜像构建和推送均已成功完成，失败发生在 CI Runner 的 Check 验证阶段，根因是 Runner 环境缺少 `shunit2` Shell 测试框架。
+CI 基础设施故障：`[Check]` 阶段因 CI 测试环境缺少 `shunit2` shell 单元测试框架而失败，与 PR #2893 代码变更无关。无需代码修改。
 
 ## 修改的文件
-无
+无。此问题为 infra-error，不需要修改任何源代码文件。
 
 ## 修复逻辑
-分析报告明确指出：
-- 全部 6 个 Docker 构建步骤均返回 `DONE`，bind9 源码编译 422/422 个目标全部通过
-- 镜像导出和推送到 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64` 成功
-- 日志记录 `[Build] finished` 和 `[Push] finished`
-- 失败仅发生在 `[Check]` 阶段，`common_funs.sh:13` 尝试 `.`（source）加载 `shunit2` 时找不到文件
+CI 分析报告明确指出：
+- Docker 构建 (`[Build]`) 和推送 (`[Push]`) 阶段均已成功完成，`meson compile` 422/422 个编译目标全部通过
+- 失败仅发生在 `[Check]` 测试验证阶段，原因是 CI runner 环境中 `shunit2` 未安装，导致 `common_funs.sh` 执行 `source` 加载时找不到该框架
+- 根因与 PR 提交的 Dockerfile、named.conf、README.md、image-info.yml、meta.yml 等文件完全无关
 
-此问题与本次 PR 新增的 Dockerfile、named.conf 及元数据文件无关，需要 CI 基础设施管理员在 Runner 镜像中安装 `shunit2`（如通过 `yum install shunit2`），非代码层面可修复。
+此问题需由 CI 基础设施团队在 runner 环境中安装 `shunit2` 后重新触发构建即可通过。
 
 ## 潜在风险
-无
+无。
