@@ -762,3 +762,17 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2848: `Database/mariadb/12.1.1/24.03-lts-sp4/Dockerfile` — 在 cmake 配置中添加 `-DWITHOUT_ABI_CHECK=1` 禁用 ABI 检查，解决 openEuler
+
+---
+
+## 模式42：日志缺失无法定位
+
+**症状关键词**: (无，CI 日志未提供)
+
+**根因**: - 失败位置: 未知（日志缺失）
+- 失败原因: 无法确认，日志不足以定位具体错误
+
+**修复方法**: 在 cmake 配置阶段添加 `-DVVENC_ENABLE_WERROR=OFF`，避免因 openEuler 24.03-LTS-SP4 基础镜像中编译器版本差异产生的新警告被 `-Werror` 转为编译错误。
+
+**历史案例**:
+- PR #2991: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile` — 在 cmake 配置阶段添加 `-DVVENC_ENABLE_WERROR=OFF`，避免因 openEuler 24.
