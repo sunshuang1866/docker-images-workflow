@@ -1,15 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复——本次 CI 失败为基础设施误报（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败由 CI 编排工具 `eulerpublisher/update/container/app/update.py` 的路径格式校验缺陷导致（期望 `/README.md`，但 git diff 产出的路径为 `README.md`），非 PR 变更中 README 内容的质量问题。
 
 ## 修改的文件
-无
+无。`README.md` 的内容变更是合法且正确的，不需要修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：失败类型为 `infra-error`，根因是 CI 工具 `eulerpublisher/update/container/app/update.py` 的 appstore 发布规范预检逻辑对根级 `README.md` 文件产生了误报（false positive）。该工具设计用于校验 Docker 镜像目录结构（如 `Category/Image/Version/Dockerfile`），当 PR 仅涉及根级纯文档文件变更时，其路径匹配逻辑未能正确处理此边界情况，报出 "Path Error"。
+该 CI 失败属于基础设施问题（infra-error）：只要 PR 修改了仓库根目录的 `README.md`，就会触发 appstore 发布规范预检器中的路径校验，而该校验器对根目录文件路径缺少前导 `/` 的标准化处理，导致 `README.md` 与预期值 `/README.md` 不匹配。
 
-PR #2790 仅修改了 `README.md` 和 `README.en.md` 两个根级文件的内容（更新 latest 标签和新增镜像 Tag 条目），属纯文档维护，未涉及任何路径变更、文件重命名或镜像构建文件。报告建议由 CI 平台维护者评估 `update.py` 的路径校验逻辑是否需要调整，但此问题与当前 PR 的代码无关，无需对 `README.md` 做任何代码级修复。
+实际修复需要在 `eulerpublisher/update/container/app/update.py` 中对 git diff 解析出的路径进行归一化（自动补全前导 `/`），或在校验预期配置中改用相对路径格式。但该文件不在原始 PR 的 `changed_files` 列表中，因此本次无法在代码层面修复此问题。
 
 ## 潜在风险
-无——未做任何代码修改。
+- 任何修改根目录 `README.md` 的 PR 都会触发此 CI 失败的误报。
+- 需要对 CI 管道中的 `update.py` 进行单独修复，建议在 CI 工具仓库中提交路径标准化补丁。
