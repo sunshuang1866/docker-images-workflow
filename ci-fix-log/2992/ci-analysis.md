@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 仓库镜像HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -25,20 +25,20 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（`dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 仓库镜像服务器（`repo.****.org`）在处理 HTTP/2 请求时出现流错误（`INTERNAL_ERROR (err 2)`），多次重试后 `gcc-12.3.1-110.oe2403sp4.x86_64` 包仍无法下载，dnf 耗尽所有可用镜像后报错退出
+- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`
+- 失败原因: Docker 构建过程中 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库下载 RPM 包时，仓库镜像服务器返回 HTTP/2 `INTERNAL_ERROR`（Curl error 92），多个包（gcc-gfortran、glibc-devel、guile、gcc）均受影响，最终 `gcc-12.3.1-110.oe2403sp4.x86_64.rpm` 耗尽所有镜像重试机会后下载失败，导致构建终止（exit code: 1）。这是仓库镜像服务端的 HTTP/2 协议层临时故障，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 无关**。PR 仅新增了 Multiwfn 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 内容正确（`dnf install` 语法无误，`sed` 编译参数替换规范）。失败发生在 `dnf install` 从远程仓库下载 RPM 包的阶段，此时尚未触及 PR 引入的任何构建逻辑，完全是上游镜像服务器的网络/服务端问题。日志中 `#7`（stage-1 runtime 阶段）和 `#8`（builder 阶段）两个独立阶段均出现了相同类型的 HTTP/2 流错误，进一步证实这是 openEuler 24.03-LTS-SP4 仓库服务器端的问题。
+PR 变更仅新增了 multiwfn 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据文件。Dockerfile 中 `dnf install` 的命令语法和包名均为合法。失败的根本原因是 **openEuler 24.03-LTS-SP4 官方仓库镜像服务端出现 HTTP/2 流错误（INTERNAL_ERROR）**，属于 CI 基础设施层面的临时性网络/服务端问题，与 PR 代码变更无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需修改代码**。此失败属于 CI 基础设施问题，应由运维排查 openEuler 24.03-LTS-SP4 RPM 镜像服务器的 HTTP/2 配置或网络状况。待服务器恢复后，重新触发 CI 构建即可通过。
+### 方向 1（置信度: 中）
+重新触发 CI 构建。由于失败原因为仓库镜像服务端的临时性 HTTP/2 协议错误，且日志中多个不同 RPM 包在不同时刻、不同 HTTP/2 流上均出现相同错误，高度提示为服务端瞬时故障。若仓库镜像服务已恢复，重试即可通过。
 
 ### 方向 2（置信度: 低）
-如果 openEuler 24.03-LTS-SP4 镜像服务器频繁出现此类 HTTP/2 流错误，可在 Dockerfile 的 `dnf install` 前添加 `dnf config-manager --setopt=max_retries=10` 增加重试次数，或通过 `dnf install --setopt=retries=10 ...` 提高容错。但这属于绕过而非修复根因，不推荐。
+若重试仍然失败，可尝试在 Dockerfile 中为 `dnf` 命令添加重试机制（如 `dnf install --setopt=retries=10 --setopt=timeout=30 ...`），或显式指定其他 openEuler 镜像仓库地址以绕过存在 HTTP/2 兼容性问题的特定镜像节点。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP4 仓库镜像服务器在构建时间点（2026-07-09 14:46 UTC）是否存在已知的服务中断或 HTTP/2 协议问题
-- 该仓库地址（`repo.****.org`，已脱敏）的负载均衡、CDN 或反向代理的 HTTP/2 实现是否有已知缺陷
+- 确认 openEuler 24.03-LTS-SP4 仓库 `repo.****.org` 在 CI 构建环境中的网络可达性和 HTTP/2 兼容性状态。
+- 如该问题持续出现，需要确认 24.03-LTS-SP3 等其他版本仓库（同批次 CI 构建）是否也出现相同问题，以排除是否为仓库侧的系统性变更。
