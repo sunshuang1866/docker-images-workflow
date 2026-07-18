@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败属于基础设施问题（infra-error），与 PR 代码变更无关。
+CI 基础设施故障（BuildKit 构造器崩溃），与 PR 代码变更无关，无需代码修改。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告明确指出，构建失败发生在 `dnf install` 下载系统包阶段，BuildKit 构建器 `euler_builder_20260709_224657` 被 CI 基础设施侧主动关闭（`graceful_stop` goaway 帧），导致 Docker 客户端连接中断。失败根因是 CI 节点网络速度极慢（仅 77 kB/s），单步构建时间超过基础设施超时阈值。
-
-PR 仅新增了结构正确的 Dockerfile 及配套配置文件，Dockerfile 内容无任何语法或逻辑错误。`dnf install` 阶段的行为完全由 CI 基础设施网络状况和超时策略决定，不受 Dockerfile 内容影响。
-
-**不需要修改任何代码**。修复方向应为 CI 基础设施层面：检查构建节点网络状况、调整 BuildKit 超时/存活检测配置，或重试构建任务。
+CI 分析报告明确指出失败类型为 `infra-error`。构建在 `dnf install` 步骤（第 2 个构建步骤）失败，原因是 CI runner `ecs-build-docker-x86-hk` 网络状况极差（dnf 下载元数据速率仅 77 kB/s），导致 BuildKit 构造器 `euler_builder_20260709_224657` 被 CI 平台的资源回收机制杀死（`graceful_stop`），客户端连接断开（`error reading from server: EOF`）。PR 仅新增了一个标准 Dockerfile 和相关元数据文件，构建尚未到达任何与 scann 或 Python 相关的步骤，与本次失败无关联。建议重新触发 CI 构建，若多次重试后仍出现同样问题，需排查该 runner 节点的网络连通性和 BuildKit 守护进程配置。
 
 ## 潜在风险
 无
