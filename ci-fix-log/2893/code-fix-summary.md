@@ -1,21 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是基础设施问题（infra-error），非 PR 代码缺陷。
+无需代码修改。此为 CI 基础设施问题（infra-error），CI runner 上缺少 `shunit2` shell 单元测试框架，导致 `eulerpublisher` 的 [Check] 阶段中 `common_funs.sh` 在 `source shunit2` 时报 `file not found`。
 
 ## 修改的文件
-无
+无（本次 PR 代码无问题，不修改任何文件）
 
 ## 修复逻辑
-CI 分析报告明确指出失败原因为 CI 基础设施问题：
+CI 分析报告确认：
+- Docker 镜像构建完全成功（422 个编译目标全部通过，镜像导出和推送均成功）
+- 失败仅发生在 CI runner 的 [Check] 阶段，根因是 `shunit2` 未安装或不在预期路径
+- 此问题与 PR #2893 的任何文件变更无关，属于 CI 运维团队职责范围
 
-- 失败位置：`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`（CI 测试框架脚本）
-- 直接错误：`shunit2: file not found` — CI runner 上未安装 `shunit2` shell 测试库
-- 与 PR 无关的证据：Docker 镜像构建 6 个步骤全部成功，镜像推送成功，422 个编译目标全部通过，`named` 链接成功
-
-PR 修改的 5 个文件（Dockerfile、named.conf、README.md、image-info.yml、meta.yml）均与 `shunit2` 缺失无关，不存在任何代码层面的缺陷需要修复。
-
-修复方案为在 CI runner 上安装 `shunit2`（`yum install -y shunit2`），或确保 `eulerpublisher` 测试脚本的 `PATH` 包含 `shunit2` 安装路径。这属于 CI 运维操作，不涉及源码修改。
+需要在 CI runner（aarch64 架构的 `ecs-build-docker-aarch64-*` 系列节点）上安装 `shunit2`，确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 能正常 `source` 到它。
 
 ## 潜在风险
-无
+无（未修改任何代码）
