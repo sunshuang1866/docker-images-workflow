@@ -1,16 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改——CI 失败为基础设施错误，与 PR 变更内容无关。
+无需代码修改。此 CI 失败为基础设施误报——`eulerpublisher` 工具的 appstore 发布预检将根级 `README.md` 的纯文档变更误判为需要参与应用镜像发布路径校验，导致 "Path Error"。
 
 ## 修改的文件
-无
+无。
 
 ## 修复逻辑
+PR #3153 是一个纯文档更新（`docs: update available base image tags in README`），仅修改了仓库根级的 `README.md` 和 `README.en.md`，用于更新基础镜像的可用 tags 列表。这些文件的变更属于正常的仓库维护工作，不应受 appstore 发布路径规范约束。
 
-PR #3153 仅修改了仓库根目录的 `README.md`（文档更新），属于纯文档变更。CI 失败的原因是 appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py`）将仓库根目录文档文件也纳入了 Docker 镜像路径规范检查范围，导致 `README.md` 被误判为不符合 `/README.md` 路径格式。
+CI 失败根因在于 `eulerpublisher` 工具的 appstore 预检环节未区分"纯文档 PR"和"镜像发布 PR"，对所有 PR 的文件变更统一进行 appstore 路径校验，而根级 `README.md` 不符合 `{分类}/{镜像名}/{版本}/{OS版本}/` 的发布路径模式，导致检查报错。这不是 `README.md` 文件本身的问题，而是 CI 流程设计上的限制。
 
-该 CI 工具的路径校验逻辑需要修改以过滤掉仓库根目录的非镜像文件（如 `README.md`、`README.en.md`、`.github/` 等），但这属于 CI 基础设施配置/代码的修复，不涉及 PR 变更文件本身。`README.md` 的内容和格式均无问题，无需任何代码修改。
+**修复应在 CI 流水线配置层面进行**，而非修改 PR 文件：需在 Jenkinsfile 或等效 CI 配置中增加对根级文档文件（如 `/README.md`、`/README.en.md`）的 appstore 检查豁免逻辑，使纯文档 PR 不被纳入 appstore 路径校验。
 
 ## 潜在风险
-无——`README.md` 未做任何修改，不影响任何功能。
+无——未修改任何代码文件。若强行修改 `README.md` 以绕过 CI 检查（如添加伪造的路径结构注释），将破坏文档可读性，属于不正确的修复方式。
