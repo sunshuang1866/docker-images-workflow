@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI appstore 发布规范校验工具对 `README.md` 路径比对失败——校验工具期望路径为 `/README.md`，但实际传入路径为 `README.md`，因缺少前导斜杠归一化导致误报。
+PR #2790 在 README.md 中引入了重复的 `24.03-lts-sp3` 标签条目（已被先前修复提交移除）；CI 预检工具 Path Error 为基础设施问题，无法在当前 PR 变更文件范围内修复。
 
 ## 修改的文件
-无。在允许修改的文件范围（`README.md`）内，没有需要修复的代码问题。
+- `README.md`: 移除重复的 `[24.03-lts-sp3]` 独立条目（该标签已在 `[24.03-lts-sp3, 24.03, latest]` 条目中涵盖）。此修复已在先前提交 `eb68566a9` 中完成，当前文件状态已正确。
 
 ## 修复逻辑
-CI 失败的根本原因是校验脚本 `eulerpublisher/update/container/app/update.py:273` 中的路径比较逻辑未对文件路径做归一化处理（统一添加或去除前导 `/`）。`README.md` 文件本身位于仓库根目录，内容正确无误，无任何需要修改的地方。
-
-由于本 PR 仅修改了 `README.md`，而 CI 校验工具代码不在 `pr.changed_files` 范围内，无法在允许的文件范围内实施修复。该问题需由 CI 维护者在 `update.py` 中增加路径归一化逻辑来解决。
+分析报告指出两个问题：
+1. **主要问题（Path Error）**：CI 预检工具 `update.py` 对所有变更文件强制进行 appstore 发布规范路径校验，将根目录 `README.md` 视为需要符合应用镜像目录规范的路径，报告 `[Path Error] The expected path should be /README.md`。根因在 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑中，该工具缺少对根目录文档文件（非应用镜像文件）的豁免逻辑。此修复需要修改 `eulerpublisher` 仓库中的 `update.py`，不在本 PR 变更文件（`README.md`）范围内。
+2. **次要问题（重复标签）**：PR 的 diff 中 `24.03-lts-sp3` 出现了两次——一次作为 `[24.03-lts-sp3, 24.03, latest]`（替代旧的最新标签），另一次作为独立的 `[24.03-lts-sp3]`。独立的条目已删除，当前文件不需要进一步修改。
 
 ## 潜在风险
-无——`README.md` 未做任何修改，不存在引入新问题的风险。
+无。内容修复（去重）已生效，不会影响其他功能。Path Error 需要 `eulerpublisher` 仓库中 `update.py` 增加对根目录文档文件的豁免逻辑。
