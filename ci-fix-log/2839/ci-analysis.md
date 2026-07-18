@@ -5,37 +5,40 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: shunit2 测试框架缺失
+- 新模式标题: shunit2测试框架缺失
 - 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-09 09:40:24,013 - INFO - [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
+2026-07-09 09:40:24,021-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
 +-------------+-------------+--------------+
 | Check Items | Description | Check Result |
 +-------------+-------------+--------------+
 +-------------+-------------+--------------+
 Build step 'Execute shell' marked build as failure
+Notifying upstream projects of job completion
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（CI 测试脚本，非 PR 代码）
-- 失败原因: CI runner 上未安装 `shunit2` 测试框架，`common_funs.sh` 脚本在第 13 行尝试加载 `shunit2` 时失败，导致 `[Check]` 阶段的容器验证测试完全无法执行（检查结果表为空）
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: CI 测试编排工具 `eulerpublisher` 在 [Check] 阶段调用 `common_funs.sh` 脚本时，依赖的 `shunit2` shell 单元测试框架在 CI Runner 环境中未安装，导致测试框架初始化失败。Docker 镜像的构建（`#8 DONE 268.4s`）与推送（`[Push] finished`）均已成功完成，失败仅发生在后置检查阶段。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** Docker 镜像构建和推送均已成功完成（日志显示 `[Build] finished`、`[Push] finished`，`#8 DONE 268.4s`，镜像 sha256 已生成并推送至 registry）。失败发生在 CI 流水线的 `[Check]` 后置验证阶段，原因是 CI runner 自身的测试依赖 `shunit2` 缺失，PR 新增的 Dockerfile、entrypoint.sh、meta.yml 和 README.md 均未触发任何构建错误。
+**与 PR 变更无关**。PR 新增的 Dockerfile 和 entrypoint.sh 完全正确——镜像构建和推送均顺利完成，PostgreSQL 17.6 从源码编译到 `make install` 全过程无错误。失败是因为 CI Runner 的测试环境缺少 `shunit2` 框架，属于 CI 基础设施问题。Check 结果表为空（无任何测试条目输出），进一步证明测试框架在初始化阶段即已崩溃，未进入实际测试。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 或测试容器中安装 `shunit2` 测试框架。`shunit2` 是一个 shell 单元测试框架，可通过包管理器（如 `dnf install shunit2`）或从 GitHub 下载安装。此为 CI 基础设施配置问题，Code Fixer 无需对 PR 代码做任何修改。
+在 CI Runner 的测试镜像或预置环境中安装 `shunit2`。可通过如下途径之一：
+- 在 Runner 置备脚本中添加 `dnf install -y shunit2` 或 `pip install shunit2`
+- 确保 `eulerpublisher` 容器测试依赖中的 `shunit2` 二进制在 `PATH` 中可达
+- 若 `shunit2` 应以本地脚本方式提供，在 `common_funs.sh` 所在目录部署 `shunit2` 脚本文件
 
 ## 需要进一步确认的点
-- 确认 CI runner 的操作系统包源中 `shunit2` 的可用性（`dnf search shunit2`）
-- 确认 `common_funs.sh` 期望的 `shunit2` 安装路径（是否在 `PATH` 中）
-- 确认是否需要联系 CI 运维团队在构建节点上预装该依赖
+- 确认 CI Runner（用于 24.03-lts-sp4 镜像检查的环境）中是否预装了 `shunit2`，以及 `common_funs.sh:13` 处引用 `shunit2` 的具体方式（`source`、`.`、还是直接命令调用）
+- 确认同一 CI 流水线中其他 24.03-lts-sp4 镜像（非 postgres）的 Check 阶段是否存在相同的 `shunit2` 缺失问题，以判断是否为该 OS 版本 Runner 的全局缺陷
