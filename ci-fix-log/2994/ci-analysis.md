@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 连接中断
-- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, Unavailable, euler_builder
+- 新模式标题: BuildKit构建器终止
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, Unavailable
 
 ## 根因分析
 
@@ -19,23 +19,17 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 #7（Dockerfile 指令 2/4，即 `dnf install` 步骤）
-- 失败原因: CI 构建所用的 BuildKit builder 实例（`euler_builder_20260709_224657`）在 `dnf install` 下载系统包过程中被外部终止（gRPC `graceful_stop` goaway 帧），导致 BuildKit 客户端与 builder 之间的连接断开，构建中断。
+- 失败位置: Docker 构建步骤 `#7 [2/4]`（`dnf install` OS 元数据下载阶段）
+- 失败原因: BuildKit 远程构建器实例 `euler_builder_20260709_224657` 在 Docker 镜像构建过程中被服务端主动终止（`graceful_stop`），导致客户端收到 GOAWAY 信号后连接断开，构建中断。构建器实例在断开后被移除（`no builder found`）。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该 PR 仅新增了一个标准的 ScaNN Dockerfile（安装编译依赖 → 编译 Python 3.9.19 → pip 安装 scann），以及配套的 README、image-info.yml、meta.yml 元数据更新。`dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel` 是合法且常见的依赖安装命令。失败发生在 `dnf` 下载系统元数据（耗时约 38 秒后）时，BuildKit builder 被 CI 基础设施意外终止，属于纯粹的基础设施问题。
+**与 PR 无关。** 本次 PR 新增的 Dockerfile 步骤 `#7`（`dnf install`）是标准操作，日志显示 `dnf` 正在正常下载 OS 元数据（2.8 MB，耗时约 39 秒）时，BuildKit 基础设施发生故障。Dockerfile 本身语法正确，构建定义已被成功加载（`#2 transferring dockerfile: 704B done`）。该失败属于 CI 基础设施层面的 BuildKit 服务端异常终止，非 PR 代码变更触发。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复。** 该失败为 CI 基础设施问题（BuildKit builder 实例在构建中途被外部终止），与 PR 的 Dockerfile 或元数据变更无关。建议：
-- 重新触发 CI 构建（retry），大概率可通过。
-- 若反复出现，需排查 Jenkins executor 节点的资源情况（内存是否不足导致 OOM Kill）或构建超时配置。
+**无需修改 PR 代码。** 这是 CI 基础设施问题——BuildKit 构建器实例 `euler_builder_20260709_224657` 在构建中途被服务端终止。应触发 CI 重跑（re-run / retry），若重跑后仍失败，需联系 CI 运维排查 BuildKit 服务端为何发送 `graceful_stop`（可能原因：节点资源不足触发构建器驱逐、构建器实例超时自动回收、宿主机维护操作等）。
 
 ## 需要进一步确认的点
-- Jenkins executor `ecs-build-docker-x86-hk` 在构建期间是否存在资源耗尽（内存/磁盘）或超时触发。
-- `euler_builder_20260709_224657` BuildKit 实例是否被外部清理脚本或容器生命周期管理策略提前回收。
-- 若重试后仍失败，需提供重试日志以排除间歇性网络问题。
-
-## 修复验证要求
-无需验证（infra-error，非代码问题）。
+- BuildKit 服务端（euler_builder）为何在 `dnf install` 阶段发送 `graceful_stop`：需检查 BuildKit 守护进程日志，确认是资源驱逐、超时策略还是宿主机运维导致。
+- 若重试后问题持续出现，需确认 `euler_builder` 构建器池是否存在容量或稳定性问题。
