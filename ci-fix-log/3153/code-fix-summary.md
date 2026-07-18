@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败属于基础设施错误（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败为 **infra-error**（CI 基础设施问题），与 PR #3153 中 README.md 的文档变更无关。
 
 ## 修改的文件
-无
+无。当前源代码仓库中的文件无需任何修改。
 
 ## 修复逻辑
-CI 失败分析报告明确判定该失败为 `infra-error` 类型。CI 的 appstore 发布规范预检工具（`eulerpublisher/update/container/app/update.py`）在扫描 PR 变更文件时，对仓库根目录的 `README.md`（项目主文档）产生路径校验误报——该工具将此文件当作需要符合 appstore 发布路径规范的应用镜像 README 进行校验，导致 `[Path Error]` 误报。
+CI 失败的直接原因是 `eulerpublisher/update/container/app/update.py:273` 中的 appstore 发布规范预检脚本对根级文件 `README.md` 执行了路径校验，其期望的绝对路径 `/README.md` 与 `git diff` 输出的相对路径 `README.md` 不匹配，导致校验失败。
 
-PR #3153 仅修改了 `README.md` 和 `README.en.md` 中的基础镜像可用 Tags 列表，属于纯文档变更，不涉及任何应用镜像 Dockerfile、meta.yml、image-info.yml 或 image-list.yml。该 CI 失败并非 PR 代码变更引入的问题，无法通过修改 PR 涉及的源文件解决。
+**根因不在本仓库代码中。** PR #3153 仅更新了 README.md 中基础镜像 Tags 列表的文档内容（新增 24.03-lts-sp4、24.03-lts-sp3、25.09、24.03-lts-sp2 条目），改动内容完全正确，不涉及任何应用镜像或 appstore 发布制品。CI 流水线中的 appstore 校验流程未能区分"根级项目文档变更"与"应用镜像文件变更"，错误地将 README.md 纳入 appstore 路径校验。
 
-修复应在上游 CI 基础设施代码（`eulerpublisher` 仓库的 `update.py`）中进行：对位于仓库根目录且不属于任何应用镜像目录（如 `AI/`、`Bigdata/`、`Database/` 等）的文件，跳过 appstore 路径规范校验。
+修复应位于 CI 编排层面（`eulerpublisher` 工具或 Jenkins pipeline 配置），需增加按文件路径过滤的机制，排除根级文件（如 `README.md`、`README.en.md`、`LICENSE`、`CONTRIBUTING.md` 等）的 appstore 路径校验。
 
 ## 潜在风险
-无 — 未修改任何源文件。
+无。本仓库代码无需修改，不涉及代码级变更风险。
