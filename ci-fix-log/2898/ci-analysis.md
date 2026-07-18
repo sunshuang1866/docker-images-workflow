@@ -2,45 +2,53 @@
 
 ## 基本信息
 - PR: #2898 — chore(go): add openEuler 24.03-LTS-SP4 support
-- 失败类型: infra-error
-- 置信度: 高
-- 知识库匹配: 新模式（与模式39同类，但具体缺失组件不同）
-- 新模式标题: CI 测试工具缺失
-- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, [Check] test failed
+- 失败类型: lint-error
+- 置信度: 低
+- 知识库匹配: 模式17 + 模式42
+- 新模式标题: (无需填写 — 匹配已有模式)
+- 新模式症状关键词: (无需填写 — 匹配已有模式)
 
 ## 根因分析
 
 ### 直接错误
-```
-2026-07-09 12:32:51,073 - INFO - [Check] checking openeulertest/go:1.25.6-oe2403sp4-aarch64 ...
-/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-2026-07-09 12:32:51,082 - CRITICAL - [Check] test failed
-```
+CI 日志未提供，无法展示直接错误信息。以下分析仅基于 PR diff 推断。
 
 ### 根因定位
-- 失败位置: CI 运行器环境 — `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 运行器上未安装 `shunit2`（Shell 单元测试框架），导致容器镜像的 `[Check]` 验证阶段无法执行测试脚本，`common_funs.sh` 中 `source` 或调用 `shunit2` 时找不到该命令。
+- 失败位置: `Others/go/1.25.6/24.03-lts-sp4/Dockerfile:1`（文件起始位置）
+- 失败原因: **日志缺失，无法确定根因**。基于 PR diff 分析，新增的 Dockerfile 缺少项目要求的 Copyright 和 SPDX-License-Identifier 头声明（匹配 **模式17**），CI `check_package_license` 检查极可能因此未通过。此外，Dockerfile 中使用 `yum` 而非 `dnf` 作为包管理器，虽然 openEuler 24.03 通常提供 `yum` 到 `dnf` 的符号链接，但在 CI 严格校验下可能引发兼容性问题。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** Docker 镜像构建（Step #1–#11）和推送均已成功完成：
-
-- 日志明确显示 `[Build] finished` 和 `[Push] finished`
-- 镜像 `openeulertest/go:1.25.6-oe2403sp4-aarch64` 已成功构建并推送到 `docker.io`
-- 失败仅发生在构建完成后的 `[Check]` 测试阶段，原因是 CI runner 缺少 `shunit2` 工具
-
-PR 仅新增了一个 Go 1.25.6 的 Dockerfile、更新了 README.md、image-info.yml 和 meta.yml，均为纯配置/文档类变更，不涉及任何构建逻辑修改。
+PR 新增了 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile`（34 行新文件），该文件第一行即为 `ARG BASE=openeuler/openeuler:24.03-lts-sp4`，未按照项目规范在文件开头添加 Copyright + SPDX 头声明。项目的 CI 流水线包含 `check_package_license` 检查，新增文件缺少版权头会导致 lint 阶段失败。此外，PR 修改了 `Others/go/README.md`、`Others/go/doc/image-info.yml` 和 `Others/go/meta.yml`，这些已有文件的变更内容本身无格式错误。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-在 CI runner 环境中安装 `shunit2` 工具。openEuler 24.03-LTS-SP4 可通过以下方式安装：
+### 方向 1（置信度: 中）
+为新 Dockerfile 添加 Copyright 和 SPDX-License-Identifier 头。在 `Others/go/1.25.6/24.03-lts-sp4/Dockerfile` 的第一行之前添加：
 
 ```
-dnf install -y shunit2
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
+# SPDX-License-Identifier: MulanPSL-2.0
 ```
 
-或由 CI 运维团队在 runner 镜像中将 `shunit2` 预装到 `/usr/local/etc/eulerpublisher/tests/container/common/` 可发现的路径下。
+这是模式17中确认的修复方式，历史案例中多个 PR 因缺少版权头导致 CI 失败。
+
+### 方向 2（置信度: 低）
+将 Dockerfile 中的 `yum` 替换为 `dnf`。openEuler 24.03 的官方包管理器为 `dnf`，虽然 `yum` 通常作为兼容性符号链接存在，但在 CI 最小化基础镜像环境中可能不提供该链接，导致 `yum: command not found`。需要将三处 `yum` 改为 `dnf`：
+
+- 第 11 行: `yum update -y && yum -y install ...` → `dnf update -y && dnf -y install ...`
+- 第 11 行: `yum clean all` → `dnf clean all`
+- 第 28 行: `yum -y remove ...` → `dnf -y remove ...`
+- 第 29 行: `yum clean all` → `dnf clean all`
+
+### 方向 3（置信度: 低）
+若 CI 检查 `Others/image-list.yml` 中是否注册了新增镜像，PR 可能因未更新该文件而失败。需要在 `Others/image-list.yml` 中补充新增镜像的条目。此方向缺乏日志证据，需进一步确认。
 
 ## 需要进一步确认的点
-- 同一 CI runner 上其他镜像（非本次 PR 的镜像）的 `[Check]` 测试是否也因同样原因失败？如果是，说明这是 CI 环境的普遍问题而非本次 PR 独有。
-- 确认 `shunit2` 的确切安装路径要求——`common_funs.sh:13` 是通过 `PATH` 查找还是引用了硬编码路径。
+1. **CI 日志缺失**是本报告置信度为"低"的主要原因。必须获取 CI 失败 job 的完整日志才能确认实际错误。
+2. 查看同目录下已有的 `24.03-lts-sp3` Dockerfile（`Others/go/1.25.6/24.03-lts-sp3/Dockerfile`）开头的 Copyright 头格式，确认本次新增文件是否与历史文件格式一致。
+3. 确认 `Others/image-list.yml` 是否需要同步更新以包含新镜像的路径映射。
+4. 确认 CI 基础镜像中 `yum` 命令是否可用（通过查看其他 24.03-lts-sp4 Dockerfile 是否也使用 `yum`）。
+
+## 修复验证要求
+1. code-fixer 必须参考同仓库中已通过 CI 的 24.03-lts-sp4 Dockerfile（如 `Others/go/1.25.6/24.03-lts-sp3/Dockerfile` 或其他已存在的 SP4 Dockerfile），确认 Copyright 头格式、包管理器命令（`yum` vs `dnf`）等细节与项目规范一致后再提交。
+2. 若修复方向仅为添加 Copyright 头，提交后需等待 CI 重新运行以验证是否为唯一的失败原因。如果 CI 仍然失败，需获取完整日志进行二次分析。
