@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error）：BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被服务端主动发送 `graceful_stop` 信号关闭，导致 gRPC 连接中断。
+无需代码修复。CI 失败属于基础设施故障（infra-error），与 PR #2994 的代码变更无关。
 
 ## 修改的文件
-无（未修改任何源代码文件）
+无。未修改任何文件。
 
 ## 修复逻辑
-CI 分析报告确认本次失败与 PR #2994 的代码变更无关。PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 等 4 个常规镜像版本文件，构建在执行 `dnf install` 阶段时，BuildKit builder 因 CI 集群调度/资源回收策略被提前销毁。这是 CI 基础设施的偶发性问题，重新触发 CI 构建即可。
+CI 失败的直接原因是 BuildKit 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 步骤中被外部触发优雅终止（`graceful_stop`），导致 RPC 连接断开。这是 CI 基础设施的间歇性故障，与 PR 新增的 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及其他元数据文件无关。Docker 构建的前序步骤（基础镜像拉取 `[1/4]`）均已成功完成。
+
+**修复方式：重试 CI Job 即可恢复，无需修改任何源代码。**
 
 ## 潜在风险
-无
+无。未做任何代码修改，不存在引入新问题的风险。
