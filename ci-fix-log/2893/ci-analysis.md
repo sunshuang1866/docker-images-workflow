@@ -4,9 +4,9 @@
 - PR: #2893 — chore(bind9): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: shunit2测试框架缺失
+- 新模式症状关键词: shunit2, file not found, common_funs.sh, Check test failed
 
 ## 根因分析
 
@@ -20,19 +20,16 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 的 `eulerpublisher` 测试环境（`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`）
-- 失败原因: CI Runner 上缺少 `shunit2` Shell 单元测试框架，导致 Docker 镜像构建和推送成功后，`[Check]` 阶段的容器验证脚本 `common_funs.sh` 无法加载 `shunit2` 库而直接失败。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13
+- 失败原因: CI 的 [Check] 阶段运行时，`common_funs.sh` 尝试通过 `.` (source) 命令加载 `shunit2` shell 测试框架，但 `shunit2` 文件在当前 CI runner 环境中不存在，导致检查脚本执行失败。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** Docker 镜像构建、安装和推送阶段全部成功（日志显示 `[Build] finished`、`[Push] finished`、`#9 DONE 41.4s` 安装完成、`#13 DONE 36.0s` 推送完成）。失败发生在 CI 自身测试基础设施（`eulerpublisher` 的 `shunit2` 依赖缺失），属于 CI 环境问题，与本次 PR 新增的 Dockerfile、named.conf 及元数据文件变更无关。
-
-本 PR 仅新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile（45 行）和一个简单的 named.conf 配置文件，不涉及任何 CI 测试框架或 Runner 环境配置。
+**无关。** PR 仅为 bind9 新增 openEuler 24.03-LTS-SP4 的 Dockerfile 及配套元数据（README.md、image-info.yml、meta.yml）。Docker 构建阶段（`#9`）完全成功——所有 422 个编译任务完成，meson install 正常结束，镜像推送（`#13`）也成功完成。失败发生在 CI 编排工具 `eulerpublisher` 的 [Check] 后处理阶段，与 PR 代码变更无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI Runner 的 aarch64 节点上安装 `shunit2` Shell 单元测试框架。openEuler 上可通过 `dnf install shunit2` 安装。此为 CI 基础设施问题，Code Fixer 无需处理 PR 代码。
+CI 运维侧需在 runner 环境中安装 `shunit2` 包（如 `yum install shunit2` 或 `pip install shunit2`），确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 中 `source shunit2` 能找到对应文件。这是纯基础设施问题，不涉及任何 PR 代码修改。
 
 ## 需要进一步确认的点
-- 确认 CI aarch64 构建节点的 `eulerpublisher` 测试环境是否包含 `shunit2`，以及该依赖是否在 Runner 初始化脚本中已配置。
-- 确认该 Check 阶段失败是否影响 x86_64 架构的 CI job（日志仅显示了 aarch64 job，需确认另一个架构是否也因相同原因失败）。
+- 确认 `shunit2` 在 CI runner 上的预期安装路径，以及该 runner 上是否曾成功执行过 [Check] 阶段（可能为首次运行该阶段的环境）；若仅为该 runner 偶发问题，可尝试重试 CI。
