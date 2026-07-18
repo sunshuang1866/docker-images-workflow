@@ -2,19 +2,18 @@
 
 ## 基本信息
 - PR: #3153 — docs: update available base image tags in README
-- 失败类型: lint-error
+- 失败类型: infra-error
 - 置信度: 中
-- 知识库匹配: 新模式
-- 新模式标题: 纯文档PR触发应用商店校验
-- 新模式症状关键词: Path Error, expected path, appstore, README.md, update.py
+- 知识库匹配: 模式11（CI appstore 发布规范预检——路径校验失败）
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-16 20:34:19,171 - INFO: Difference: [ "README.md" ]
-2026-07-16 20:34:43,043 - INFO: Clone https://gitcode.com/sunshuang1866/****-docker-images.git successfully.
-2026-07-16 20:34:43,051 - ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
+2026-07-16 20:34:19,171- INFO: Difference: [
+    "README.md"
+]
+2026-07-16 20:34:43,051- ERROR: There are some specification errors for releasing on appstore in this PR, please check as above.
 +-------------+-----------------------------------------------------+--------------+
 | Check Items |                     Description                     | Check Result |
 +-------------+-----------------------------------------------------+--------------+
@@ -23,26 +22,27 @@
 ```
 
 ### 根因定位
-- 失败位置: `eulerpublisher/update/container/app/update.py:273`
-- 失败原因: PR 仅修改了仓库根目录下的 `README.md` 和 `README.en.md`（纯文档更新），但 CI 的应用商店发布规范校验（appstore release specification check）对所有变更文件执行路径校验。根目录的 `README.md` 不匹配应用商店要求的路径格式（如 `{category}/{app}/{version}/{os-version}/Dockerfile` 等应用镜像子目录结构），被判定为路径错误。
+- 失败位置: `eulerpublisher/update/container/app/update.py:273`（CI appstore 发布规范预检步骤）
+- 失败原因: CI 的 appstore 发布规范校验工具检测到 PR 变更了根目录下的 `README.md`，但其内部路径校验逻辑认为该文件的期望路径为 `/README.md`，与 diff 中报告的路径 `README.md`（无前置 `/`）不匹配，导致路径校验失败。该 PR 为纯文档变更（仅更新 README 中基础镜像可用 tag 列表），不涉及任何应用镜像 Dockerfile 或 meta.yml 等 appstore 发布制品。
 
 ### 与 PR 变更的关联
-PR 变更（更新的基础镜像 tag 列表、新增 SP4/SP3/25.09 版本）本身是合法的文档内容更新，但触发 CI 失败的原因是：该 PR **仅有文档类文件变更**，却经过了应用商店发布规范校验步骤。`update.py` 将根目录 `README.md` 视为需要校验的应用商店发布文件，而其路径不符合应用镜像子目录的预期格式，导致校验失败。
+PR 变更仅涉及两个文件：
+1. `README.md` — 更新基础镜像 tag 列表（sp2→sp4，新增 sp3、25.09、sp2 等条目）
+2. `README.en.md` — 同上（英文版同步更新）
+
+PR 未修改任何应用镜像的 Dockerfile、meta.yml、image-info.yml 等 appstore 发布相关文件。CI 失败源于其预检工具 `eulerpublisher/update/container/app/update.py` 对 diff 中检测到的 `README.md` 执行了不恰当的 appstore 路径校验。该工具的路径字符串比较方式（diff 报告 `README.md` 无前置 `/`，而校验规则期望 `/README.md`）触发了误判。
+
+**本次失败与 PR 代码变更无直接因果关系**——PR 的文档内容本身正确，失败是 CI 工具的路径校验机制对纯文档 PR 的兼容性问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 中）
-CI 校验逻辑可能未区分"纯文档 PR"和"应用镜像发布 PR"。如果 `update.py` 或 CI 流水线配置中存在对文件变更类型的前置过滤（例如仅校验特定子目录下的文件），需要确保根目录的文档文件（`README.md`、`README.en.md`）被排除在应用商店发布规范校验之外。或者，该 PR 本不应触发应用商店校验 job。
+CI appstore 预检工具 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑可能存在缺陷：它从 diff 中提取变更文件路径时未统一添加前置 `/`，导致与期望路径 `/README.md` 的字符串比较失败。根本修复应在 CI 工具侧（`eulerpublisher` 仓库）对 diff 提取的路径做归一化处理（统一添加或移除前置 `/`），而非在本 PR 中修改。本 PR 作为纯文档 PR，可通过 CI 侧加白名单或跳过根目录 README 文件的 appstore 校验来绕过。
 
 ### 方向 2（置信度: 低）
-错误消息 "The expected path should be /README.md" 可能存在路径归一化问题——CI 工具内部使用无前导 `/` 的路径（如 `README.md`），而校验规则中保存的期望路径带有前导 `/`（如 `/README.md`），导致字面比较失败。但这与"该文件本不应被校验"的根因指向不同，需阅读 `update.py` 源码确认。
+如果 CI 策略要求任何 PR 都必须包含至少一个有效的 appstore 发布制品（应用镜像 Dockerfile + meta.yml），则本次文档变更 PR 需要额外包含某个应用镜像的更新才能通过 CI。但这与 PR 标题 `docs:` 的意图矛盾，且不合理的 CI 策略应被修正，不建议走此方向。
 
 ## 需要进一步确认的点
-1. 需查阅 `eulerpublisher/update/container/app/update.py` 中第 270-280 行的校验逻辑，确认路径校验的具体匹配规则，以及是否存在文件类型/路径白名单。
-2. 需确认 CI 流水线配置中"应用商店发布规范校验"job 的触发条件——是否应对所有 PR 触发（包括纯文档 PR），还是仅对包含应用镜像目录文件变更的 PR 触发。
-3. 需确认该 PR 实际对应的 CI job 编号：日志中展示的 `PR 3184 [sunshuang1866:fix/3153 -> master]` 为 fix 分支创建的另一个 PR，需要确认 #3153 本身的 CI 日志是否缺失或与此一致。
-
-## 修复验证要求
-若修复方向涉及修改 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑或白名单规则，code-fixer 必须：
-1. 从上游 eulerpublisher 仓库拉取 `update.py` 完整源码，确认第 222-273 行之间的路径校验函数签名和匹配逻辑。
-2. 验证修改后的逻辑对纯文档 PR（仅根目录 README 文件变更）能正确跳过校验，同时对包含应用镜像目录（如 `AI/`、`Database/`）文件变更的 PR 仍正常执行校验。
+1. `eulerpublisher/update/container/app/update.py:273` 处路径校验逻辑的具体实现——确认是否因字符串前缀不一致（`README.md` vs `/README.md`）导致误判
+2. CI 编排层是否对纯文档 PR（仅修改根目录 README 类文件）有白名单豁免机制，若有则需确认为何未被触发
+3. 日志中 `Difference: ["README.md"]` 仅列出了 `README.md`，未列出 `README.en.md`——需确认 CI 工具的 diff 提取范围（是否仅监视特定文件名模式）
