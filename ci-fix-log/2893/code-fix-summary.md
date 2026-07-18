@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败属于基础设施问题（infra-error），与 PR 代码变更无关。
+CI 基础设施问题（infra-error）：CI runner 缺少 `shunit2` shell 测试框架，导致 eulerpublisher 的 [Check] 阶段因 `shunit2: file not found` 而失败。此问题与 PR 代码变更无关，无需修改任何源代码。
 
 ## 修改的文件
-无
+无（此失败为 CI 基础设施问题，不需要修改任何代码文件）。
 
 ## 修复逻辑
-CI 分析报告明确指出：Docker 镜像构建（422 个编译目标全部成功）和推送均已成功完成，失败发生在 `eulerpublisher` CI 工具的 [Check] 阶段。错误根因是 aarch64 runner 上缺少 `shunit2` shell 测试库（`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13: .: shunit2: file not found`），属于 CI 基础设施的测试依赖缺失问题。
-
-PR 仅新增 bind9 的 Dockerfile、配置文件、并更新 README/meta/image-info 元数据，代码本身和生成的 Docker 镜像均无问题。此问题需要 CI 运维团队在对应 runner 上安装 `shunit2` 或在测试脚本中修复其路径。
+CI 分析报告明确指出这是 **infra-error**，根因是 CI runner 缺少 `shunit2` 依赖。Docker 镜像的构建（422 个编译目标全部成功）和推送到 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64` 均已完成，失败仅发生在 CI 工具链自身的 [Check] 阶段。根据修复方向建议，此问题需由 CI 运维团队在 runner 上安装 `shunit2` 框架解决。
 
 ## 潜在风险
-无（未修改任何代码）
+无
