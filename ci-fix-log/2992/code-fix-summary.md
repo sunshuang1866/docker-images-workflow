@@ -1,18 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败由 openEuler 24.03-LTS-SP4 仓库镜像站的 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR）导致，属于 CI 基础设施/网络瞬态故障（infra-error），与 PR 代码变更无关。无需代码修改。
+无代码修复。CI 失败为 openEuler 24.03-LTS-SP4 仓库镜像 HTTP/2 协议层故障导致的临时性基础设施问题（infra-error），与 PR #2992 的代码变更无关。
 
 ## 修改的文件
-无。所有 PR 变更文件（Dockerfile、meta.yml、image-info.yml、README.md）代码均正确无误，无需修改。
+无。本次失败属于 infra-error，无需修改任何源代码文件。
 
 ## 修复逻辑
-CI 失败分析报告明确将根因归类为 `infra-error`：
-- 失败发生在 `dnf install` 从上游 openEuler 仓库下载 RPM 包的阶段，多个包遭遇 HTTP/2 流中断
-- 日志中部分包（glibc-devel、gcc-gfortran）在遭遇同样错误后通过自动重试成功下载，进一步佐证为间歇性网络故障
-- PR 仅新增了一个符合现有规范（与 SP3 版本构建模式一致）的 Dockerfile 及配套元数据文件，不涉及任何语法或逻辑错误
+CI 构建日志显示多个 RPM 包（gcc、gcc-gfortran、glibc-devel、guile）从 `repo.****.org` 下载时出现 Curl error (92): Stream error in the HTTP/2 framing layer: INTERNAL_ERROR。两个并行构建阶段（#7 和 #8）均遭遇同一仓库的 HTTP/2 流错误，证实问题出在仓库端而非 Dockerfile 配置。Dockerfile 的 `dnf install` 命令语法和包名均正确，与已有的 sp3 版本 Dockerfile 模式一致。
 
-**推荐操作**：直接重试 CI 构建。
+## 修复方向
+等待 CI 基础设施恢复后重新触发构建。若多次重试后仍然失败，可在 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 临时禁用 HTTP/2 作为规避手段。
 
 ## 潜在风险
-无。若该仓库持续出现 HTTP/2 流错误（非 transient），可考虑在 Dockerfile 的 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 以回退到 HTTP/1.1，但此为规避方案，不应作为常规修复手段。
+无
