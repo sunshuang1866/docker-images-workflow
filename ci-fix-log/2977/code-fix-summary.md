@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 本次 CI 失败为 `infra-error`。
+CI 构建失败由 `repo.openeuler.org` 仓库 HTTP/2 传输层瞬时错误导致，属于基础设施问题，与 PR 代码变更无关。无需代码修改。
 
 ## 修改的文件
-无
+无。本次为 infra-error，不对任何源文件做修改。
 
 ## 修复逻辑
-CI 失败根因是 `repo.openeuler.org` 在 aarch64 runner 上构建时出现网络不稳定，导致 yum 在下载 `vim-common` 等 RPM 包时发生多次 Curl 错误（HTTP/2 流异常中断、SSL 读取失败），yum 重试耗尽后报错退出。PR #2977 新增的 Dockerfile 内容与已有 SP3 版本结构一致，包依赖声明正确，与网络故障无关。此问题属于 CI 基础设施侧临时性网络波动，重新触发 CI 构建大概率可成功通过，无需对 PR 代码做任何修改。
+分析报告确认失败根因为：Docker 构建在 aarch64 runner 上执行 `yum install` 时，openEuler 官方仓库服务器 `repo.openeuler.org` 的 HTTP/2 连接出现 `INTERNAL_ERROR`，导致 173 个待下载包中的最后一个 `vim-common` 下载失败且无备用镜像可用。日志中另有 gcc、kernel-headers 等包也出现了同类 Curl error (92)，但重试后成功下载，表明这是仓库服务器在该时间段内的暂时性网络波动。Dockerfile 中 `yum install` 命令语法正确，包列表均为合法包。修复方式是重试 CI 构建，无需对代码做任何修改。
 
 ## 潜在风险
-无
+无。重试 CI 构建无副作用。
