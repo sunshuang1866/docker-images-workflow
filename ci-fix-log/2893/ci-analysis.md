@@ -4,13 +4,14 @@
 - PR: #2893 — chore(bind9): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39（CI工具依赖缺失）
+- 知识库匹配: 模式39
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
-2026-07-10 09:24:00,652 - INFO - [Check] checking openeulertest/bind9:9.21.23-oe2403sp4-aarch64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: .: shunit2: file not found
 2026-07-10 09:24:00,662 - CRITICAL - [Check] test failed
 Build step 'Execute shell' marked build as failure
@@ -18,27 +19,25 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 环境中 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`（`eulerpublisher` CI 测试框架层）
-- 失败原因: CI 测试框架的 `common_funs.sh` 脚本尝试通过 `. shunit2` 加载 `shunit2` 测试库，但该库在 CI Runner 的文件系统中不存在（未安装或路径配置错误），导致 `[Check]` 阶段立刻退出，返回失败状态。
+- 失败位置: CI [Check] 阶段 — `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
+- 失败原因: CI 测试脚本 `common_funs.sh` 尝试通过 `source` 命令 (`.`) 加载 `shunit2` 单元测试框架，但该框架在 CI runner 环境中缺失，导致检查阶段无法执行容器启动测试而标记为失败。
 
 ### 与 PR 变更的关联
-**无关**。PR 新增了一个 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关配置文件，这些变更与 CI 测试框架内部依赖 `shunit2` 不存在之间没有任何因果关系。日志明确显示 Docker 镜像的构建、导出和推送三个阶段均已成功完成：
+**与 PR 变更无关。** Docker 镜像构建和推送均已成功完成：
+- 编译阶段 422/422 全部通过，无任何编译错误
+- Docker 构建 6 个步骤全部 `DONE`，镜像导出和推送均成功（`#13 DONE 36.0s`）
+- 日志明确显示 `[Build] finished` 和 `[Push] finished`
 
-- `#9 DONE 41.4s` — meson 编译 422/422 目标全部完成并安装
-- `#10 DONE 0.2s` — groupadd/useradd 创建用户组和用户
-- `#11 DONE 0.0s` — COPY named.conf 成功
-- `#12 DONE 0.1s` — 权限和目录设置完成
-- `#13 exporting to image` — 镜像导出并推送成功
-- `[Build] finished` + `[Push] finished` — 构建和推送阶段均正常结束
-
-失败仅发生在 CI 编排工具 `eulerpublisher` 自身的测试阶段（`[Check]`），与本次 PR 代码变更无关。
+失败仅发生在 CI 后处理/容器检查阶段，根因是 CI runner 环境缺少 `shunit2` 框架，属于基础设施问题，与 PR 新增的 Dockerfile、named.conf 及元数据文件无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI Runner 环境中安装 `shunit2` 测试框架（可通过系统包管理器或 pip 安装），确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 中的 `. shunit2` 能找到该库。这是 CI 基础设施问题，Code Fixer 无需处理。
+无需修改 PR 代码。需要在 CI runner 环境中安装 `shunit2` 测试框架（如通过包管理器安装或调整 `PATH` 使其可被 `common_funs.sh` 找到）。Code Fixer 无需处理此 PR。
 
 ## 需要进一步确认的点
-1. 确认 aarch64 CI Runner 上 `shunit2` 是否已安装：`find / -name "shunit2" 2>/dev/null` 或检查 `dnf list installed | grep shunit2`
-2. 确认 x86-64 架构的构建 job 是否也因同样原因失败（日志中仅展示了 aarch64 构建 job 的输出，若 x86-64 job 也失败，大概率同因）
-3. 确认 `common_funs.sh` 中 `shunit2` 的预期安装路径与 CI Runner 实际环境是否匹配
+- 确保 `shunit2` 在本次 CI 使用的 runner 上已正确安装且路径可解析。若已安装但路径不正确，需检查 `common_funs.sh` 中 `shunit2` 的引用路径是否与 CI runner 实际安装位置一致。
+- 当前日志仅覆盖 aarch64 架构构建（推送目标为 `openeulertest/bind9:9.21.23-oe2403sp4-aarch64`），若 x86-64（amd64）架构也存在独立 job，需确认该 job 的构建和检查是否通过。
+
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+（不适用，本次失败属于 infra-error，无需修改代码）
