@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。该 CI 失败为 **infra-error**：BuildKit builder 实例 `euler_builder_20260709_224657` 在 `dnf install` 阶段被外部优雅关闭（`graceful_stop`），与 PR 代码变更无关。
+CI 失败为 infra-error（BuildKit 构建连接中断），无需修改任何代码。
 
 ## 修改的文件
-无。PR 代码本身没有问题，Dockerfile 中的 `dnf install` 命令语法和包名均正确。
+无
 
 ## 修复逻辑
-CI 失败根因是 BuildKit daemon builder 实例被意外关闭，属于基础设施层面的问题，不是代码缺陷。PR 新增的 Dockerfile 在 `dnf install` 阶段（尚未执行到任何 PR 定制逻辑）因 builder 断开而中断。分析报告建议直接重试 CI job 即可。
+CI 失败分析报告明确判定此次失败为 **infra-error**：BuildKit builder（`euler_builder_20260709_224657`）在执行 `dnf install` 下载元数据期间被 `graceful_stop` 信号意外终止，导致 gRPC 连接中断（`error reading from server: EOF`）。该故障与 PR #2994 的代码变更无关——PR 新增的 Dockerfile 结构正确，`meta.yml`、`image-info.yml` 和 `README.md` 的更新也符合项目规范。这是一个 CI 基础设施层面的瞬时故障，正确的处理方式是重新触发 CI 构建，而非修改任何源代码文件。
 
 ## 潜在风险
 无
