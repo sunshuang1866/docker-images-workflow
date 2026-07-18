@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2980 — chore(grads): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库 HTTP/2 流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: RPM仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, HTTP/2 stream was not closed cleanly, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -19,21 +19,20 @@
 #7 1970.5 [FAILED] gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1970.5 Error: Error downloading packages:
 #7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
+#7 ERROR: process "/bin/sh -c dnf install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`RUN dnf install -y` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 软件仓库的 HTTP/2 连接出现流错误（`INTERNAL_ERROR`），导致多个 RPM 包下载中断。`cmake-data` 和 `git-core` 在重试后成功下载，但 `gcc-c++` 两次尝试均失败，dnf 耗尽所有镜像重试后放弃。
+- 失败位置: `Dockerfile:6-16`（`RUN dnf install` 步骤）
+- 失败原因: CI 构建环境中 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库镜像站下载 RPM 包时，多个包（cmake-data、git-core、gcc-c++）遭遇 HTTP/2 协议层流错误（Curl error 92），gcc-c++ 重试后所有镜像均失败，导致 dnf 安装中断
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 仅新增了 GrADS 2.2.3 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及相关元数据文件。Dockerfile 中 `dnf install` 命令语法正确、包名无误，错误发生在从远端仓库下载 RPM 包的网络传输阶段，属于 CI 基础设施/外部仓库服务的瞬时问题。
+**与 PR 代码变更无关。** PR 仅新增了 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile` 及其对应的 README.md、image-info.yml、meta.yml 元数据文件。Dockerfile 的 `dnf install` 命令语法正确、包名有效，失败完全由 openEuler 24.03-LTS-SP4 仓库镜像站的 HTTP/2 服务端不稳定导致。cmake-data 和 git-core 虽在重试后下载成功，但 gcc-c++ 在多次尝试后仍失败。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-**重试构建**。该错误属于外部仓库服务的瞬时网络故障（HTTP/2 流被服务端以 INTERNAL_ERROR 异常关闭）。在同一 CI 构建中，`cmake-data` 和 `git-core` 首次遇到同样的错误后重试成功，仅 `gcc-c++` 始终失败。最可能的根因是 openEuler 24.03-LTS-SP4 仓库在该时间段内服务不稳定。建议等待仓库服务恢复后重新触发 CI，大概率可自然通过。
+### 方向 1（置信度: 高）
+**重试构建。** 这是典型的 CI 基础设施网络波动问题，与代码无关。等待仓库镜像站恢复稳定后重新触发 CI 构建即可。Code Fixer 无需处理。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）在构建时间段是否有服务异常/维护记录
-- 如果重试仍然失败，需排查是否仓库对特定 IP 段或 CI runner 的 HTTP/2 连接存在限制策略
-- 可尝试在 Dockerfile 的 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 强制禁用 HTTP/2，改用 HTTP/1.1 降低流层协议问题的影响
+- 若多次重试后 gcc-c++ 仍然下载失败，需确认 openEuler 24.03-LTS-SP4 仓库镜像站是否长期不可用，以及是否有替代镜像源可用
