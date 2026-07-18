@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复 — CI 失败为 infra-error（基础设施/网络瞬态故障），非代码缺陷。
+无需代码修改。CI 失败为 openEuler 24.03-LTS-SP4 仓库镜像的临时性 HTTP/2 流错误（Curl error 92），属于 CI 基础设施/上游服务端问题，与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告判定失败类型为 `infra-error`，置信度 **高**。根因是 openEuler 24.03-LTS-SP4 上游仓库在构建时刻出现 HTTP/2 协议层流错误（Curl error 92），导致多个 RPM 包（gcc-gfortran、glibc-devel、guile、gcc）下载失败，重试耗尽所有镜像后 `dnf install` 退出码为 1。
-
-该错误与 PR #2992 的代码变更完全无关：Dockerfile 语法和依赖声明均正确，所有声明的包均为 openEuler SP4 仓库中实际存在的包。失败纯粹是上游仓库镜像的网络传输问题。
-
-**建议操作**：重新触发 CI 构建（retry），等待仓库 HTTP/2 服务恢复正常后构建应可通过。
+分析报告明确指出失败类型为 `infra-error`。两个并行的构建阶段（builder 阶段 `#8` 和 runtime 阶段 `#7`）同时出现了相同的 HTTP/2 流错误，而其他使用 openEuler 24.03-lts-sp3 的 dnf 安装步骤均正常完成，说明问题是 openEuler 24.03-LTS-SP4 仓库服务端的普遍性问题。PR 仅做了纯文档/元数据变更（新增 Dockerfile、更新 README.md、image-info.yml、meta.yml），Dockerfile 内容本身（包名、依赖等）并无错误。**因此无需对任何文件做出代码修改。** 建议在 openEuler 24.03-LTS-SP4 仓库镜像服务恢复正常后重新触发 CI 构建。
 
 ## 潜在风险
 无
