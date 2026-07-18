@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: Builder连接意外断开
-- 新模式症状关键词: graceful_stop, no builder found, failed to receive status, rpc error, connection error, EOF
+- 新模式标题: BuildKit构建器被终止
+- 新模式症状关键词: graceful_stop, no builder, closing transport, connection error, EOF, rpc error
 
 ## 根因分析
 
@@ -19,21 +19,17 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker build 步骤 `#7 [2/4]`（`RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在执行 `dnf install` 下载 OS repo 元数据过程中被意外关闭（`graceful_stop`），导致 gRPC 连接断开，Docker 构建中断。这是 CI 基础设施问题，与 PR 代码变更无关。
+- 失败位置: BuildKit 构建步骤 `#7 [2/4] RUN dnf install ...`，dnf 正在下载仓库元数据时
+- 失败原因: CI 基础设施的 BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行过程中被服务端主动关闭（`graceful_stop` goaway 帧），导致 gRPC 连接中断、构建器实例消失，docker build 进程无法继续
 
 ### 与 PR 变更的关联
-PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及相关元数据文件（README.md、image-info.yml、meta.yml），Dockerfile 语法正确，依赖声明完整。Docker build 在下载阶段（未到达任何 Dockerfile 指令执行阶段）因 builder 意外终止而失败，PR 改动不触发该失败。
+**与 PR 改动无关**。PR 新增的 Dockerfile 内容（安装编译依赖、编译 Python、pip 安装 scann）是标准操作，失败发生在 dnf 下载仓库元数据的第 38.59 秒，此时尚未进入任何与 PR 特有逻辑相关的步骤（Python 编译在步骤 [3/4]、scann 安装在步骤 [4/4]）。构建器实例被 CI 平台侧回收/重启导致了此次失败，属基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-该失败为 CI 基础设施问题（BuildKit builder 实例异常终止），与 PR 代码无关。Code Fixer 无需修改任何文件。建议：
-- 在 CI 系统中重新触发该 job 重试（retry），若 builder 恢复正常则构建应能通过。
-- 若重试后仍反复出现，需要 CI 运维团队排查 `ecs-build-docker-x86-hk` 节点上 BuildKit builder 的稳定性问题（如资源耗尽、OOM kill、超时回收等）。
+CI 基础设施问题，代码无需修改。应重新触发 CI 构建（retry），如果同一个节点 `ecs-build-docker-x86-hk` 反复出现此类问题，需由 CI 运维排查该节点的 BuildKit builder 是否因资源不足（内存/磁盘）或配置问题被频繁回收。
 
 ## 需要进一步确认的点
-- 日志中无 Dockerfile 指令执行失败的信息，构建卡在 builder 连接层面，证据充分，无需额外确认。
-
-## 修复验证要求
-无需验证。本次失败为 infra-error，修复方向不涉及代码或 Dockerfile 修改。
+- 同一时间段其他 PR 是否也在该节点 (`ecs-build-docker-x86-hk`) 上出现类似的 `graceful_stop` / `no builder found` 错误，以确认是否为节点级故障
+- CI 平台是否有构建超时策略导致 long-running build 被主动终止（dnf 下载 2.8 MB 元数据耗时 38.59 秒可能较慢，但不致触发超时）
