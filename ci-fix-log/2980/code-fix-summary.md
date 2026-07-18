@@ -1,20 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败类型为 `infra-error`（证据不足），CI 日志不可用，无法从代码层面确定具体失败原因。
+CI 构建失败属于基础设施故障（infra-error），无需修改代码。
 
 ## 修改的文件
-无。未对任何文件进行修改。
+无
 
 ## 修复逻辑
-1. CI 分析报告将此次失败归为 `infra-error`（置信度：低），CI 日志不可用（`ci.logs` 字段标注为 `"not available"`），无法确认实际构建错误。
-2. 报告提供了两个推测性修复方向：Copyright 头缺失（置信度：中）和 SP4 依赖包差异（置信度：低）。
-3. 经代码库审查：
-   - 现有 SP3 Dockerfile（`Others/grads/2.2.3/24.03-lts-sp3/Dockerfile`）同样没有 Copyright 头，且此前通过 CI 验证。
-   - `Others/` 目录下所有 Dockerfile 均未包含 Copyright/SPDX 头声明，这是该目录的一贯模式。
-   - SP4 Dockerfile 与 SP3 Dockerfile 结构完全一致（仅基础镜像 tag 不同），依赖包列表完全相同。
-4. 因此，即使 CI 日志缺失，也缺乏充分证据表明是代码层面的问题。强制添加 Copyright 头会与现有 SP3 文件不一致，反而引入不一致性。
-5. 根据任务指令"如果分析报告指出是 `infra-error`（CI 基础设施问题），在 output_file 中说明无需代码修改，不要强行改代码"，决定不修改任何文件。
+
+根据 CI 失败分析报告，失败原因是 Docker 构建过程中 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库镜像下载 `gcc-c++` 包时，上游镜像服务器反复返回 HTTP/2 帧层流错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），重试耗尽所有镜像后下载失败。同时 `cmake-data` 和 `git-core` 也遭遇同类错误但在重试后成功，说明这是间歇性网络故障。
+
+此问题与本次 PR（#2980）的代码变更无关，PR 仅新增了 Dockerfile 及相关文档文件，`dnf install` 命令格式和依赖包列表均正确。建议等待 openEuler 24.03-LTS-SP4 仓库镜像恢复后重试 CI 构建。
 
 ## 潜在风险
-无（未修改代码）。建议获取完整的 CI 构建日志（x86-64 和 aarch64）后，基于实际错误信息重新评估根因。
+无（未修改任何代码）
