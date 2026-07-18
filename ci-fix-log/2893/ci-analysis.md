@@ -4,34 +4,43 @@
 - PR: #2893 — chore(bind9): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: 测试框架缺失
-- 新模式症状关键词: shunit2, file not found, common_funs.sh
+- 知识库匹配: 模式39
+- 新模式标题: (不适用)
+- 新模式症状关键词: (不适用)
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-10 09:24:00,652 - INFO - [Check] checking openeulertest/bind9:9.21.23-oe2403sp4-aarch64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: .: shunit2: file not found
-2026-07-10 09:24:00,662-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
 2026-07-10 09:24:00,662 - CRITICAL - [Check] test failed
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 测试环境，`/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
-- 失败原因: CI [Check] 阶段执行容器测试脚本时，`common_funs.sh` 尝试通过 `. shunit2` 引入 shunit2 测试框架，但该框架未在 CI runner 上安装，导致测试阶段失败。**Docker 镜像构建和推送均已成功完成**（日志中可见 422/422 编译单元全部通过，`[Build] finished`，`[Push] finished`）。
+- 失败位置: CI 编排工具 `eulerpublisher` 的 [Check] 阶段（`app.py:173`）
+- 失败原因: CI 测试框架的公共脚本 `common_funs.sh` 在第 13 行尝试 source `shunit2`（Shell 单元测试库），但该文件在 CI runner 上不存在，导致 [Check] 测试阶段直接失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 仅新增了 bind9 在 openEuler 24.03-LTS-SP4 上的 Dockerfile（含 named.conf 配置文件和 metadata），Docker 构建阶段（编译、链接、安装、镜像导出、推送）全部成功。失败发生在 CI 基础设施的容器测试/检查阶段，属于 runner 环境缺失 `shunit2` 测试框架的问题，非 PR 代码引入。
+**与 PR 无关。** 本次 PR 仅新增了 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据文件（named.conf、README.md、image-info.yml、meta.yml）。Docker 镜像构建阶段完全成功：
+- 源码编译：422/422 目标全部完成（`meson compile` 成功，`ninja: no work to do`）
+- 镜像安装：所有二进制库和 man 页面正确安装（`#9 DONE 41.4s`）
+- 镜像推送：成功推送到 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`
+- 失败发生在构建完成后的 `[Check]` 阶段，根因是 CI runner 环境缺少 `shunit2` 测试库，与 PR 的 Dockerfile/配置变更完全无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner 的测试环境（`/usr/local/etc/eulerpublisher/tests/`）中安装 `shunit2` shell 测试框架。`shunit2` 可通过系统包管理器（如 `dnf install shunit2`）或从 GitHub 获取安装。此为 CI 基础设施维护工作，Code Fixer 无需处理此 PR 的 Dockerfile 或配置。
+CI 基础设施问题——在 CI runner 上安装或恢复 `shunit2` 库。`shunit2` 是一个 Shell 单元测试框架，通常通过以下方式部署：
+- 通过包管理器安装（如 `dnf install shunit2`）
+- 或从 GitHub 拉取后放入 CI 测试脚本可找到的路径
+- 或检查 CI runner 镜像是否最近变更导致该文件被清除
+
+此问题需要 CI 运维团队处理，Code Fixer 无需修改 PR 中的任何代码。
 
 ## 需要进一步确认的点
-- 确认 CI runner 上是否有 `shunit2` 安装策略（检查 `/usr/local/etc/eulerpublisher/tests/` 或 `/usr/local/share/` 下是否缺少 shunit2 文件）
-- 确认该 CI runner 是否为本次新增的 aarch64 架构节点——若是，可能该节点的测试环境初始化脚本遗漏了 shunit2 的安装步骤
-- 确认其他同类镜像（如已有的 bind9 9.21.23-oe2403sp3）在最近是否也出现同样的 [Check] 阶段失败——若其他镜像也失败，进一步证明确属 CI runner 环境问题
+- 确认 CI runner（aarch64 构建节点）上 `shunit2` 的预期安装路径（`/usr/local/etc/eulerpublisher/tests/container/app/../common/` 下或系统 PATH 中）
+- 确认该 CI runner 是否需要重新部署或更新测试环境依赖
+- 确认同一时期其他 aarch64 runner 上的其他 PR 是否也出现同样的 `shunit2: file not found` 错误（判断是单节点问题还是全局 CI 环境变更）
