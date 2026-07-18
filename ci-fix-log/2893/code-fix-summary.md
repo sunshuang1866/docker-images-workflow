@@ -1,15 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），与 PR 代码变更无关。
+CI 基础设施错误：`eulerpublisher` 测试框架中 `common_funs.sh` 无法找到 `shunit2` shell 测试库，与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。此失败为 infra-error，无需代码修改。
 
 ## 修复逻辑
-CI 分析报告明确指出此次失败为 infra-error：Docker 镜像编译（meson 422/422 编译单元全部通过）、安装和推送均已完成且成功，失败仅发生在 CI 的 [Check] 后处理阶段。根本原因是 CI 测试执行器环境缺少 `shunit2`（Shell 单元测试框架），`common_funs.sh` 在第 13 行尝试 source 该文件时失败。
+CI 分析报告明确指出这是 **infra-error**（置信度: 高），与 PR #2893 的代码变更无关：
+- Docker 镜像构建（[Build]）和推送（[Push]）阶段均已成功完成
+- 所有 422 个编译目标通过，`meson install` 成功
+- 失败仅发生在 CI 基础设施层面的 [Check] 阶段，因 CI aarch64 runner 缺少 `shunit2` 包
 
-该问题需要由 CI 基础设施管理员在运行节点上安装 `shunit2` 测试框架来解决，PR 中的代码文件无需任何修改。
+此问题需要 CI 运维团队在 aarch64 runner 节点上安装 `shunit2` 包，而非通过代码修改解决。
 
 ## 潜在风险
 无
