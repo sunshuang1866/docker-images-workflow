@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: HTTP/2 镜像站流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, HTTP/2 stream, INTERNAL_ERROR, err 2, dnf install
+- 新模式标题: 镜像站HTTP2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,24 +22,21 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 仓库镜像站在 HTTP/2 协议层返回 `INTERNAL_ERROR`（Curl error 92），导致多个 RPM 包下载中断。虽然 cmake-data 和 git-core 在重试后成功下载，但 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm`（13 MB）在两次尝试后均失败，已无更多镜像可尝试，`dnf install` 最终报错退出。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库镜像在 HTTP/2 传输层反复出现流错误（`Curl error 92: HTTP/2 stream INTERNAL_ERROR`），导致 `cmake-data`、`git-core` 和 `gcc-c++` 三个包下载失败。其中 `gcc-c++` 经多次重试（两个不同 stream ID：65 和 83）后仍失败，`dnf` 耗尽所有可用镜像后报错退出。这是一个**典型的 CI 基础设施/网络层问题**，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** PR 新增的 Dockerfile 中 `dnf install` 命令语法正确，所列依赖包在仓库中均存在（日志中 `Dependencies resolved` 阶段完整列出了所有 258 个待安装包）。失败是仓库镜像站 HTTP/2 传输层的网络基础设施问题，不是 Dockerfile 或代码层面的问题。
+**无关。** PR 仅新增了一个标准的 Grads Dockerfile（含常规 `dnf install` 构建依赖列表）及配套的 `README.md`、`image-info.yml`、`meta.yml` 元数据文件。Dockerfile 中的包列表与同仓库其他 Grads 版本（如 `24.03-lts-sp3`）一致，语法正确。失败发生在 `dnf` 从远程 RPM 仓库下载包阶段，属于下游镜像站网络传输问题，这是唯一新引入的 Dockerfile 面临该仓库源的问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**触发 CI 重试。** 这是一个典型的 `infra-error`——仓库镜像站 HTTP/2 传输层出现间歇性错误。cmake-data 和 git-core 在重试后成功下载，说明此问题为瞬时性网络抖动。推荐操作：直接触发 CI 重新运行该 job，大概率可自行恢复。
+### 方向 1（置信度: 低）
+在 Dockerfile 的 `dnf install` 命令中添加 `--retries 5` 参数和 `--setopt=timeout=30` 超时配置，提高对间歇性 HTTP/2 流错误的容忍度。但需注意：该方案不能根本解决镜像站侧 HTTP/2 传输问题，尤其是当问题持续存在时（日志中 `gcc-c++` 在两次不同 stream 上均失败）依然可能失败。
 
 ### 方向 2（置信度: 低）
-**若反复失败，考虑为 dnf 降级到 HTTP/1.1 或换源。** 如果重试多次仍失败，可尝试在 Dockerfile 中为 `dnf` 配置禁用 HTTP/2（`http2=false`）或更换仓库源 URL，但这属于规避方案，不是根因修复。
+在 `dnf install` 之前将 repo 配置中的 HTTP/2 降级为 HTTP/1.1（通过 `--setopt=ip_resolve=4` 或修改 repo 文件添加 `http2=false`），规避 openEuler 镜像站在 HTTP/2 层的不稳定性。但此方法的有效性取决于镜像站是否正确实现了 HTTP/1.1 fallback。
 
 ## 需要进一步确认的点
-- 确认 `repo.****.org` 镜像站在该时间段的 HTTP/2 服务稳定性状态
-- 确认是否只有 24.03-LTS-SP4 的仓库镜像受影响，还是多个 SP 版本均有此问题
-- 确认 aarch64 架构的同 PR 构建是否也出现相同错误（若 aarch64 构建设备正常，本失败可进一步确认是 x86_64 仓库镜像的瞬时问题）
-
-## 修复验证要求
-（无 — 本失败为 infra-error，无需 code-fixer 介入）
+- 该 openEuler 24.03-LTS-SP4 镜像站（repo.****.org）的 HTTP/2 流错误是否为持续性故障还是间歇性问题。建议在 CI 中重试该 job，若多次重试均在同一批包（`gcc-c++`、`cmake-data`、`git-core`）上失败，则问题偏向镜像站侧；若每次失败在不同包上，则为网络层间歇性抖动。
+- 同一 CI 环境中针对 `24.03-lts-sp3` 基础镜像的构建是否也存在同样问题（从日志看 sp3 构建本次未触发，无法对比）。
+- CI runner 所在网络环境与 `repo.****.org` 之间是否存在中间代理或防火墙干扰 HTTP/2 长连接。
