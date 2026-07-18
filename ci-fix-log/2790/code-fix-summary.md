@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题：appstore 发布规范预检（`update.py`）对仅含根级文档变更（`README.md`）的 PR 不应触发镜像路径校验。
+无需代码修改 — CI 失败为 `infra-error`（CI 基础设施问题）。
 
 ## 修改的文件
-无（CI 基础设施问题，不在 `README.md` 代码修改范围内）
+无。PR #2790 仅修改了仓库根目录的文档文件 `README.md`（及 `README.en.md`），这些文件不包含 Dockerfile、`meta.yml` 或 `image-list.yml`，不应被 appstore 镜像发布校验所覆盖。CI 的 `eulerpublisher` 工具将根级纯文档文件误纳入 appstore 发布校验流程，导致 `Path Error`。
 
 ## 修复逻辑
-CI 失败的直接错误为 `update.py:273` 的 appstore 发布规范校验将根目录的 `README.md` 判定为不符合镜像路径规范（期望格式为 `{category}/{image}/{version}/{os-version}/Dockerfile`）。PR #2790 仅更新了 `README.md` 中的镜像 tag 条目（`25.09`、`24.03-lts-sp3`、`24.03-lts-sp2`），是纯文档变更，不存在代码缺陷。
-
-根因是 CI 流水线未对纯文档 PR 跳过 appstore 校验步骤，需要在 CI 流水线/Jenkins job 配置层面解决（例如在 `update.py` 中增加对根级文档文件的过滤逻辑，或为文档类 PR 设置免检机制）。`README.md` 文件内容本身没有问题，强制修改该文件无法解决 CI 失败，只会引入不必要的变更。
+分析报告将此次失败归类为 `infra-error`，根因在于 CI 流水线或 `eulerpublisher` 工具未排除仓库根目录的纯文档文件。修复应在 CI 配置或 `eulerpublisher` 工具源码中调整，无需对 Docker 镜像仓库内的文件做任何变更。根据任务约束中的规则——"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"，本次不执行任何代码修改。
 
 ## 潜在风险
-无（未做任何代码修改）
+无。不涉及代码变更，不会引入回归风险。CI 侧的修复需要在 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑中增加对根级非镜像文件的排除规则。
