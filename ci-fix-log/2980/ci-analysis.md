@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error, HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: RPM仓库HTTP/2传输错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, HTTP/2 stream, INTERNAL_ERROR, No more mirrors to try, Error downloading packages
 
 ## 根因分析
 
@@ -22,24 +22,18 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`
-- 失败原因: CI 构建过程中，`dnf install` 从 openEuler 24.03-LTS-SP4 仓库下载 RPM 包时，repo 镜像服务器多次返回 HTTP/2 协议层流错误（Curl error 92: `Stream error in the HTTP/2 framing layer`，`INTERNAL_ERROR`）。多个包（cmake-data、git-core、gcc-c++）均受此影响，其中 cmake-data 和 git-core 在重试后成功下载，但 gcc-c++（13 MB）经过两次重试均失败并耗尽所有镜像重试次数，最终导致整个 `dnf install` 步骤失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`dnf install` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 软件源（`repo.****.org`）在 HTTP/2 传输层出现服务器端内部错误（`INTERNAL_ERROR err 2`），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载失败，其中 `gcc-c++` 在所有镜像重试后仍无法下载，`dnf install` 整体失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 本次 PR 新增了一个标准的 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`，其中的 `dnf install` 命令写法与同类 Dockerfile 一致，没有语法错误或依赖包名问题。失败原因是 openEuler 24.03-LTS-SP4 仓库镜像服务器在下载时段出现的 HTTP/2 协议层故障，属 CI 基础设施/网络问题。PR 的 Dockerfile 代码本身没有缺陷。
+**与 PR 变更无关**。该 PR 仅新增了一个 GrADS 2.2.3 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及相关元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 中的 `dnf install` 命令格式正确，列出的所有软件包名称在 openEuler 24.03-LTS-SP4 仓库中均存在（依赖解析阶段成功完成，列出了 258 个待安装包）。失败完全由 RPM 仓库服务器的 HTTP/2 传输故障引起，属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建。** 该失败为 openEuler 仓库镜像服务器的 HTTP/2 协议层瞬时故障，属于短暂性网络问题。gcc-c++ 包下载在第一次尝试时 HTTP/2 stream 65 报 `INTERNAL_ERROR`，重试时 stream 83 再次报同样错误，表明服务器侧在处理大文件（13 MB）的 HTTP/2 多路复用流时存在间歇性不稳定。重试 CI 工作流大概率会成功，因为其他受影响的包（cmake-data、git-core）在重试后均成功下载。
-
-### 方向 2（置信度: 中）
-**若多次重试仍失败，考虑在 Dockerfile 的 `dnf install` 前添加 `dnf config-manager --setopt=fastestmirror=true` 或切换到 HTTP/1.1 下载。** 如果 openEuler 仓库服务器持续存在 HTTP/2 协议问题，可通过在 Dockerfile 中禁用 dnf 的 HTTP/2（如设置 `ip_resolve=4` 或配置 curl 后端参数）绕过。但此操作仅应在确认问题持续复现后才进行，不应作为首次修复手段。
+**无需修改 PR 代码**。这是 openEuler RPM 镜像站 `repo.****.org` 的临时性 HTTP/2 传输故障。应在镜像站恢复后**重新触发 CI 构建**（retry/rerun）。若该镜像站持续不稳定，可考虑在 Dockerfile 的 `dnf install` 之前添加仓库配置步骤，使用备选镜像源（如 `mirrors.tuna.tsinghua.edu.cn` 或 `mirrors.aliyun.com`）。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像服务器在 CI 失败时段是否有已知的服务降级或维护事件。
-- 确认其他 PR 在同时段构建 24.03-lts-sp4 镜像时是否也遇到相同的 HTTP/2 流错误（判断是否为系统性 repo 问题）。
-- 该 runner（`ecs-build-docker-x86-03-sp`）的网络到 repo 镜像之间的路径是否稳定。
-
-## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
-无需。本次失败为 infra-error，不涉及代码修改或正则 patch。
+1. openEuler 24.03-LTS-SP4 RPM 仓库（`repo.****.org`）在构建时段的可用性状态——是否为临时性中断还是持续性问题。
+2. 该仓库是否对 CI 构建环境（`ecs-build-docker-x86-03-sp`）的 IP 段存在限流或连接策略。
+3. 同一时段该仓库的其他 CI job（如其他 PR 对 24.03-LTS-SP4 的构建）是否也出现同类 HTTP/2 流错误，以确认是否为仓库端的全局性问题。
