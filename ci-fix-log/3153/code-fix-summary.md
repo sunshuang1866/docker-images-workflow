@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — CI 失败由校验工具的设计缺陷（虚假误报）导致，与 PR 的文档变更无关。
+无需代码修改 — CI 失败为基础设施问题（infra-error），非 PR 代码缺陷。
 
 ## 修改的文件
-无。PR #3153 仅修改了 `README.md`（更新基础镜像可用 tag 列表），内容完全正确，无需任何修改。
+无
 
 ## 修复逻辑
-CI 失败日志显示 `eulerpublisher/update/container/app/update.py` 中的 appstore 发布规范校验工具对仓库根级 `README.md` 进行了路径校验（期望 `/README.md`，但 diff 返回 `README.md`）。该校验工具本应仅针对应用镜像子目录（`AI/`、`Bigdata/` 等）内的文件进行校验，却错误地将纯文档类 PR 的变更文件纳入了校验范围。PR #3153 仅更新了根级文档中的基础镜像 tag 列表，与任何应用镜像的发布无关，校验工具的误报与 PR 变更无因果关系。
+CI 失败分析报告判定此次失败类型为 `infra-error`，根因为 CI appstore 发布规范检查工具 (`eulerpublisher/update/container/app/update.py`) 对仓库根目录 `README.md` 的路径校验逻辑存在缺陷。PR #3153 仅修改了仓库根目录下的 `README.md` 和 `README.en.md`（更新基础镜像可用 tag 列表），未修改任何 Dockerfile、image-list.yml、meta.yml 或其他镜像构建相关文件。这是纯粹的文档更新，不应触发 appstore 镜像发布规范校验。
 
-修复应在上游 CI 工具 `eulerpublisher/update/container/app/update.py` 中增加文件路径过滤逻辑：若变更文件位于仓库根目录且不涉及任何应用镜像子目录，则跳过 appstore 发布规范校验。此修复不在本 PR 的范围内。
+CI 工具未能区分纯文档 PR 与涉及镜像构建的 PR，导致合法文档变更被误判为路径错误。此问题需要在 CI 工具侧修复（增加对变更文件类型的预过滤），而非在 PR 代码侧修复。PR 本身的 `README.md` 内容变更正确无误，无需回退或调整。
 
 ## 潜在风险
-无 — 未对代码进行任何修改。
+无 — 此 PR 的代码变更（README.md 的 tag 列表更新）本身正确且无风险。CI 失败需由基础设施团队在 `eulerpublisher` 工具中修复。
