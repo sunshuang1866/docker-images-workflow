@@ -1,13 +1,16 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error）——`eulerpublisher` 应用商店路径校验对仅修改仓库根级文档（`README.md`）的非镜像 PR 无豁免机制，导致校验失败。PR 代码变更本身无任何错误，无需修改源代码。
+无需代码修改。CI 失败为 infra-error：CI 工具 `update.py` 路径归一化缺陷导致根目录文件 `README.md` 被误判为路径错误，与 PR 变更无实质性关联。
 
 ## 修改的文件
-无
+无。PR 仅修改了 `README.md` 的文档内容（更新基础镜像可用 tag 列表），不需要对任何源码进行修改。
 
 ## 修复逻辑
-CI 失败根因为 CI 流水线配置缺陷：`eulerpublisher` 应用商店路径校验要求所有变更文件遵循 `{category}/{image}/{version}/{os-version}/` 镜像目录层级结构，但未对仓库根级文档（如 `README.md`）等非镜像文件做豁免处理。本 PR 仅更新 README 中基础镜像的可用 Tags 列表，属于纯文档变更，不应触发应用商店路径校验。此问题需在 CI 流水线配置层面修复（例如在 `eulerpublisher` 调用脚本中添加文件变更范围检测逻辑，对仅修改根级文档的 PR 跳过路径校验），而非源代码层修改。
+CI 失败分析报告确认此为 infra-error：
+- 根因在 CI 工具 `eulerpublisher/update/container/app/update.py:273`，该工具从 `git diff` 获取相对路径（如 `README.md`）后直接与期望的绝对路径（如 `/README.md`）做字符串比对，导致不匹配误报。
+- PR 仅更新了 README 中文档内容，无任何代码或配置变更，与 CI 失败无因果关系。
+- 修复应在 `eulerpublisher` 仓库的 `update.py` 中进行路径归一化处理，不在本仓库范围内。
 
 ## 潜在风险
-无——未修改任何代码，不影响任何功能。
+无。本次未对源码做任何修改。
