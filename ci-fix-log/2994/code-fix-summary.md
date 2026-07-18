@@ -1,20 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施问题（infra-error），BuildKit builder 实例在 dnf install 下载元数据过程中被意外回收（graceful_stop），导致 gRPC RPC 连接断开。
+CI 基础设施故障：BuildKit 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 阶段被异常终止（`graceful_stop`），导致 gRPC 连接断开（`EOF`），构建器随后不可用（`no builder found`）。此为 infra-error，与 PR 代码变更无关。
 
 ## 修改的文件
-无。所有 PR 文件（Dockerfile、README.md、image-info.yml、meta.yml）经审查均无语法或逻辑错误，无需修改。
+- 无代码修改。
 
 ## 修复逻辑
-CI 分析报告明确指出：
-1. 基础镜像拉取成功（`#6 DONE 2.9s`）
-2. CI 元数据预检通过
-3. `dnf install` 正在正常下载仓库元数据时，构建器被优雅关闭
-4. 错误为 gRPC 传输层错误（`closing transport`, `EOF`, `graceful_stop`），非构建逻辑错误
-5. 与 PR 改动无关
-
-这是 Docker buildx 构建器生命周期管理问题，属于 CI 基础设施范畴。建议直接重新触发 CI pipeline，大概率可成功通过。若重试后仍失败，需排查 CI 环境中构建器实例的超时/回收配置及网络连通性。
+CI 失败分析报告将此失败定性为 **infra-error**（置信度：高）。错误发生在 Docker 构建步骤 `#7 [2/4]` 的 `dnf install` 阶段，即 BuildKit 守护进程/构建器实例意外退出导致的 gRPC 传输层错误。PR 变更仅为新增标准的 scann 1.4.2 Dockerfile（含 dnf 安装编译工具链、编译安装 Python 3.9.19、pip 安装 scann）、README 和 meta.yml 条目更新，Dockerfile 内容无语法或逻辑问题。根据修复原则中的"如果分析报告指出是 infra-error，在 output_file 中说明无需代码修改，不要强行改代码"，本次无需修改任何代码文件。
 
 ## 潜在风险
-无
+无。建议直接重新触发 CI 构建（retry），大概率在下一次构建中通过。
