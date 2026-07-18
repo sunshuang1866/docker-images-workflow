@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 transient 基础设施问题（infra-error），根因是 `repo.openeuler.org` 在 aarch64 构建节点上的 HTTP/2 流连接不稳定（Curl error 92），导致 `guile` 等 RPM 包下载失败。与 PR #2991 的代码变更无关。
+无代码修改。CI 失败为基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无（未修改任何文件）
+无
 
 ## 修复逻辑
-CI 分析报告将此失败归类为 **infra-error**，置信度：高。失败发生在 Dockerfile 第 6 行的 `dnf install` 命令执行期间，错误类型为 "Stream error in the HTTP/2 framing layer"，这属于上游镜像仓库的网络传输问题，而非代码或配置缺陷。PR 新增的 Dockerfile 严格遵循仓库模板规范，`dnf install` 命令正确无误。根据报告建议，重新触发 CI 运行即可，无需修改任何代码。
+CI 失败的直接原因是 aarch64 构建节点执行 `dnf install` 时，`repo.openeuler.org` 镜像站出现 HTTP/2 流层异常（Curl error 92: INTERNAL_ERROR），导致多个 RPM 包（git-core、gcc-c++、guile）下载失败。经分析确认，Dockerfile 中的 `dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 指令在语法和逻辑上完全正确，问题纯粹是由于构建时刻上游软件源的服务抖动所致。此类型失败与 PR 引入的代码变更无任何关联，无需修改源码，只需在基础设施恢复稳定后重新触发 CI 构建即可。
 
 ## 潜在风险
 无
