@@ -1,20 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。CI 失败属于 infra-error（镜像仓库 HTTP/2 流错误），与 PR 变更无关。
+无需代码修复。CI 失败为基础设施错误（infra-error），由 openEuler 24.03-LTS-SP4 仓库镜像站 HTTP/2 协议层间歇性错误（Curl error 92: Stream error in the HTTP/2 framing layer）导致 `dnf install` 下载 RPM 包失败，与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确指出：
-
-- 失败位置在 Dockerfile:6 的 `dnf install` 步骤
-- 根因是 openEuler 24.03-LTS-SP4 软件仓库镜像站（`repo.****.org`）的 HTTP/2 服务端存在流层错误（Curl error 92: INTERNAL_ERROR），导致 RPM 包下载失败
-- 日志显示 `Dependencies resolved` 成功，包列表和语法均正确
-- 此失败与 PR 新增的 Dockerfile 内容无关，属 CI 基础设施网络瞬时故障
-
-建议直接重新触发 CI 构建（retry），待镜像站恢复后应能自动通过。若多次重试仍失败，需从 CI 基础设施层面（如禁用 HTTP/2）调整，不属于代码修改范围。
+分析报告确认：Dockerfile 中 `dnf install` 命令语法正确，所列依赖包在仓库中均存在（Dependencies resolved 阶段列出所有 258 个包）。cmake-data 和 git-core 在重试后成功下载，说明问题为瞬时性网络抖动。推荐操作：触发 CI 重新运行该 job。
 
 ## 潜在风险
 无
