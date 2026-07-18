@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败根因是 `eulerpublisher` 测试框架在 CI Runner 环境中找不到 `shunit2` 库，导致 `[Check]` 阶段失败。该问题与本次 PR 代码变更无关，属于 CI 基础设施问题（infra-error），无需修改源码。
+无需代码修复。CI 失败为 infra-error（CI 基础设施问题），与 PR 代码变更无关。
 
 ## 修改的文件
-无（无需代码修改）
+无
 
 ## 修复逻辑
-分析报告明确指出：
-- Docker 镜像的构建、导出、推送三个阶段均已成功完成（`[Build] finished` + `[Push] finished`）
-- 失败仅发生在 CI 编排工具 `eulerpublisher` 自身的测试阶段，`common_funs.sh` 脚本中 `. shunit2` 无法找到 `shunit2` 库
-- 失败类型: `infra-error`，与 PR 新增的 bind9 Dockerfile 及配置文件无任何因果关系
+CI 分析报告明确指出：Docker 镜像构建（422/422 编译全部通过）和推送均已成功完成，失败仅发生在 CI 后处理/容器检查阶段。根因是 CI runner 环境中缺少 `shunit2` 单元测试框架，导致 `common_funs.sh` 脚本无法加载该框架而报错：`. : shunit2: file not found`。
 
-根据修复指令：当分析报告指出是 `infra-error` 时，不强行修改源码。需由 CI 运维人员在 CI Runner 环境中安装 `shunit2` 测试框架来解决。
+此为 CI 基础设施问题，需要在 CI runner 环境中安装 `shunit2` 测试框架（如通过包管理器安装或调整 `PATH`），无需修改 PR 中的任何代码文件。
 
 ## 潜在风险
 无
