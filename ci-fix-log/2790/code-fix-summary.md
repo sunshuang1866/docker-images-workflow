@@ -1,15 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是 `eulerpublisher` appstore 规范校验工具对根级文档文件 `README.md` 产生的误报（false positive），与 PR 改动本身的正确性无关。
+无需代码修改。本 CI 失败属于 `infra-error`，根因在 CI 基础设施工具 `eulerpublisher` 的 `update/container/app/update.py` 中 appstore 规范预检逻辑存在路径格式处理缺陷——git diff 产出的文件路径不带前导 `/`（`README.md`），而校验规则期望带前导 `/`（`/README.md`），路径比较时因格式不匹配导致误报 FAILURE。
 
 ## 修改的文件
-无。PR 仅修改了 `README.md`（纯文档修正："可用镜像 Tags" 列表的仓库链接更新），内容本身没有问题，不需要修改。
+无
 
 ## 修复逻辑
-CI 分析报告明确指出：`eulerpublisher/update/container/app/update.py:273` 的 appstore 发布规范预检工具对根目录下的 `README.md` 执行了镜像路径校验（期望路径 `/README.md` 应为 `{image-name}/{version}/{os-version}/Dockerfile` 格式），这是一个 **CI 基础设施层面的工具缺陷**，而非 PR 代码质量问题。
-
-根级 `README.md` 是仓库级文档文件，不属于任何镜像提交，不应被镜像路径校验规则覆盖。实际的修复应在 CI 工具或流水线层面进行（如：排除根级文档文件的路径校验，或在仅含文档变更的 PR 中跳过 appstore 检查），不在本 PR 的可修改范围内。
+PR #2790 仅修改了 `README.md` 和 `README.en.md` 两个根级文档文件的内容（更新镜像 tag 列表和 URL），属于纯文档类改动，不涉及任何 Dockerfile、构建配置或镜像元数据。CI 失败是 `eulerpublisher` 工具在 appstore 发布规范检查阶段对根级 README 文件进行了不必要的路径格式校验所致，与 PR 变更内容无关。此问题需要在 `eulerpublisher` 仓库中修复路径比较逻辑（在比较前统一 normalize 路径格式）或为纯文档 PR 跳过该检查阶段。当前 PR 的源代码无需任何修改。
 
 ## 潜在风险
-无。PR 改动仅为 README 文档中的链接更新，内容正确，不影响任何镜像构建、发布或测试逻辑。
+无
