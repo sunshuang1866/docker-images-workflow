@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器崩溃
-- 新模式症状关键词: no builder found, closing transport, graceful_stop, rpc error, connection error
+- 新模式标题: BuildKit构建器异常终止
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, EOF, euler_builder
 
 ## 根因分析
 
@@ -19,16 +19,20 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker BuildKit 构建器基础设施（`euler_builder_20260709_224657`）
-- 失败原因: BuildKit 构建器实例在 Docker 构建过程中被优雅关闭（`graceful_stop` + `NO_ERROR` goaway），导致正在执行的构建步骤（`dnf install`）因传输中断而失败，随后构建器实例已不存在（`no builder found`）
+- 失败位置: Docker 构建步骤 [2/4]（第一个 `RUN dnf install` 命令执行期间）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 构建过程中被异常终止（`graceful_stop`），导致 gRPC 连接断开（`EOF`），构建进程无法继续。dnf 当时正在下载仓库元数据，尚未进入实际的包安装阶段。
 
 ### 与 PR 变更的关联
-**与 PR 无关**。该失败发生在 BuildKit 基础设施层面。日志显示构建器在 `dnf install` 步骤执行约 38 秒后被外部信号触发的 `graceful_stop` 关闭，而非 `dnf` 命令本身报错。PR 中新增的 Dockerfile 内容是常规的 `dnf install` + `wget` + `pip install` 流程，不会触发 BuildKit 守护进程的优雅关闭。该 PR 重跑 CI 大概率直接通过。
+**与 PR 变更无关。** 本次 PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及相关元数据文件（README.md、doc/image-info.yml、meta.yml）。Dockerfile 内容为常规的 `dnf install` 构建依赖、编译 Python 3.9.19、pip 安装 scann，不存在任何可能导致 BuildKit builder 进程崩溃的代码逻辑。构建甚至未到达 PR 变更特有的步骤（Python 编译、scann 安装），仅在基础镜像拉取后的第一个通用 `dnf install` 阶段即因 builder 实例丢失而失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复**。这是 CI 基础设施的临时故障（BuildKit 构建器意外关闭），建议重试 CI 流水线。Code Fixer 无需处理。
+**重试 CI 构建。** 这是 BuildKit 基础设施层面的瞬时故障（builder 实例被意外停止），与 PR 代码无关。Code Fixer 无需对 Dockerfile 或任何源文件进行修改。建议直接重新触发 CI pipeline，大概率能正常通过。
 
 ## 需要进一步确认的点
-- BuildKit 构建器 `euler_builder_20260709_224657` 被关闭的原因（可能是 CI 节点资源回收、定时清理任务、或 Docker daemon 重启）。此信息通常在 CI 平台管理日志中查看，非 PR 代码层面可解决。
+- 确认 CI 集群中 BuildKit builder 实例的生命周期管理策略——是否存在自动回收 builder 的机制（如空闲超时、资源配额限制），导致构建中的 builder 被误终止。
+- 如果重试后仍然失败，需获取 builder 所在宿主机的系统日志（dmesg/journalctl），排查是否存在 OOM killer 或磁盘空间不足导致的 builder 容器被强制停止。
+
+## 修复验证要求
+无需验证（infra-error，不涉及代码修改）。
