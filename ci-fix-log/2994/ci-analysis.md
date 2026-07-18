@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit builder 连接中断
-- 新模式症状关键词: `graceful_stop`, `no builder`, `closing transport`, `rpc error`, `code = Unavailable`
+- 新模式标题: BuildKit构建器中断
+- 新模式症状关键词: `failed to receive status`, `graceful_stop`, `no builder`, `rpc error: code = Unavailable`, `closing transport`
 
 ## 根因分析
 
@@ -17,22 +17,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`（Dockerfile 第 8 行附近）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在执行构建过程中被服务端主动终止（`graceful_stop`），导致客户端 gRPC 连接断开（`closing transport` + `EOF`），后续尝试查找该 builder 时已不存在（`no builder ... found`）
+- 失败位置: Docker 构建步骤 `#7 [2/4] RUN dnf install -y ...`（dnf 正在下载 OS 元数据时）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 dnf 安装阶段被终止（`graceful_stop`），连接断开后无法再找到该构建器，导致 Docker build 失败。
 
 ### 与 PR 变更的关联
-- **与 PR 变更无关**。该失败是 CI 基础设施（BuildKit 服务端）自身的 builder 回收/重启行为导致。
-- Docker 构建仅在步骤 `[2/4]`（`dnf install` 下载元数据阶段，进度约 39 秒、速率 77 kB/s）时 builder 即被终止，步骤远未执行到 `pip install scann` 等软件特有逻辑。
-- CI 预检阶段（镜像规范检查、Git 克隆）全部通过，未报告任何 PR 代码层面的错误。
-- 日志中 `graceful_stop` 和 `NO_ERROR` 明确表明 builder 端为主动、无错误的关闭，属于基础设施生命周期管理范畴，非构建逻辑触发。
+**与 PR 变更无关**。PR 仅新增了 `Others/scann/1.4.2/24.03-lts-sp4/Dockerfile` 及相关元数据文件，Dockerfile 内容为标准的 dnf 包安装和 Python 编译流程。失败发生在 dnf 正在下载元数据时（构建步骤 2/4），BuildKit 构建器在约 38 秒后主动发送 `graceful_stop` 信号并断开连接——这是 CI 基础设施层面的问题（构建器被回收/超时/资源不足终止），而非 Dockerfile 内容或 PR 改动引起。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-重新触发 CI 构建。该失败为 BuildKit builder 实例被服务端主动回收导致的瞬时基础设施问题，与 PR 代码变更无关。直接 rerun 即可，无需修改任何代码。
+这是 CI 基础设施故障（BuildKit 构建器异常终止），**Code Fixer 无需处理此 PR 的代码**。建议在 CI 侧重新触发构建（retry），大多数情况下重新运行即可通过。如果重试后仍然失败，需要排查构建节点的资源状况或构建器 TTL 配置。
 
 ## 需要进一步确认的点
-- 无。本失败原因为基础设施建设问题（BuildKit builder 被服务端 graceful stop），日志证据充分，无需额外确认。
-
-## 修复验证要求
-不适用（infra-error，非代码修复）。
+- 构建节点（`ecs-build-docker-x86-hk`）在构建期间是否存在资源压力（内存/磁盘不足）导致构建器被 OOM Killer 终止
+- BuildKit 构建器 `euler_builder_20260709_224657` 的 TTL/超时配置，是否存在构建超时自动回收机制
+- 同一时间段内同一节点上其他构建 job 是否也出现相同问题（判断是单点故障还是系统性问题）
