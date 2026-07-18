@@ -1,18 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。此为 CI 基础设施问题（infra-error），CI runner 上缺少 `shunit2` shell 单元测试框架，导致 `eulerpublisher` 的 [Check] 阶段中 `common_funs.sh` 在 `source shunit2` 时报 `file not found`。
+CI 基础设施问题：`eulerpublisher` 测试框架因 CI runner 上缺少 `shunit2` shell 单元测试框架依赖，导致 `[Check]` 阶段失败。Docker 镜像构建和推送阶段均已成功完成。
 
 ## 修改的文件
-无（本次 PR 代码无问题，不修改任何文件）
+无需代码修改。此失败为 infra-error。
 
 ## 修复逻辑
-CI 分析报告确认：
-- Docker 镜像构建完全成功（422 个编译目标全部通过，镜像导出和推送均成功）
-- 失败仅发生在 CI runner 的 [Check] 阶段，根因是 `shunit2` 未安装或不在预期路径
-- 此问题与 PR #2893 的任何文件变更无关，属于 CI 运维团队职责范围
+CI 分析报告明确指出：
+- 失败类型为 **infra-error**，与 PR #2893 的代码变更无关。
+- Docker 的 `[Build]` 和 `[Push]` 阶段均成功（`meson install` 全部 422 个编译目标通过）。
+- 失败发生在 `eulerpublisher` 框架的 `common_funs.sh` 脚本第 13 行，该脚本尝试加载 `shunit2` 但文件不可达。
 
-需要在 CI runner（aarch64 架构的 `ecs-build-docker-aarch64-*` 系列节点）上安装 `shunit2`，确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 能正常 `source` 到它。
+此问题应由 CI 运维团队在 runner 环境层面解决（如在 CI runner 上安装 `shunit2` 包）。
 
 ## 潜在风险
-无（未修改任何代码）
+无。未修改任何代码。
