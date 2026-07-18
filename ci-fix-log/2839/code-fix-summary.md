@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 infra-error，原因是 CI runner (Jenkins agent) 缺少 `shunit2` Shell 测试框架，导致 [Check] 阶段无法加载测试断言库而失败。
+无需代码修改。CI 失败是基础设施问题（`shunit2` 测试框架在 CI Runner 上缺失），与 PR 代码变更无关。
 
 ## 修改的文件
-无。本次 CI 失败与 PR 代码变更无关，Docker 构建和镜像推送均已成功完成。
+无。
 
 ## 修复逻辑
-CI 分析报告明确判定为 infra-error（置信度: 高）。失败发生在构建/推送成功之后的 [Check] 阶段，由 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 加载 `shunit2` 失败导致。该问题由 CI 基础设施管理员在 Jenkins agent 上安装 `shunit2` 后重新触发流水线即可解决，不需要对 PR 源代码做任何修改。
+CI 分析报告判定失败类型为 `infra-error`，根因是 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13` 在执行镜像测试时找不到 `shunit2` 命令。镜像的构建和推送阶段均已成功完成，失败仅发生在构建后的 [Check] 测试阶段。
+
+PR 变更的文件（Dockerfile、entrypoint.sh、README.md、meta.yml）均不涉及 CI 测试框架的安装或配置，无法通过修改这些文件来解决问题。此问题应由 CI 运维团队在 Runner 镜像中安装 `shunit2` 解决。
 
 ## 潜在风险
-无。此为 CI 环境配置问题，修复后需关注 `entrypoint.sh` 中的 `case` 语句语法测试结果（此前因 shunit2 缺失未被实际测试到）。
+无——未对任何文件做修改。
