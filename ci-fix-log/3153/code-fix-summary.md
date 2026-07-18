@@ -1,13 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复 — 此 CI 失败属于 infra-error，系 `eulerpublisher` 工具对根级 README 文档文件的路径校验误报。
+无需代码修改。CI 失败为 infra-error：CI appstore 发布规范校验流水线被纯文档 PR 错误触发，校验工具期望 PR 包含 Dockerfile / meta.yml 等镜像文件变更，而 PR #3153 仅修改了 README.md（文档更新），导致路径校验失败。
 
 ## 修改的文件
-无（未修改任何文件）
+无。`README.md` 的文档内容本身没有问题，无需修改。
 
 ## 修复逻辑
-CI 失败的直接原因是 `eulerpublisher/update/container/app/update.py:273` 中的 appstore 发布路径校验逻辑对 PR 变更的所有文件执行路径检查，根级 `README.md` 不在该工具预期的应用镜像目录结构路径模式内，因此被误判为路径错误。PR 变更仅为文档更新（将基础镜像 Tags 列表中的 `24.03-lts-sp1` 更新为 `24.03-lts-sp4`，并新增 `sp3`、`sp2`、`25.09` 条目），不涉及任何 Dockerfile、meta.yml、image-info.yml 或应用镜像目录结构，代码本身无问题。该问题需由 CI 维护者在 eulerpublisher 工具端添加根级文件白名单或跳过逻辑来修复，不属于本 PR 的代码修改范围。
+分析报告明确指出该 CI 失败属于**基础设施配置问题**，非 PR 代码缺陷：
+- 失败位置在 CI 编排工具 `eulerpublisher/update/container/app/update.py:273`，不在 PR 变更文件中
+- 根因为 CI appstore 发布校验触发条件未排除纯文档 PR，需由 CI 维护方调整流水线触发规则
+
+根据修复原则中的规定："如果分析报告指出是 `infra-error`（CI 基础设施问题），不强行改代码"。
 
 ## 潜在风险
-无
+无。当前不修改任何代码，不会引入新问题。需由 CI 维护方处理流水线触发条件配置。
