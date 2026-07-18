@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error）：openEuler 官方镜像仓库 `repo.openeuler.org` 在构建时的临时网络波动导致 aarch64 runner 下载 RPM 包失败（Curl error 92/56）。
+CI 失败由 openEuler 官方镜像仓库 (`repo.openeuler.org`) 网络不稳定导致，属于基础设施问题（infra-error），无需修改代码。
 
 ## 修改的文件
-无。
+无。未对任何文件进行代码修改。
 
 ## 修复逻辑
-CI 失败分析报告明确指出该失败与 PR #2977 的代码变更无关，属于 `infra-error`。PR 仅新增了一个标准的 brpc 1.16.0 Dockerfile，其 `yum install` 命令语法正确、包名有效。失败由构建期间 `repo.openeuler.org` 的 HTTP/2 服务不稳定导致，多数受影响的包（gcc、kernel-headers、perl-MIME-Base64）在 yum 自动重试后下载成功，仅 `vim-common` 在重试后仍未恢复。按照修复指导原则，基础设施问题不应强行修改代码，应通过重新触发 CI 构建解决。
+分析报告明确指出：该失败与 PR 变更无关。Dockerfile 中的 `yum install` 命令语法和包名均正确——yum 已成功解析全部 173 个依赖包，其中 172 个下载成功，仅最后一个包 `vim-common` 因 HTTP/2 流中断（Curl error 92: INTERNAL_ERROR）和 SSL 连接中断（Curl error 56: SSL_ERROR_SYSCALL）耗尽重试后失败。
+
+此问题属于 `repo.openeuler.org` 镜像仓库在 CI 构建期间的暂时性网络波动，非代码层面可修复的问题。建议重新触发 CI 构建。
 
 ## 潜在风险
 无。
