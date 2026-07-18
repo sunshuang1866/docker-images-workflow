@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 镜像站网络不稳定
-- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, Curl error (56), SSL_ERROR_SYSCALL, repo.openeuler.org, No more mirrors to try
+- 新模式标题: 软件源网络波动
+- 新模式症状关键词: Curl error (92), Curl error (56), Stream error in the HTTP/2 framing layer, SSL_ERROR_SYSCALL, No more mirrors to try, vim-common
 
 ## 根因分析
 
@@ -22,20 +22,16 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（yum install RUN 指令）
-- 失败原因: CI aarch64 runner（`ecs-build-docker-aarch64-04-sp`）在通过 `yum install` 从 `repo.openeuler.org` 下载 openEuler 24.03-LTS-SP4 的 RPM 包时，遇到多次 HTTP/2 协议层流错误（Curl error 92）和 SSL 读取系统调用失败（Curl error 56），最终 `vim-common` 包的下载在所有镜像源均失败，yum 整体安装步骤以 exit code 1 退出。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install -y ...` 步骤）
+- 失败原因: aarch64 CI runner 在从 `repo.openeuler.org` 下载 RPM 包（`gcc`、`kernel-headers`、`perl-MIME-Base64`、`vim-common`）时遭遇多次 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），最终 `vim-common` 下载失败导致 yum 事务中止。这些错误均为 openEuler 软件源侧的瞬时网络/协议层问题，与 PR 代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 该 PR 新增了一个标准的 brpc Dockerfile，其 `yum install` 命令列出的软件包名正确、格式规范。失败的直接原因是 CI 构建节点到 `repo.openeuler.org` 之间网络不稳定，导致大量 HTTP/2 stream 未正常关闭及 SSL 连接中断，属于 CI 基础设施问题。日志显示多个包（gcc、kernel-headers、perl-MIME-Base64、vim-common）均遭遇了相同的网络错误，且构建节点为 aarch64 专用 runner，进一步佐证这是该节点与镜像源之间的网络连接质量问题。
+PR 新增了一个标准的 Dockerfile（`Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile`），其中 `RUN yum install -y ...` 安装编译依赖是合理且必要的步骤。失败发生在 yum 从上游仓库下载 RPM 包的过程中，多个关键包（gcc、kernel-headers、vim-common 等）因 `repo.openeuler.org` 的 HTTP/2 连接异常而下载失败。**该失败与 PR 代码逻辑无关**，Dockerfile 本身的语法和依赖声明均正确（同类已存在的 `24.03-lts-sp3` 版本的 Dockerfile 结构完全一致且构建成功）。若软件源恢复正常，该构建应可正常通过。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-重新触发 CI 构建。该失败为 `repo.openeuler.org` 镜像站与 CI 构建节点之间的**瞬时网络故障**，与 PR 的 Dockerfile 内容无关。多次 HTTP/2 stream error 和 SSL_ERROR_SYSCALL 是典型的网络层间歇性中断，通常在网络恢复后重试即可通过。建议直接 `/retest` 或重新触发 CI pipeline，无需修改任何文件。
+**重试 CI 构建**。根因是 openEuler 软件源 `repo.openeuler.org` 在 aarch64 CI runner 构建期间的瞬时网络不稳定（HTTP/2 流异常关闭、SSL 读取失败）。此类镜像站波动通常为临时性问题，在当前时刻重新触发 CI 大概率可正常通过。无需修改任何代码、Dockerfile 或元数据文件。
 
 ## 需要进一步确认的点
-- 若多次重试后仍然失败，需检查 CI aarch64 runner（`ecs-build-docker-aarch64-04-sp`）到 `repo.openeuler.org` 的出网连通性，可能存在防火墙、代理或 DNS 配置问题。
-- 可对比 x86_64 runner 上同 PR 的构建结果，确认是否为 aarch64 节点专属的网络问题。
-
-## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
-不适用。本失败为 infra-error，无需代码修复。
+- 无。日志已明确显示失败为软件源侧的网络层协议错误（Curl error 92 / Curl error 56），与 PR 变更无因果关联。
