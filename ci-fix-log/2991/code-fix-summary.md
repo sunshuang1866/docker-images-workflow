@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障，无需代码修改。具体表现为 aarch64 架构构建时从 `repo.openeuler.org` 下载 RPM 包遭遇 HTTP/2 流层错误（Curl error 92: INTERNAL_ERROR），导致 dnf install 失败。
+无需代码修复。CI 失败原因为 infra-error（基础设施错误）：`repo.openeuler.org` aarch64 仓库 HTTP/2 传输层不稳定导致 `guile` 等 RPM 包下载失败（Curl error 92），与 PR 代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-分析报告明确指出这是 **infra-error**（CI 基础设施问题），根因是 openEuler 24.03-LTS-SP4 官方仓库 `repo.openeuler.org` 在 aarch64 构建时段内 HTTP/2 传输不稳定，与 PR 代码变更无关。Dockerfile 中的 `RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all` 语法和包选择均正确无误，README.md、image-info.yml、meta.yml 的变更也均为纯元数据更新，不会触发此故障。
+CI 失败分析报告确认失败类型为 `infra-error`，根因是 `repo.openeuler.org` 的 aarch64 仓库 HTTP/2 传输层出现间歇性流错误（Curl error 92），导致 `dnf install` 无法完成包下载。日志显示多个 aarch64 包遭遇相同错误，`guile` 包在所有镜像重试耗尽后失败。
 
-根据修复原则：**infra-error 无需代码修改，不要强行改代码。** 建议等待 openEuler 仓库端网络恢复后重新触发 CI（retest），或如反复出现可考虑在 Dockerfile 中为 dnf 配置更多镜像源/强制使用 HTTP/1.1。
+此问题属于上游仓库/CI 基础设施网络问题，与 PR #2991 新增的 Dockerfile、README、image-info.yml、meta.yml 无关。处理方式为重新触发 CI 构建，无需修改任何代码。
 
 ## 潜在风险
-无（未做任何代码修改）
+无
