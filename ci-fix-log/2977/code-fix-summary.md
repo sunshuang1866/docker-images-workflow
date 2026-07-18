@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 构建失败为基础设施问题（infra-error），无需代码修改。
+无需代码修改。CI 失败为 `infra-error`，根因是 openEuler 软件源 `repo.openeuler.org` 在 aarch64 CI runner 构建期间的瞬时网络波动（HTTP/2 流异常关闭 Curl error 92、SSL 读取失败 Curl error 56），导致 RPM 包下载失败。
 
 ## 修改的文件
-无。CI 失败原因与 PR 代码变更无关。
+无（基础设施问题，不涉及代码变更）
 
 ## 修复逻辑
-CI 日志显示构建节点（`ecs-build-docker-aarch64-04-sp`）在 `yum install` 过程中从 `repo.openeuler.org` 下载 RPM 包时，遭遇多次 HTTP/2 协议层流错误（Curl error 92）和 SSL 读取系统调用失败（Curl error 56），导致多个软件包（gcc、kernel-headers、perl-MIME-Base64、vim-common）下载失败，最终 yum 安装步骤退出。这些错误是 CI 构建节点到上游镜像源之间的瞬时网络故障，属于 CI 基础设施问题，与 PR 中新增的 Dockerfile 内容无关。Dockerfile 中的 `yum install` 命令格式正确、软件包名规范。建议直接重新触发 CI 构建（`/retest`）即可。
+根据 CI 失败分析报告，失败发生在 `yum install` 从上游仓库下载 RPM 包的过程中，多个关键包（gcc、kernel-headers、vim-common 等）因 `repo.openeuler.org` 的 HTTP/2 连接异常而下载失败。该失败与 PR 变更的 Dockerfile 及元数据文件（README.md、image-info.yml、meta.yml）无因果关系。Dockerfile 本身的语法和依赖声明均正确（与已存在的 `24.03-lts-sp3` 版本结构一致）。修复方向为 **重试 CI 构建**，待软件源恢复正常后构建应可正常通过。
 
 ## 潜在风险
-无。若多次重试后仍失败，需排查 CI aarch64 runner 到 `repo.openeuler.org` 的出网连通性（防火墙、代理、DNS 或网络质量）。
+无
