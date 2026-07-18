@@ -1,16 +1,18 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是基础设施问题（infra-error），失败原因为 CI aarch64 runner 从 `repo.openeuler.org` 下载 RPM 包时遭遇反复的 HTTP/2 流错误（Curl error 92）和 SSL 读取错误（Curl error 56），与 PR 代码变更无关。
+无需代码修复。CI 失败由 openEuler 官方包仓库 `repo.openeuler.org` 在构建时段的 HTTP/2 网络不稳定导致（Curl error 92/56），属于纯粹的 CI 基础设施问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无
+无。所有 PR 变更文件（Dockerfile、README.md、image-info.yml、meta.yml）内容均正确，无需修改。
 
 ## 修复逻辑
-CI 失败分析报告确认：
-- 新增的 Dockerfile 语法正确，`yum install` 列出的所有依赖包均为 openEuler 24.03-LTS-SP4 仓库中真实存在的合法包
-- 失败由 CI 构建节点与 `repo.openeuler.org` 之间的网络层 / HTTP/2 协议层不稳定所致
-- 此为临时性基础设施问题，建议触发 CI 重试（re-run / re-trigger）
+CI 分析报告确诊此失败为 **infra-error**：
+- 失败发生在 `yum install` 下载 RPM 包阶段，多个包出现 HTTP/2 stream INTERNAL_ERROR (Curl error 92) 和 SSL_ERROR_SYSCALL (Curl error 56)
+- Dockerfile 中的包名和 yum 命令语法均正确
+- 失败与 PR 代码变更完全无关
+
+建议操作：重新触发 CI 构建，在网络状况恢复后可自然通过。
 
 ## 潜在风险
-无（未修改任何代码）
+无
