@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: RPM 镜像 HTTP/2 流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, dnf install
+- 新模式标题: RPM仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -23,24 +23,29 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`
-- 失败原因: CI 构建环境在通过 `dnf install` 从 openEuler 24.03-LTS-SP4 的 RPM 仓库镜像下载依赖包时，多个包（cmake-data、git-core、gcc-c++）遭遇 HTTP/2 协议层流错误（Curl error 92）。其中 cmake-data 和 git-core 在重试后成功下载，但 gcc-c++（约 13MB）两次下载尝试均失败，DNF 耗尽镜像列表后构建终止。这是基础设施/网络层面的问题，与 PR 代码变更无关。
+- 失败位置: Dockerfile:6（`RUN dnf install -y ...` 步骤）
+- 失败原因: 构建过程中 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库下载 RPM 包时，多个包（`cmake-data`、`git-core`、`gcc-c++`）遭遇 HTTP/2 协议层流错误（Curl error 92: INTERNAL_ERROR），其中 `gcc-c++` 在两次重试后耗尽所有镜像源仍未能成功下载，导致整个 `dnf install` 命令失败。该问题与 PR 代码变更无关，属于仓库服务器 HTTP/2 服务端的瞬时或协议兼容性问题。
 
 ### 与 PR 变更的关联
-**无关。** PR 新增的 Dockerfile 中 `dnf install` 命令语法和包名均正确——DNF 已成功解析出 258 个待安装包的依赖关系（见日志 `Dependencies resolved.` 阶段）。失败发生在第二阶段的"实际下载 RPM 包"过程中，原因是 openEuler 24.03-LTS-SP4 OS 仓库的 HTTP/2 传输不稳定。该问题具有随机性：同一批构建中其他包（gcc、cmake 本体等）均成功下载，仅 gcc-c++ 失败；前序的其他 PR 构建同样依赖该仓库却未触发此错误。
+**本次 PR 的故障为 infra-error，与 PR 代码变更无关。**
+
+PR #2980 新增了 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`（30 行）及相关元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 内容完全正常：基础镜像、`dnf install` 命令、源码构建步骤均无语法或逻辑错误。构建失败发生在 Docker 构建的第二步（`dnf install`），原因是 openEuler 24.03-LTS-SP4 软件仓库服务器在对 `gcc-c++` 等大包进行 HTTP/2 传输时持续返回 INTERNAL_ERROR 流错误，与 Dockerfile 内容、PR 改动无关。
+
+日志中 `cmake-data` 和 `git-core` 也出现了同类错误但通过重试其他镜像成功下载，说明该问题是服务端 HTTP/2 实现的间歇性缺陷，仅在特定包（如 13MB 的 `gcc-c++`）的重试中全部失败。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**直接重试 CI 构建。** 此失败是由 openEuler 24.03-LTS-SP4 RPM 仓库镜像的瞬时网络波动导致 HTTP/2 流异常中断。Dockerfile 本身无需修改。重新触发 CI build（rerun）大概率可通过，因为 cmake-data 和 git-core 在同一次构建中重试后也已成功下载。
+**无需代码修复，建议重跑 CI。**
+
+这是一个 CI 基础设施/上游仓库问题。openEuler 仓库镜像站的 HTTP/2 服务在传输大文件（`gcc-c++` 约 13MB）时出现流中断。问题具有间歇性特征：`cmake-data` 和 `git-core` 通过重试其他镜像成功下载。`gcc-c++` 的两次重试恰好都抽到了有问题的镜像。建议：
+1. 直接触发 CI 重跑（retry），大概率能通过
+2. 如持续失败，联系 openEuler 24.03-LTS-SP4 仓库管理员排查 HTTP/2 反向代理/负载均衡配置
 
 ### 方向 2（置信度: 低）
-**在 Dockerfile 中添加 DNF 重试配置。** 若此问题频繁复现，可考虑在 `dnf install` 命令前增加重试参数（如设置 `retries=10` 的 dnf 全局配置），使 DNF 在遇到 HTTP/2 流错误时自动多次重试。但此改动超出本次 PR 的范围，且同类仓库其他 Dockerfile 亦无此模式，不建议主动采用。
+**作为规避手段，在 Dockerfile 的 `dnf install` 前禁用 HTTP/2。**
+
+如果重跑持续失败且无法等待上游修复，可在 Dockerfile 中添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 或在 BuildKit 层面配置 HTTP/1.1。但这属于临时规避，不应作为首选方案。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 OS 仓库镜像（`repo.****.org`）在 CI 构建时段是否有已知的网络波动或维护窗口。
-- 若重试后仍失败，排查 CI runner 所在网络到该镜像站的路由质量问题（丢包、MTU 等可能导致 HTTP/2 帧异常）。
-- 确认是否只有 x86_64 架构的该镜像出现问题（日志中仅显示 x86-64 runner），aarch64 构建节点是否遇到同样问题。
-
-## 修复验证要求
-无需 code-fixer 介入。Code Fixer 无需处理此 infra-error 类型的失败。
+- 日志已足以确定根因，无需额外确认。仓库 `repo.****.org` 的 HTTP/2 实现存在间歇性问题，该问题是故障的唯一原因。
