@@ -1,16 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error）：CI runner 环境中缺少 `shunit2` 测试框架，导致 [Check] 阶段无法执行镜像测试用例。
+无需代码修改 — CI 失败为基础设施问题（infra-error）。
 
 ## 修改的文件
-无
+无（CI 失败与 PR 代码变更无关）
 
 ## 修复逻辑
-- Docker 构建和推送阶段均已成功完成（镜像已推送到注册表 `docker.io/****test/postgres:17.6-oe2403sp4-x86_64`）。
-- 失败发生在 CI 流水线的 [Check] 阶段，根因是 CI runner 环境未安装 `shunit2`，与 PR #2839 的代码变更无关。
-- 应在 CI runner 环境中安装 `shunit2`（如 `dnf install shunit2`）或检查 `common_funs.sh` 中的 source 路径是否正确。
-- 此为 CI 基础设施配置问题，不在 Code Fixer 的修复范围内。
+CI 分析报告确认：失败发生在 Docker 镜像构建和推送成功之后的 [Check] 阶段，根因为 CI Runner 宿主机上缺少 `shunit2` Bash 测试框架（`shunit2: No such file or directory`），导致测试脚本无法启动。该问题属于 CI 基础设施配置问题，与 PR 中 `Database/postgres/17.6/24.03-lts-sp4/Dockerfile`、`entrypoint.sh`、`README.md`、`meta.yml` 的变更无关。需要在 CI Runner 上安装 `shunit2` 或在编排脚本中将其加入 Runner 预置依赖。
 
 ## 潜在风险
 无
