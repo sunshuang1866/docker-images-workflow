@@ -3,33 +3,34 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit 构建器终止
-- 新模式症状关键词: failed to receive status, rpc error, graceful_stop, no builder found, euler_builder
+- 新模式标题: BuildKit builder 连接中断
+- 新模式症状关键词: graceful_stop, closing transport, error reading from server: EOF, no builder found, gRPC Unavailable
 
 ## 根因分析
 
 ### 直接错误
 ```
+#7 [2/4] RUN dnf install -y       gcc gcc-c++ make wget       openssl-devel bzip2-devel zlib-devel &&     dnf clean all
 #7 38.59 OS                                               77 kB/s | 2.8 MB     00:37
 ERROR: failed to receive status: rpc error: code = Unavailable desc = closing transport due to: connection error: desc = "error reading from server: EOF", received prior goaway: code: NO_ERROR, debug data: "graceful_stop"
 ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker build 步骤 `[2/4] RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all`（x86-64 构建节点 `ecs-build-docker-x86-hk`）
-- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在 Docker 构建进行到 `dnf install` 阶段时，收到服务端 GOAWAY 信号（`graceful_stop`）被终止，导致 gRPC 连接断开，构建无法继续。
+- 失败位置: Docker 构建步骤 `#7 [2/4]`（`dnf install` 阶段），构建进行约 39 秒时
+- 失败原因: Docker BuildKit builder 实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被优雅关闭（`graceful_stop`），gRPC 传输层连接断开（`error reading from server: EOF`），导致构建中断。`no builder found` 为后续连锁错误。
 
 ### 与 PR 变更的关联
-PR 仅新增了一个标准结构的 Dockerfile（安装系统依赖 → 编译 Python 3.9.19 → pip 安装 scann）及配套的 README、image-info.yml、meta.yml 条目。构建失败发生在最基础的 `dnf install` 步骤，与 PR 代码变更无直接关联。该 Dockerfile 本身不存在语法错误或逻辑问题。
+**与 PR 变更无关**。本次 PR 仅新增了一个标准 Dockerfile（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`），安装 Python 3.9.19 并用 pip 安装 scann 1.4.2。Dockerfile 内容没有明显错误，构建在 `dnf install` 常规下载阶段因 BuildKit 基础设施故障中断，而非因代码问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-这是 CI 基础设施的瞬时故障（BuildKit builder daemon 被服务端优雅关闭）。建议**触发 CI 重试（re-run）**，大概率可成功通过。若多次重试仍失败，需检查 CI 节点上 BuildKit builder 实例的健康状态和资源配额。
+### 方向 1（置信度: 高）
+CI 基础设施故障——BuildKit builder 进程意外终止或被外部信号关闭。Code Fixer 无需处理。建议重新触发 CI 流水线重试构建，若多次重试均在同一位置失败，则需排查 runner 节点（`ecs-build-docker-x86-hk`）上 BuildKit daemon 的稳定性或资源限制（OOM、磁盘空间等）。
 
 ## 需要进一步确认的点
-1. CI 节点 `ecs-build-docker-x86-hk` 上 BuildKit daemon（`euler_builder_*`）是否存在资源不足、OOM 或被其他 Job 抢占的问题。
-2. 同批次其他 PR 的构建是否也出现相同错误——如果是，则确认是集群级别的基础设施问题。
-3. 该 PR 的 aarch64 构建 job 是否成功，以排除 Dockerfile 在多架构上的潜在问题（根据日志，当前失败仅发生在 x86-64 job）。
+- 检查 runner 节点 `ecs-build-docker-x86-hk` 的系统日志（`dmesg`/`journalctl`），确认是否存在 OOM killer 或其他资源事件导致 BuildKit builder 被终止
+- 确认 BuildKit builder `euler_builder_20260709_224657` 是否由外部编排进程主动回收
+- 若多次重试后问题持续，需排查 Docker daemon 或 buildx 版本兼容性
