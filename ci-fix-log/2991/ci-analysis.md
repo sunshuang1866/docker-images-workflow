@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 软件源HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, repo.openeuler.org
+- 新模式标题: 仓库镜像HTTP/2流中断
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR (err 2), No more mirrors to try, dnf install, repo.openeuler.org
 
 ## 根因分析
 
@@ -23,17 +23,20 @@
 
 ### 根因定位
 - 失败位置: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）
-- 构建节点: `ecs-build-docker-aarch64-04-sp`（aarch64 架构）
-- 失败原因: aarch64 架构构建节点在执行 `dnf install` 从 `repo.openeuler.org` 下载软件包时，多个 RPM 包（git-core、gcc-c++、guile）遭遇 HTTP/2 流层错误（Curl error 92: INTERNAL_ERROR），其中 `guile` 包重试耗尽所有镜像后最终失败，导致整个 `dnf install` 命令以 exit code 1 退出。
+- 失败原因: CI 构建节点 `ecs-build-docker-aarch64-04-sp`（aarch64）在执行 `dnf install` 从 `repo.openeuler.org` 下载 RPM 包时，多个包（`git-core`、`gcc-c++`、`guile`）遭遇 HTTP/2 流传输中断错误（Curl error 92: INTERNAL_ERROR），其中 `gcc-c++` 重复失败 2 次、`guile` 重试耗尽后最终导致构建失败。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 此次 PR 仅新增了一个标准的 vvenc Dockerfile（含 `dnf install` + `git clone` + `cmake` 构建流程）和元数据文件更新。Dockerfile 本身在语法和逻辑上没有问题——`dnf install -y git gcc gcc-c++ make cmake` 是合法的包安装命令。失败纯粹是由于 CI 构建期间 `repo.openeuler.org` 镜像站在 aarch64 节点上出现 HTTP/2 协议层传输异常，属于基础设施层面的偶发性网络问题。
+**与 PR 代码变更无关。** 本次 PR 仅新增了一个标准的 vvenc Dockerfile（安装 git、gcc、gcc-c++、make、cmake 并通过 cmake 编译 vvenc），同时更新了 README.md、image-info.yml 和 meta.yml。`dnf install` 下载 RPM 包失败是 `repo.openeuler.org` 仓库镜像与 CI aarch64 构建节点之间的网络传输问题（HTTP/2 流异常中断），属于 CI 基础设施层面的临时性故障，非 PR 代码缺陷。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，重试 CI 构建。** 此失败是 `repo.openeuler.org` 软件源在构建时刻的临时性 HTTP/2 流层异常，与 PR 引入的 Dockerfile 内容无任何关联。在 openEuler 镜像站恢复稳定后，重新触发 CI 构建即可通过。
+**重新触发 CI 构建。** 该失败为 `repo.openeuler.org` 仓库到 CI aarch64 runner 的网络波动导致的临时性 RPM 下载失败（HTTP/2 流中断），与 PR 代码变更完全无关。直接重试 CI 即可，若网络恢复则构建将正常通过。
+
+### 方向 2（置信度: 低）
+如果多次重试仍失败，可能是 openEuler 24.03-LTS-SP4 的 aarch64 仓库镜像站 `repo.openeuler.org` 存在持续的服务端 HTTP/2 问题，可尝试在 Dockerfile 的 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 强制 dnf 使用 HTTP/1.1 协议下载，规避 HTTP/2 流中断问题。
 
 ## 需要进一步确认的点
-- 确认 `repo.openeuler.org` 在 aarch64 节点上的 HTTP/2 服务是否稳定，是否为临时性抖动
-- 检查同一时间段是否有其他 PR 在 aarch64 节点上遇到相同的 `Curl error (92)` 包下载失败，以判断是全局基础设施问题还是该节点独有问题
+- 确认 `repo.openeuler.org` 的 openEuler-24.03-LTS-SP4 aarch64 仓库当前是否稳定可访问，是否存在 HTTP/2 服务端问题
+- 确认 x86-64 架构的构建 job 是否也出现相同的 RPM 下载失败（本次日志仅包含 aarch64 构建 job）
+- 如果其他 SP4 镜像的 aarch64 构建也同时失败，可确认是仓库侧问题而非单次网络抖动
