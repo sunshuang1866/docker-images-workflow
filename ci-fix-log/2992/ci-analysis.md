@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 仓库镜像HTTP/2错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, MIRROR, No more mirrors to try
 
 ## 根因分析
 
@@ -23,21 +23,17 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（`RUN dnf install` 步骤）
-- 失败原因: CI 构建环境从 openEuler 24.03-LTS-SP4 软件仓库下载 RPM 包时，多个包遭遇 HTTP/2 流错误（Curl error 92），在重试耗尽所有可用镜像后，gcc-12.3.1-110.oe2403sp4.x86_64.rpm 下载最终失败，导致 dnf install 退出码为 1。
+- 失败位置: 新增文件 `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile`:7（`RUN dnf install` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件仓库镜像在构建期间反复出现 HTTP/2 帧层错误（Curl error 92: INTERNAL_ERROR），多个 RPM 包（gcc-gfortran、glibc-devel、guile、gcc）在多个镜像节点上均下载失败，dnf 耗尽所有镜像后放弃，导致构建终止。这是仓库服务器侧的瞬态网络故障，与 Dockerfile 内容无关。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 的变更仅为：
-1. 新增 `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile`（标准的 dnf 安装构建依赖 + git clone + make）
-2. 更新 README.md、image-info.yml、meta.yml 添加新版本条目
-
-Dockerfile 的 `dnf install` 命令语法和包名均正确（stage-1 运行时阶段也在并行下载且未报语法错误）。失败完全由 openEuler 24.03-LTS-SP4 软件仓库的 HTTP/2 服务端不稳定导致下载中断。stage-1（#7）的下载过程也同样出现了 `[MIRROR] Curl error (92)` 但侥幸在重试中恢复；builder stage（#8）的 gcc 包在多次重试后耗尽所有镜像而失败。
+PR 新增了一个 Dockerfile（`Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile`），其 `RUN dnf install` 步骤需要从 openEuler 24.03-LTS-SP4 仓库下载约 157 个 RPM 包。构建时仓库镜像遭遇 HTTP/2 连接异常，属于 CI 基础设施问题，**与 PR 代码变更无关**。Dockerfile 语法正确，基镜像拉取（`FROM openeuler/openeuler:24.03-lts-sp4`）成功，且 PR 仅新增文件无修改已有代码，不会引入回归。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需代码修复。** 这是 openEuler 24.03-LTS-SP4 软件仓库镜像的临时性基础设施问题（HTTP/2 流中断），与 PR 的 Dockerfile 内容无关。Code Fixer 不应对该 PR 做任何修改。建议触发 CI 重试（re-run），待仓库服务恢复后构建应能通过。
+CI 基础设施问题，无需修改代码。直接**重新触发 CI 构建**即可。当 openEuler 24.03-LTS-SP4 仓库镜像恢复稳定后，`dnf install` 步骤应能正常下载 RPM 包并完成构建。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP4 软件仓库（`repo.****.org`）在该时段的服务状态，确认是否为临时的服务端 HTTP/2 协议栈异常
-- 同一时段内其他同样使用 `openeuler:24.03-lts-sp4` 基础镜像的 PR 是否也出现了相同的 dnf 下载失败，以佐证这是全局性基础设施问题
+- 确认构建时 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）是否存在全网性故障或升级维护。
+- 如果重试多次仍失败，需确认 CI runner 所在网络环境是否与仓库镜像节点间存在 HTTP/2 协议兼容性问题（可尝试降级为 HTTP/1.1）。
