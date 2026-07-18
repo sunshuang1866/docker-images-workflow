@@ -1,18 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施故障：`[Check]` 阶段因 CI 测试环境缺少 `shunit2` shell 单元测试框架而失败，与 PR #2893 代码变更无关。无需代码修改。
+CI 基础设施问题：eulerpublisher 在 [Check] 阶段运行容器测试时，CI runner 环境中缺少 `shunit2` 单元测试框架，导致测试失败。此失败与 PR 代码变更完全无关，构建和推送阶段均已成功完成。
 
 ## 修改的文件
-无。此问题为 infra-error，不需要修改任何源代码文件。
+无需修改任何源代码文件。
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- Docker 构建 (`[Build]`) 和推送 (`[Push]`) 阶段均已成功完成，`meson compile` 422/422 个编译目标全部通过
-- 失败仅发生在 `[Check]` 测试验证阶段，原因是 CI runner 环境中 `shunit2` 未安装，导致 `common_funs.sh` 执行 `source` 加载时找不到该框架
-- 根因与 PR 提交的 Dockerfile、named.conf、README.md、image-info.yml、meta.yml 等文件完全无关
-
-此问题需由 CI 基础设施团队在 runner 环境中安装 `shunit2` 后重新触发构建即可通过。
+此为 **infra-error**，根因是 CI runner 环境中未安装 `shunit2`（Shell 单元测试框架），导致 `common_funs.sh` 脚本在 source `shunit2` 时报 `file not found`。Docker 镜像的构建（meson 编译 bind9 422 个目标全部通过）和推送均已成功完成，失败仅发生在构建完成后的容器镜像功能测试 [Check] 阶段。此问题应在 CI runner 环境中安装 `shunit2` 解决，无需对 Dockerfile 或任何 PR 涉及的源代码文件进行修改。
 
 ## 潜在风险
-无。
+无
