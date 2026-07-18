@@ -1,15 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 本次 CI 失败为 `infra-error`（CI 基础设施问题），非源代码 bug。
+无需代码修改。PR #2790 是纯文档更新（仅修改仓库根目录 `README.md`），CI 流水线错误地将面向应用镜像发布的 appstore 规范预检应用于此文档 PR，导致路径校验失败。该问题是 CI 基础设施/流水线配置问题，不是 PR 代码内容有误。
 
 ## 修改的文件
-无（0 个文件被修改）
+无（无需对 `README.md` 做任何修改）
 
 ## 修复逻辑
-PR #2790 仅修改了仓库根目录的 `README.md` 和 `README.en.md`，更新其中的 openEuler 版本 tag 列表，属于纯文档更新。CI 失败由 appstore 发布规范检查工具（`eulerpublisher/update/container/app/update.py`）触发，该工具期望变更文件位于 `{category}/{app-name}/{version}/` 等应用镜像目录结构下，而根目录 README.md 不属于应用镜像发布范畴，因此被误判为路径错误。
+CI 失败的直接原因是 appstore 发布规范预检脚本（`eulerpublisher/update/container/app/update.py`）扫描到根层级 `README.md` 发生变更，但该文件路径不在任何已识别的应用镜像发布路径下（如 `AI/`、`Bigdata/` 等），因此路径校验失败。
 
-该失败并非由代码缺陷引起，而是 CI 的触发/校验逻辑未对纯文档 PR 做跳过滤造成的。根据分析报告结论（失败类型: `infra-error`），不需要且不应对源码做任何修改。
+但该 PR 是纯文档更新，`README.md` 是仓库级别的合法文件，不应被 appstore 镜像发布规范预检处理。分析报告明确指出"该失败与 PR 的 README 变更直接相关，但并非 PR 内容有错误"。修复方向（CI 流水线增加文档文件白名单过滤、或为文档 PR 使用独立流水线）均涉及 CI 编排层配置变更，不在本 PR 的变更文件范围（`['README.md']`）内。
+
+此场景本质上属于 CI 基础设施问题（infra-error），强行修改 `README.md` 无法解决该 CI 检查失败，反而可能引入其他问题。
 
 ## 潜在风险
-无 — 未修改任何代码文件。
+无（未对代码做任何修改）
