@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2980 — chore(grads): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像 HTTP/2 流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, No more mirrors to try, INTERNAL_ERROR
+- 新模式标题: 仓库 HTTP/2 流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
 
 ## 根因分析
 
@@ -22,19 +22,18 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
-- 失败原因: openEuler 24.03-LTS-SP4 的官方软件仓库镜像在本次构建期间存在 HTTP/2 传输层间歇性故障（Curl error 92: INTERNAL_ERROR），导致多个 RPM 包（cmake-data、git-core、gcc-c++）下载遭遇 `Stream error in the HTTP/2 framing layer`。其中 cmake-data 和 git-core 经重试后成功，但 gcc-c++ 的两次重试均失败，最终 `No more mirrors to try`，dnf 安装步骤退出码为 1。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`RUN dnf install -y` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件仓库的 HTTP/2 连接出现流错误（`INTERNAL_ERROR`），导致多个 RPM 包下载中断。`cmake-data` 和 `git-core` 在重试后成功下载，但 `gcc-c++` 两次尝试均失败，dnf 耗尽所有镜像重试后放弃。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该 PR 新增的 Dockerfile 内容完全正确——`dnf install` 命令语法无误、包名均有效、构建逻辑合理。失败纯粹是 openEuler 24.03-LTS-SP4 仓库镜像的网络基础设施问题：HTTP/2 连接流在传输大体积 RPM（gcc-c++ 13MB）时不稳定，导致 stream 异常关闭。日志中多个不同 RPM 包在不同 stream 上均出现同类错误，进一步排除包自身问题，确认根因在仓库服务端。
+**与 PR 代码变更无关。** 该 PR 仅新增了 GrADS 2.2.3 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及相关元数据文件。Dockerfile 中 `dnf install` 命令语法正确、包名无误，错误发生在从远端仓库下载 RPM 包的网络传输阶段，属于 CI 基础设施/外部仓库服务的瞬时问题。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-此失败为 **infra-error**，与 PR 代码无关。无需修改 Dockerfile 或任何代码文件。建议操作：
-1. 等待 openEuler 仓库镜像恢复稳定后，在 CI 中重试（re-trigger）该 job。
-2. 若该仓库镜像持续不稳定，可考虑在 Dockerfile 的 `dnf install` 命令中增加 `--retries 5` 或添加 `--setopt=retries=5` 参数，提高 dnf 对偶发网络错误的容忍度。
+### 方向 1（置信度: 中）
+**重试构建**。该错误属于外部仓库服务的瞬时网络故障（HTTP/2 流被服务端以 INTERNAL_ERROR 异常关闭）。在同一 CI 构建中，`cmake-data` 和 `git-core` 首次遇到同样的错误后重试成功，仅 `gcc-c++` 始终失败。最可能的根因是 openEuler 24.03-LTS-SP4 仓库在该时间段内服务不稳定。建议等待仓库服务恢复后重新触发 CI，大概率可自然通过。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像 `repo.****.org` 的网络状态是否已恢复。可查看同一时间段内其他基于 24.03-lts-sp4 的 PR 构建是否也出现类似的 Curl error (92)。
-- 若该仓库持续不稳定，确认 CI 环境是否可配置备用镜像站（如清华镜像站），通过 `dnf` 配置多镜像 fallback 提升下载可靠性。
+- 确认 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）在构建时间段是否有服务异常/维护记录
+- 如果重试仍然失败，需排查是否仓库对特定 IP 段或 CI runner 的 HTTP/2 连接存在限制策略
+- 可尝试在 Dockerfile 的 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 强制禁用 HTTP/2，改用 HTTP/1.1 降低流层协议问题的影响
