@@ -4,37 +4,46 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 模式39
-- 新模式标题: (不适用)
-- 新模式症状关键词: (不适用)
+- 知识库匹配: 新模式
+- 新模式标题: CI测试框架缺失
+- 新模式症状关键词: shunit2, No such file or directory, common_funs.sh, Check test failed
 
 ## 根因分析
 
 ### 直接错误
 ```
+2026-07-09 09:40:24,013 - INFO - [Check] checking ****test/postgres:17.6-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
-[Check] test failed
+2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
-- 失败原因: CI 运行器环境中缺少 `shunit2`（Shell 单元测试框架），导致 [Check] 阶段无法加载测试断言库，所有检查项以空表呈现后直接失败
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh`:13
+- 失败原因: CI Runner 上缺少 `shunit2` Bash 单元测试框架，导致 `eulerpublisher` 的 [Check] 阶段（镜像功能验证测试）在执行测试脚本时无法找到 `shunit2` 依赖而失败。
 
 ### 与 PR 变更的关联
-与本次 PR 变更无关。Docker 构建和镜像推送均已完成并成功（日志中可见 `#8 DONE 268.4s`、`#11 DONE 58.0s`、`[Build] finished`、`[Push] finished`）。失败发生在构建/推送之后的 [Check] 阶段，该阶段使用 eulerpublisher 测试框架对已构建的镜像执行自动化验证，但由于 CI runner 缺少 `shunit2` 依赖而无法加载任何测试断言——这与 PR 新增的 postgres 17.6 Dockerfile、entrypoint.sh、README.md 及 meta.yml 均无关联。
+**与 PR 变更无关。** 此次 PR 仅新增了以下文件：
+- `Database/postgres/17.6/24.03-lts-sp4/Dockerfile` — PostgreSQL 17.6 构建文件
+- `Database/postgres/17.6/24.03-lts-sp4/entrypoint.sh` — 容器入口脚本
+- 更新 `Database/postgres/README.md` 和 `Database/postgres/meta.yml`
+
+Docker 镜像的构建和推送阶段均**全部成功**（日志显示 `#8 DONE 268.4s`、`[Build] finished`、`[Push] finished`），PostgreSQL 源码编译安装步骤全部正常完成。失败发生在镜像构建完成后的 [Check] 测试阶段，是 CI 基础设施（测试框架依赖）问题，与 PR 的 Dockerfile 或 entrypoint.sh 内容无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 CI runner（Jenkins agent）上安装或部署 `shunit2` 测试框架。`shunit2` 是一个独立的 Shell 脚本测试库，通常可通过系统包管理器（如 `yum install shunit2`）安装，或从其官方仓库获取后部署到 `/usr/local/etc/eulerpublisher/tests/container/common/` 路径下。安装后重新触发 CI 流水线即可恢复 [Check] 阶段的正常执行。
+在 CI Runner 上安装 `shunit2` Bash 测试框架。`shunit2` 是一个标准的 shell 单元测试库，通常可通过以下方式之一获取：
+- 从 EPEL/系统仓库安装（如 `yum install shunit2`）
+- 从 GitHub releases 下载到 `/usr/local/bin/` 或 CI 脚本的 `PATH` 路径中
 
-### 方向 2（置信度: 中）
-在 eulerpublisher 测试框架的 `common_funs.sh` 中增加 `shunit2` 依赖的前置存在性检查。若 `shunit2` 缺失，直接给出明确的错误提示（如 "shunit2 is required but not found, please install it first"）并退出，而非静默加载失败导致检查项表为空。这可以提升后续同类问题的可观测性。
+这是 CI 基础设施维护问题，**Code Fixer 无需处理**，应由 CI 运维团队在 runner 镜像中预装 `shunit2`。
 
 ## 需要进一步确认的点
-1. 确认 CI runner（Jenkins agent）上 `shunit2` 的预期安装方式和路径——是通过系统包管理器安装（如 `yum install shunit2`），还是作为 eulerpublisher 测试框架的一部分从固定路径部署
-2. 确认同一 CI runner 上其他同类 PR（其他 openEuler 24.03-LTS-SP4 镜像添加类 PR）的 [Check] 阶段是否也因同样原因失败，以判断是本次 runner 的局部问题还是集群级别的系统性问题
-3. `entrypoint.sh` 中的 `case` 语句语法（第 1 行）因 shunit2 缺失而未在此次检查中被实际测试到——在 infra 问题修复后，应关注该文件的后续测试结果
+1. 确认 `shunit2` 在 openEuler 24.03-LTS-SP4 仓库中的包名（可能是 `shunit2` 或 `shUnit2`）
+2. 确认该 CI Runner 是否是为此 PR 新分配的 runner（如果是存量 runner，需确认为何 `shunit2` 丢失）
+3. 确认其他同时期的 PR 是否也遇到了同样的 [Check] 阶段失败，以判断是单点问题还是全局 CI 环境退化
 
 ## 修复验证要求
-(不适用——此为 infra 问题，无需修改 PR 代码。修复由 CI 基础设施管理员在 Jenkins agent 上安装 `shunit2` 后，重新触发流水线即可验证。)
+（不适用——本问题为 infra-error，不涉及代码修改或正则 patch）
