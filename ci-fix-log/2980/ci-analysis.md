@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像 HTTP/2 流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, gcc-c++, dnf install
+- 新模式标题: 仓库镜像HTTP/2错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,17 +22,20 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`RUN dnf install -y ...` 步骤）
-- 失败原因: Docker 构建过程中，`dnf install` 从 openEuler 24.03-LTS-SP4 仓库镜像下载 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm`（13 MB）时，上游镜像服务器反复返回 HTTP/2 帧层流错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），重试耗尽所有镜像后下载失败。同时，`cmake-data` 和 `git-core` 两个包也遭遇了同类 HTTP/2 流错误，但重试后成功下载；仅 `gcc-c++` 包因连续两次 HTTP/2 错误最终完全失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 软件包仓库镜像在 HTTP/2 传输层出现 `INTERNAL_ERROR (err 2)` 协议错误，导致 `gcc-c++` 等 RPM 包下载失败。`cmake-data` 和 `git-core` 在重试后成功下载，但 `gcc-c++` 经过多次重试仍未成功，最终耗尽所有镜像后构建失败。
 
 ### 与 PR 变更的关联
-**与 PR 无关**。本次 PR 仅新增了一个 `Dockerfile`（GrADS 2.2.3 + openEuler 24.03-LTS-SP4）、更新了 README.md、image-info.yml 和 meta.yml。Dockerfile 中的 `dnf install` 命令格式正确、依赖包列表完整，失败原因是 CI 构建环境与 openEuler 24.03-LTS-SP4 仓库镜像之间的网络/HTTP 协议层问题，属于基础设施故障。
+**与 PR 变更无关。** PR #2980 的改动仅为新增一个正确格式的 Dockerfile（`Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`）及配套的 README、image-info.yml、meta.yml 更新。Dockerfile 中的 `dnf install` 命令语法正确，所需软件包在仓库中确实存在（事务摘要列出了 258 个待安装包，下载总大小 914 MB）。失败根因是 openEuler 24.03-LTS-SP4 仓库镜像网络的瞬时 HTTP/2 传输故障。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改代码，重试 CI 即可。** 这是 openEuler 24.03-LTS-SP4 仓库镜像服务器的临时性 HTTP/2 流错误（`INTERNAL_ERROR`），非 PR 代码引起。多个包（cmake-data、git-core、gcc-c++）均出现同类错误，且 cmake-data 和 git-core 在重试后成功，说明问题为间歇性网络故障。建议等待镜像服务器恢复后重新触发 CI 构建。
+**无需代码修改。** 这是 CI 基础设施的网络瞬时故障。触发重新构建（retry）即可解决。`gcc-c++` 包本身在仓库中是存在的（`gcc` 包在同一批次中下载成功），问题出在镜像站的 HTTP/2 连接稳定性上。
+
+### 方向 2（置信度: 低）
+如果重试多次仍然失败，可能需要在 Dockerfile 的 `dnf install` 前先更新 dnf 配置，禁用 HTTP/2 或增加重试次数/超时时间。但这是规避手段而非根治，仅供多次重试仍失败时参考。
 
 ## 需要进一步确认的点
-- 如果多次重试 CI 仍然失败，需排查 CI 构建节点（`ecs-build-docker-x86-03-sp`）到 `repo.****.org` 之间的网络链路是否存在持续性问题。
-- 确认 openEuler 24.03-LTS-SP4 仓库镜像服务端是否有 HTTP/2 协议相关的已知缺陷或配置变更。
+- 如果重试（re-trigger CI）后问题解决，则确认为瞬时网络故障，无需任何代码变更。
+- 如果重试后 x86_64 仍然失败，需检查 openEuler 24.03-LTS-SP4 仓库镜像站 `repo.****.org` 在 CI 构建时间段是否存在持续性的 HTTP/2 协议问题。
