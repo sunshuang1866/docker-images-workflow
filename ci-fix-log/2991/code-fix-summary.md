@@ -1,15 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改 — 本次 CI 失败为基础设施错误（infra-error），与 PR 代码变更无关。
+CI 基础设施故障（infra-error），非代码问题。`repo.openeuler.org` 的 openEuler 24.03-LTS-SP4 aarch64 CDN 节点在构建窗口期内 HTTP/2 连接不稳定，导致 `dnf install` 下载 `guile` 包时失败。
 
 ## 修改的文件
-无
+无需修改任何代码文件。该失败与 PR #2991 的代码变更完全无关。
 
 ## 修复逻辑
-CI 分析报告确认失败根因是 `repo.openeuler.org` 镜像站在构建时刻 HTTPS/2 连接不稳定，导致 dnf 下载 `guile` 等 RPM 包时出现 Curl error (92)。`git-core` 和 `gcc-c++` 也遇到了同样的 HTTP/2 流错误，只是通过 dnf 的自动重试恢复，而 `guile` 重试耗尽后失败。
+CI 分析报告判定为纯基础设施故障，置信度"高"。失败原因是 `repo.openeuler.org` 的 aarch64 节点在构建时 HTTP/2 流层出现 `INTERNAL_ERROR`，多个 RPM 包（`git-core`、`gcc-c++`、`guile`）遭遇 Curl error 92，其中 `guile` 耗尽所有镜像重试后失败。PR 新增的 Dockerfile 构建指令（`dnf install -y git gcc gcc-c++ make cmake && dnf clean all`）本身完全正确。
 
-PR #2991 新增的 Dockerfile 中 `dnf install` 命令完全正确，无语法错误或版本问题，无需修改任何代码。建议重新触发 CI 构建（rerun），大概率能通过。若反复出现同样错误，需联系 openEuler 镜像站管理员排查 `repo.openeuler.org` 的 HTTP/2 服务端配置或 CDN 节点健康状况。
+建议重新触发 CI 构建（retry），待 `repo.openeuler.org` 的 aarch64 节点网络恢复稳定后构建即可通过。
 
 ## 潜在风险
 无
