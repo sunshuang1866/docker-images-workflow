@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败是基础设施问题（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败属于 `infra-error`，原因是 CI Runner 的 aarch64 节点上缺少 `shunit2` Shell 单元测试框架。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告明确指出：失败发生在 CI 工具 `eulerpublisher` 内部的 [Check] 测试阶段，根因是 CI runner 上缺失 `shunit2` shell 测试框架（`common_funs.sh:13: .: shunit2: file not found`）。该错误与 PR #2893 新增 bind9 9.21.23 Dockerfile 及配置文件的代码变更完全无关。Docker 镜像构建、推送阶段均已成功完成。此问题需由 CI 管理员在 runner 上安装 `shunit2` 或修复 `eulerpublisher` 的依赖声明。
+分析报告明确指出：Docker 镜像的构建、安装和推送阶段全部成功，失败发生在 `[Check]` 阶段的 `common_funs.sh:13` 因找不到 `shunit2` 库而报错。这与本次 PR 新增的 Dockerfile、named.conf 及元数据文件变更无关，属于 CI 基础设施问题。修复方向为在 CI Runner 上安装 `shunit2`（如 `dnf install shunit2`），不需要对 PR 代码做任何修改。
 
 ## 潜在风险
 无
