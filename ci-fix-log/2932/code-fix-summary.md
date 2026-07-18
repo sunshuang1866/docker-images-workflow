@@ -1,18 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 BuildKit 构建器启动失败的 infrastructure 问题，与 PR 代码变更无关。
+在 openEuler 24.03-LTS-SP4 的 glibc 2.42 Dockerfile 中补充缺失的构建依赖 `gawk`（GNU awk）。
 
 ## 修改的文件
-无（infra-error，无需修改任何代码文件）
+- `Others/glibc/2.42/24.03-lts-sp4/Dockerfile`: 在 `dnf install` 命令中添加 `gawk` 包
 
 ## 修复逻辑
-CI 日志显示失败发生在 `[internal] booting buildkit` 阶段，错误信息为 `Error response from daemon: Could not find the file / in container buildx_buildkit_euler_builder_20260709_2057000`。此时尚未执行任何 Dockerfile 中的指令，BuildKit 构建器容器在 Docker daemon 层面创建失败。PR 变更（新增 glibc 2.42 openEuler 24.03-LTS-SP4 的 Dockerfile 及配套元数据）均为常规的镜像新增操作，与 BuildKit 构建器启动无任何关联。
+对比已有且正常构建的 SP1/SP2 Dockerfile，三者 `dnf install` 列表完全一致（仅 ARG BASE 不同），说明 Dockerfile 结构本身没有问题。根据 glibc 2.42 官方 INSTALL 文档（已从上游 `bminor/glibc` 仓库 `glibc-2.42` tag 获取验证），glibc 明确要求 GNU awk 3.1.2+（`gawk`），其 `configure` 脚本会检测 `gawk` 是否可用。SP1/SP2 基础镜像可能预装了 `gawk`，而 SP4 基础镜像未预装，导致配置阶段失败。此次修复仅添加 `gawk` 这一确认的硬性依赖，与 CI 分析报告方向 1 一致。
 
-建议方向：
-1. 重新触发 CI（此类 BuildKit 启动瞬态故障通常可通过重试解决）
-2. 在 CI 节点上执行 `docker buildx rm euler_builder_20260709_205700` 清理旧 builder
-3. 检查 CI 节点 Docker 存储空间和 overlay2 文件系统状态
+由于 CI 日志缺失，分析报告置信度为"低"。本次修复采用了最保守、最可论证的方案：仅添加 glibc INSTALL 文档明确列为必选工具的 `gawk`，不添加未确认的包（如 `gettext-devel`、`kernel-headers`）。
 
 ## 潜在风险
-无
+无。`gawk` 是 glibc 构建的硬性依赖，添加后不会影响其他功能。若构建仍失败，需获取实际 CI 日志进一步排查。
