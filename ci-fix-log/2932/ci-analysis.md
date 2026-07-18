@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器启动失败
-- 新模式症状关键词: Could not find the file, buildx_buildkit, euler_builder, Error response from daemon
+- 新模式标题: BuildKit 构建器启动失败
+- 新模式症状关键词: Could not find the file, buildx_buildkit, Error response from daemon, booting buildkit
 
 ## 根因分析
 
@@ -28,19 +28,24 @@ euler_builder_20260709_205700 removed
 ```
 
 ### 根因定位
-- 失败位置: 不适用（CI 基础设施层）
-- 失败原因: Docker daemon 在 CI 构建节点（`ecs-build-docker-x86-hk`）上创建 `buildx` builder 容器时失败。Pulling `moby/buildkit:buildx-stable-1` 镜像和创建容器均成功，但在后续初始化阶段 daemon 报错 `Could not find the file / in container`，导致 builder 容器无法正常启动，构建流程在开始前即已中断。
+- 失败位置: CI runner 上的 Docker daemon（构建节点 `ecs-build-docker-x86-hk`）
+- 失败原因: Docker buildx 在创建 buildkit 容器实例时，Docker daemon 报错 `Could not find the file / in container`，表明容器文件系统未能正确挂载或初始化，导致 buildkit 构建器无法启动。容器在创建后（0.1s）即进入异常状态，Docker 在尝试操作容器内路径 `/` 时失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该失败发生在 Docker BuildKit 构建器初始化阶段（即实际 `docker build` 执行之前），是 CI 构建节点上的 Docker daemon / BuildKit 基础设施问题。PR 仅新增了一个标准的 glibc Dockerfile（安装构建依赖、下载源码、configure + make），CI 流水线在检测到变更并通过镜像规格校验后，尝试启动 buildx builder 时就已失败，并未实际开始构建该 Dockerfile。
+**与 PR 代码变更无关**。本次 PR 仅新增 `Others/glibc/2.42/24.03-lts-sp4/Dockerfile` 及更新相关元数据文件（README.md、image-info.yml、meta.yml）。失败发生在 Docker buildx 构建器初始化阶段，尚未进入 Dockerfile 解析或构建执行阶段。CI 预检步骤（镜像规格校验）也已正常通过：
+
+```
+The image specification check for releasing on appstore has passed.
+```
+
+这表明该失败是 CI 基础设施（Docker daemon / buildx / 存储驱动）层面的问题，不涉及本次 PR 的代码正确性。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试 CI 构建。** 这是 CI 节点上的 BuildKit 基础设施瞬时故障（Docker daemon 创建容器时无法正确挂载或访问根文件系统），与 PR 代码完全无关。通常重启构建即可恢复正常。
-
-### 方向 2（置信度: 低）
-**排查构建节点 Docker/containerd 状态。** 如果重试多次均失败，可能是构建节点 `ecs-build-docker-x86-hk` 上的 Docker daemon 或 containerd 服务异常（如磁盘空间不足、文件系统挂载问题），需要运维介入排查节点健康状态。
+**CI 基础设施维护**：该失败与 PR 代码无关，属于 CI runner（`ecs-build-docker-x86-hk`）上 Docker daemon 的瞬时异常。建议 CI 管理员检查该节点的 Docker 存储驱动状态、磁盘空间剩余量、overlay2 文件系统健康度，以及 buildkit 相关镜像（`moby/buildkit:buildx-stable-1`）的缓存状态。通常重试构建即可恢复。
 
 ## 需要进一步确认的点
-- 如果重试 CI 后仍然失败，需检查构建节点 `ecs-build-docker-x86-hk` 的磁盘空间、Docker daemon 日志以及 `moby/buildkit:buildx-stable-1` 镜像的拉取完整性。
+- 该 CI runner 节点是否近期频繁出现类似的 buildkit 初始化失败
+- Docker daemon 日志中是否有存储驱动相关的错误信息（如 overlay2 层损坏、inode 耗尽等）
+- 同一时段同节点上其他 PR 的构建是否也失败
