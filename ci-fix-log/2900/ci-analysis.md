@@ -3,20 +3,16 @@
 ## 基本信息
 - PR: #2900 — chore(httpd): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 中
+- 置信度: 高
 - 知识库匹配: 新模式
 - 新模式标题: 测试框架缺失
-- 新模式症状关键词: shunit2, file not found, common_funs.sh, [Check] test failed
+- 新模式症状关键词: `shunit2: file not found`, `common_funs.sh`, `Check test failed`
 
 ## 根因分析
 
 ### 直接错误
 ```
-#14 DONE 31.3s
-euler_builder_20260710_091535 removed
-2026-07-10 09:18:18,406 - INFO - [Build] finished
-2026-07-10 09:18:18,406 - INFO - [Push] finished
-2026-07-10 09:18:18,896 - INFO - [Check] checking ****test/httpd:2.4.66-oe2403sp4-x86_64 ...
+[Check] checking ****test/httpd:2.4.66-oe2403sp4-x86_64 ...
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: .: shunit2: file not found
 2026-07-10 09:18:18,902 - CRITICAL - [Check] test failed
 +-------------+-------------+--------------+
@@ -28,21 +24,21 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 测试脚本 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
-- 失败原因: CI 在 Docker 镜像构建和推送均成功完成后，进入后置 `[Check]` 阶段时，测试脚本尝试通过 `. shunit2` 加载 `shunit2` 单元测试框架，但该框架未安装在 CI runner 上，导致测试完全无法执行，Check 结果表为空，整个 job 被标记为 FAILURE。
+- 失败位置: CI Runner 的 `eulerpublisher` 测试框架层
+- 失败原因: CI [Check] 阶段的测试脚本 `common_funs.sh` 在第 13 行尝试 `source shunit2`，但 `shunit2` 壳层单元测试框架未安装在 CI Runner 上，导致测试无法执行，Check 步骤失败。（Build 和 Push 阶段均已成功完成并推送镜像。）
 
 ### 与 PR 变更的关联
-与 PR 代码变更**无关**。PR 仅新增了 httpd 2.4.66 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套文件（httpd-foreground 启动脚本、meta.yml、README.md、image-info.yml）。Docker 镜像的构建和推送阶段均 100% 成功完成（Build + Push 共计 14 个 Docker buildx 步骤全部 DONE）。失败发生在 `eulerpublisher` 工具的容器检查阶段，系 CI 基础设施缺少 `shunit2` 依赖所致，不是 PR 代码变更可以解决的问题。
+**与 PR 变更无关。** PR 新增的 Dockerfile 构建（`#10 DONE 41.6s`）、配置步骤（`#11 DONE 0.1s`）和镜像推送（`#14 DONE 31.3s`）全部成功。失败发生在 CI 平台的 Check 后验证阶段，原因是 Runner 缺少 `shunit2` 测试工具——这是 CI 基础设施配置问题，与 Dockerfile、README、meta.yml 等代码变更无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 中）
-在 CI runner 的操作系统上安装 `shunit2` 测试框架。openEuler 系统中可通过 `dnf install shunit2` 安装。这是 CI 运维层面的修复，需要联系 CI 平台管理员处理。
-
-### 方向 2（置信度: 低）
-如果确认 CI runner 上不应依赖系统级安装的 `shunit2`，则需修改 `eulerpublisher` 测试脚本 `common_funs.sh`，将 `shunit2` 的来源改为项目内嵌或 pip 安装的版本，确保测试框架自包含在 CI 环境中。
+### 方向 1（置信度: 高）
+CI 运维方在 Runner 上安装 `shunit2` 壳层测试框架。shunit2 是开源项目（https://github.com/kward/shunit2），需确保其安装路径在 `PATH` 中或 `common_funs.sh` 可正确 source 到。此问题无法通过修改 Dockerfile 或仓库代码解决，需 CI 平台侧介入。
 
 ## 需要进一步确认的点
-1. 同一 CI runner 上其他 PR（特别是同样使用 openEuler 24.03-LTS-SP4 的镜像）是否也遇到相同的 `shunit2: file not found` 错误。如果是，说明这是 CI 环境的系统性问题；如果不是，需调查本次运行 runner 的环境差异。
-2. `shunit2` 是否本应作为 `eulerpublisher` 的依赖自动安装到 CI runner？如果是，需检查 `eulerpublisher` 包的依赖声明（setup.py/pyproject.toml）中是否遗漏了 `shunit2`。
-3. 该 CI runner 的管理方式和可用软件源，确认安装 `shunit2` 的可行性。
+- 确认 shunit2 应该安装的路径（`common_funs.sh:13` 的 source 路径是相对路径还是绝对路径，是否依赖特定安装位置）
+- 确认是否只有特定 Runner（如 x86_64）缺少 shunit2，而其他架构 Runner 正常
+- 排查是否是 Runner 镜像更新后 shunit2 被移除
+
+## 修复验证要求
+不适用（infra-error，非代码修复范畴）。若 CI 运维侧安装 shunit2 后重跑，需确认 `[Check]` 测试表中有实际测试项和执行结果输出。
