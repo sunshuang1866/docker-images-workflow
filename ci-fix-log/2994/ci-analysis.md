@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器断连
-- 新模式症状关键词: builder not found, graceful_stop, rpc error, connection error, goaway, Unavailable
+- 新模式标题: BuildKit构建器异常关闭
+- 新模式症状关键词: `no builder`, `graceful_stop`, `closing transport`, `rpc error`, `Unavailable`
 
 ## 根因分析
 
@@ -19,23 +19,23 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Dockerfile 第 7 行 `RUN dnf install` 步骤（`dnf` 正在下载 OS 元数据时）
-- 失败原因: Docker buildx 构建器实例 `euler_builder_20260709_224657` 在构建中途被意外终止（`graceful_stop`），BuildKit 客户端失去与构建器的 gRPC 连接（`rpc error: Unavailable`，`connection error: EOF`），导致后续所有操作报 `no builder found`。
+- 失败位置: Dockerfile 第 2/4 步，`dnf install` 阶段（Docker 构建层 #7）
+- 失败原因: CI 的 BuildKit 构建器 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据过程中被优雅关闭（`graceful_stop`），导致构建连接中断。日志显示该构建器随后已不存在（`no builder found`），确认构建器实例已被销毁或重启。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关**。PR 新增的是一个标准的 scann Dockerfile（安装 gcc/gcc-c++/make/wget/openssl-devel/bzip2-devel/zlib-devel 等基础构建工具 + 编译 Python 3.9.19 + pip install scann），Dockerfile 本身不存在语法错误或异常操作。失败发生在 `dnf install` 下载元数据阶段，此时尚未执行到任何 PR 特有的逻辑（如 Python 编译或 pip install scann）。构建器 `graceful_stop` 表明这是 CI 基础设施侧的主动终止行为（如节点资源回收、超时清理、或底层容器运行时重启），与代码变更无关。
+**无关**。PR 新增的 Dockerfile 内容完全正确，`dnf install` 命令语法和包名均有效。构建器关闭发生在 dnf 正常下载元数据阶段，属于 CI 基础设施（BuildKit builder）的运行实例被意外终止，与 Dockerfile 代码变更无因果关系。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 运行**。该失败为 BuildKit 构建器被基础设施侧主动终止（`graceful_stop`）导致的瞬时 infra-error，非代码问题。直接重新触发 CI（rerun/retry）即可，大概率通过。
-
-### 方向 2（置信度: 低）
-若重试后仍然相同位置失败，需排查 CI 构建节点是否有资源限制（磁盘空间不足、内存 OOM、或构建超时策略），该方向无需修改 Dockerfile。
+**无需修改代码**。这是一个 CI 基础设施故障，应通过以下方式处理：
+- 重新触发 CI pipeline（retry），大概率可以通过
+- 若持续复现，需联系 CI 运维排查 BuildKit builder 在构建该镜像时频繁被终止的原因（可能是 runner 资源不足、超时策略过于激进，或调度器误判 builder 空闲而回收）
 
 ## 需要进一步确认的点
-- 构建节点 `ecs-build-docker-x86-hk` 在 `2026-07-09 22:46` 前后是否有资源波动或维护操作。
-- 若重试多次仍失败，需确认该构建节点的 disk/memory 资源是否充足（`dnf install` 需要下载和安装约数百 MB 的包）。
+- 确认 BuildKit builder `euler_builder_20260709_224657` 被 `graceful_stop` 的具体原因（是否受 runner 资源配额限制、是否有外部调度回收策略）
+- 若 retry 后仍失败，需获取 BuildKit builder 的系统日志（非 Docker build 日志）以确认 builder 实例终止的根因
+- 可对比同一 CI runner 上其他成功构建的 job，排查是否为该 runner 特定时段的不稳定问题
 
 ## 修复验证要求
-无需验证（infra-error，与代码无关）。重新触发 CI 即可。
+（不适用——此失败为 infra-error，无需修改代码文件。）
