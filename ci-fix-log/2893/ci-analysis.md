@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: CI测试框架缺失
-- 新模式症状关键词: shunit2: file not found, common_funs.sh, Check, test failed, eulerpublisher
+- 新模式标题: shunit2 测试框架缺失
+- 新模式症状关键词: `shunit2: file not found`, `common_funs.sh`, `Check test failed`
 
 ## 根因分析
 
@@ -20,17 +20,27 @@ Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI runner 上缺少 `shunit2` Shell 测试框架，导致 eulerpublisher 容器的 [Check] 阶段测试脚本无法 sourc `shunit2` 库而失败。Docker 镜像的构建和推送本身均已完成（422 个编译目标全部链接成功，镜像推送到 docker.io 成功）。
+- 失败位置: CI Check 阶段 — `eulerpublisher` 测试框架的 `common_funs.sh` 第 13 行
+- 失败原因: CI runner 环境中未安装 `shunit2` shell 测试框架，导致 `common_funs.sh` 中 `source shunit2` 失败，整个 Check 阶段在测试脚本启动前即崩溃
 
 ### 与 PR 变更的关联
-PR 仅新增 bind9 9.21.23 在 openEuler 24.03-LTS-SP4 上的 Dockerfile（含 named.conf）、README 条目、image-info.yml 条目和 meta.yml 条目。Docker 镜像构建完全成功，所有编译任务（libisc、libdns、libns、libisccc、libisccfg 库及 named 等全部工具）均正常完成。失败发生在构建后的 CI 基础设施层测试阶段，与 PR 代码变更无关。
+PR 变更与此次失败**无关**。Docker 镜像构建（编译 422 个 C 源文件、链接、安装）和推送均已完成且成功：
+- `#9 DONE 41.4s`（meson 编译 + 安装全部通过）
+- `#10` ~ `#12` Dockerfile 其余步骤均 `DONE`
+- `#13 exporting to image` + pushing 完成
+- `[Build] finished`、`[Push] finished` 均已记录
+
+失败仅发生在 eulerpublisher CI 工具的 `[Check]` 后置测试阶段，因 `shunit2` 未安装在 runner 环境中导致测试脚本无法加载，与 Dockerfile 内容、bind9 编译过程、镜像产物无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-在 aarch64 CI runner 上安装 `shunit2` 包（openEuler 上可能为 `shunit2`），使 `common_funs.sh` 中的 `. shunit2` 能正确找到并加载测试框架。此操作需由 CI 管理员在 runner 镜像/环境中执行，非 PR 提交者无责修复。
+在 CI runner 环境中安装 `shunit2` 测试框架。`shunit2` 是 eulerpublisher 容器镜像检查流程的运行时依赖，需确保所有执行 Check 阶段的 runner 均已预装该工具。
 
 ## 需要进一步确认的点
-- 同一 PR 的 x86_64 架构构建 job 是否也因相同原因失败，还是仅 aarch64 架构存在此问题（当前日志仅覆盖 aarch64 job）。
-- `shunit2` 在 openEuler 24.03-LTS-SP4 仓库中的确切包名（可能为 `shunit2` 或 `shunit`），确认后由 CI 管理员补充安装。
+- 确认 CI runner 镜像/环境中 `shunit2` 的预期安装路径（`common_funs.sh` 第 13 行 `source shunit2` 依赖 `PATH` 或特定路径）
+- 确认该 runner 是否与其他成功通过 Check 阶段的 runner 共享同一个环境模板，以及 shunit2 是否存在版本或路径差异
+- 确认是否仅有 aarch64 runner 存在此问题（目前日志只显示了 aarch64 架构的构建和检查），amd64 runner 是否也因同样原因失败
+
+## 修复验证要求
+无需代码修复。此失败为 CI 基础设施问题（测试环境缺少 shunit2），Code Fixer 无需处理。待 CI 运维团队修复 runner 环境（安装 shunit2）后，重新触发构建即可通过。
