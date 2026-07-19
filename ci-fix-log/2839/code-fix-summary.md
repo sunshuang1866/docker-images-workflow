@@ -1,16 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于 infra-error，根因是 CI Runner 节点缺少 `shunit2` 测试框架包，与 PR 代码变更无关。
+无需代码修改。CI 失败属于 infra-error，由 CI runner 环境缺少 `shunit2` 测试框架依赖导致，与 PR #2839 的代码变更无关。
 
 ## 修改的文件
-无。PR 涉及的 4 个文件（Dockerfile、entrypoint.sh、README.md、meta.yml）均无问题：
-- Docker 构建阶段 [Build] 完全成功
-- 镜像推送阶段 [Push] 完全成功
-- 失败发生在独立的 [Check] 阶段，因 CI 节点缺少 `shunit2` 而无法启动测试框架
+无。所有 PR 涉及的代码文件均正确，无需修改。
 
 ## 修复逻辑
-分析报告明确指出失败类型为 `infra-error`，根因在 CI 基础设施层面（Runner 节点未安装 `shunit2`），而非 PR 代码层面。根据修复策略，对于 infra-error 不应强行修改源代码。正确的修复应由 CI 运维在 Runner 节点上执行 `dnf install -y shunit2`，确保 `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh` 能正确引用 `shunit2` 库文件。
+CI 分析报告确认：Docker 镜像构建（`#8 DONE 268.4s`）和推送（`[Push] finished`）均已成功完成。失败发生在后续的 `[Check]` 阶段，根因是 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 尝试加载 `shunit2` 但 CI runner 环境中未安装该依赖。这属于 CI 基础设施配置问题，应在 runner 环境中安装 `shunit2`（如 `yum install shunit2`），而非修改 PR 源码。
 
 ## 潜在风险
-无。PR 代码本身无问题，后续仅需在 CI 节点安装 `shunit2` 后重新触发 CI 验证即可。
+无。PR 代码未做任何变更。
