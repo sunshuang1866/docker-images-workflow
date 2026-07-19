@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: openEuler镜像站HTTP/2错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, repo.openeuler.org, yum install, HTTP/2, SSL_ERROR_SYSCALL
+- 新模式标题: 仓库源网络连接不稳定
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, repo.openeuler.org
 
 ## 根因分析
 
@@ -14,30 +14,30 @@
 ```
 #7 556.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/gcc-12.3.1-110.oe2403sp4.aarch64.rpm [HTTP/2 stream 41 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 836.2 [MIRROR] kernel-headers-6.6.0-159.4.3.154.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/kernel-headers-6.6.0-159.4.3.154.oe2403sp4.aarch64.rpm [HTTP/2 stream 59 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#7 1029.3 [MIRROR] perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm: Curl error (56): Failure when receiving data from the peer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm [OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0]
-#7 1310.2 [MIRROR] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm [HTTP/2 stream 125 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#7 1029.3 [MIRROR] perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm: Curl error (56): Failure when receiving data from the peer [OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0]
+#7 1310.2 [MIRROR] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer [HTTP/2 stream 125 was not closed cleanly: INTERNAL_ERROR (err 2)]
 #7 1310.2 [FAILED] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
 #7 1310.3 Error: Error downloading packages:
 #7 1310.3   vim-common-2:9.0.2092-36.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
-#7 ERROR: process "/bin/sh -c yum install -y         git gcc gcc-c++ make cmake which         openssl-devel         gflags-devel         protobuf-devel protobuf-compiler         abseil-cpp-devel         leveldb-devel snappy-devel &&     yum clean all && rm -rf /var/cache/yum" did not complete successfully: exit code: 1
+#7 ERROR: process "/bin/sh -c yum install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11`（`yum install` 步骤）
-- 失败原因: `repo.openeuler.org` 镜像站在 aarch64 架构的构建过程中出现间歇性 HTTP/2 传输层错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），导致部分 RPM 包下载失败。其中 `gcc`、`kernel-headers`、`perl-MIME-Base64` 重试后成功，`vim-common` 重试后仍失败，yum 因所有镜像源均已尝试而中止安装。
+- 失败位置: Dockerfile:4-11（`yum install` 步骤，安装 173 个 RPM 包）
+- 失败原因: CI 构建环境（aarch64 runner `ecs-build-docker-aarch64-04-sp`）在从 `repo.openeuler.org` 下载 RPM 包时遭遇持续的 HTTP/2 帧层错误（Curl error 92: INTERNAL_ERROR）和 SSL 读取错误（Curl error 56: SSL_ERROR_SYSCALL）。部分包（gcc、kernel-headers）通过 yum 自动重试其他 mirror 后下载成功，但第 173 个包 `vim-common`（7.8 MB）重试后所有 mirror 均已用尽，最终失败。整个 `yum install` 过程耗时约 21 分钟（从 #7 198.5 开始到 #7 1310.3 结束），期间出现 4 次网络错误。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR #2977 新增了一个完全标准的 Dockerfile（`Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile`），其 `yum install` 命令列出的所有包名均正确且存在于 openEuler 24.03-LTS-SP4 仓库中（日志中依赖解析阶段已确认全部 173 个包均可识别）。失败发生在 RPM 下载传输阶段，是远端镜像站 `repo.openeuler.org` 的网络/服务端问题。
+**与 PR 变更无关。** 本次 PR 新增的 Dockerfile（`Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile`）结构正确，`yum install` 命令语法无误，所列 RPM 包名均有效且存在于 24.03-LTS-SP4 仓库中。失败完全由 CI runner 到 `repo.openeuler.org` 的网络连接不稳定导致，属于基础设施问题。PR 中的其他文件变更（README.md、image-info.yml、meta.yml）均为纯文档/元数据更新，不涉及构建逻辑。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重试构建即可。** 这是一次由 `repo.openeuler.org` 镜像站 HTTP/2 服务端连接不稳定性引起的偶发 infra-error。同类失败在本次构建日志中已出现多次（gcc、kernel-headers、perl-MIME-Base64 均遇到相同错误后重试成功，仅 vim-common 在最后一轮重试中彻底失败）。在镜像站恢复稳定后重新触发 CI 构建，大概率可成功通过。
+**重新触发 CI 构建。** 网络下载 RPM 包阶段的 HTTP/2 流错误和 SSL 连接重置是暂时性的基础设施问题，通常重试即可通过。yum 的自动重试机制已成功恢复了大部分失败的包下载（gcc、kernel-headers 的 mirror 错误被自动重试绕过），仅最后一个包耗尽全部 mirror 后失败，说明整体网络状态处于临界点。建议等待一段时间后重新提交 CI 构建任务。
 
 ### 方向 2（置信度: 低）
-若短期内反复出现同类错误，可考虑在 Dockerfile 的 `yum install` 命令中增加重试参数（如 `yum install --retries=5` 或循环重试逻辑），提高对网络波动的容忍度。但这属于 CI 基础设施侧优化而非 PR 代码缺陷。
+**Dockerfile 添加 yum 重试参数。** 在 `yum install` 命令中增加 `--retries` 或使用 `dnf` 的 `--setopt=retries=10` 等配置提高包下载重试次数，增强对网络波动的容忍度。但本次失败中 yum 的重试机制已生效（gcc 和 kernel-headers 的 mirror 错误均被恢复），且 vim-common 报 "No more mirrors to try" 说明已用尽所有可用 mirror，额外重试可能效果有限。此方向为可选优化，非必要。
 
 ## 需要进一步确认的点
-
-1. 确认 `repo.openeuler.org` 在构建时段（2026-07-09 13:44 UTC）是否存在服务端 HTTP/2 协议栈异常或负载过高问题。
-2. 确认 `vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm` 在镜像站是否可正常访问（可通过 wget 或 curl 直接下载验证）。
+- 确认 `repo.openeuler.org` 在 CI 构建时段是否有网络波动或维护窗口（日志时间戳：2026-07-09 13:44 UTC）
+- 确认 aarch64 runner `ecs-build-docker-aarch64-04-sp` 的出站网络是否稳定，是否需要切换 runner 或配置本地镜像缓存
+- 如果多次重试后仍失败，需排查是否 `repo.openeuler.org` 上 `vim-common-9.0.2092-36.oe2403sp4.aarch64` 文件本身存在问题（如校验和不匹配导致服务器端流中断）
