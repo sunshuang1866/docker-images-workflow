@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），`eulerpublisher` 工具对根级 `README.md` 的 appstore 路径校验出现误报，与 PR 代码变更无关。
+无需代码修改。CI 失败属于基础设施问题（infra-error），由 appstore 发布规范检查工具对纯文档 PR 的路径格式校验过严导致，与 PR 改动的 README.md 内容无关。
 
 ## 修改的文件
-无。该失败为 CI 基础设施问题，`eulerpublisher/update/container/app/update.py:273` 的路径校验逻辑可能存在字符串规范化缺失（如缺少 `os.path.normpath` 或 `lstrip('/')` 处理），需要 CI 维护者排查，**无需修改仓库文件**。
+无（PR #2790 仅涉及 `README.md` 的文档内容更新，`README.md` 本身无代码质量问题，无需修改）
 
 ## 修复逻辑
-CI 分析报告确认：PR #2790 仅修改了 `README.md` 中"可用镜像 Tags"部分的版本列表内容（如将 `24.03-lts-sp2` 替换为 `24.03-lts-sp3`、新增 `25.09` 条目等），未新增文件、未变更文件路径，也未涉及任何 Dockerfile 或构建逻辑。CI 失败由 `eulerpublisher` 工具的 appstore 发布规范预检触发，对 `README.md` 报告 `[Path Error] The expected path should be /README.md`，但 `README.md` 确实位于仓库根目录，路径本身正确。根据规范，infra-error 不需要代码修改。
+CI 分析报告明确指出：PR #2790 仅修改了仓库根目录的 `README.md` 和 `README.en.md`（纯文档标签列表更新），但 CI 的 appstore 发布规范检查工具对所有变更文件执行路径格式校验，将 git diff 输出的无前导斜杠路径 `README.md` 与期望的带前导斜杠路径 `/README.md` 进行严格字符串比较，导致不匹配判定为 FAILURE。此根级文档变更不应被纳入应用镜像提交规范检查范围，属于 CI 基础设施问题，与 PR 改动内容无关。
+
+根本修复需要在 CI 编排工具（`eulerpublisher/update/container/app/update.py`）中对根级 README.md/README.en.md 文件进行豁免处理，或对纯文档类 PR 跳过 appstore 发布规范检查步骤。这些变更不在 PR 涉及的文件范围（`pr.changed_files: ['README.md']`）内。
 
 ## 潜在风险
-无。
+无
