@@ -1,19 +1,22 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题：CI runner 环境中缺少 `shunit2` shell 单元测试框架，导致 `eulerpublisher` 的 [Check] 阶段失败。与 PR 代码变更无关，无需对源码进行任何修改。
+CI [Check] 阶段因测试框架 `shunit2` 缺失导致失败，属于 CI 基础设施问题（infra-error），无需修改 PR 代码。
 
 ## 修改的文件
-无。此为 infra-error，不涉及 PR 代码变更。
+无。此 CI 失败与 PR 代码变更无关，不需要修改任何文件。
 
 ## 修复逻辑
-CI 分析报告明确指出：
-- Docker 镜像构建（`make -j $(nproc)` 编译 PostgreSQL 17.6 → `make install` → Docker image build）和镜像推送（`[Build] finished`、`[Push] finished`）均成功完成
-- 失败发生在 CI 编排工具 `eulerpublisher` 的 [Check] 阶段，该阶段尝试运行容器功能测试但由于 `shunit2` 未安装而无法执行
-- 根因：`/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory`
-- 修复方向：在 CI runner 环境中安装 `shunit2` 包（CI 基础设施团队的工作范畴）
+分析报告明确指出：
+- Docker 镜像构建成功（`#8 DONE 268.4s`）
+- Docker 镜像推送成功（`#11 DONE 58.0s`）
+- 失败仅发生在 [Check] 阶段，错误为 `shunit2: No such file or directory`——这是 `common_funs.sh:13` 尝试加载 `shunit2` shell 测试框架时失败
+- 根因是 CI runner 上缺少 `shunit2` 测试框架依赖，属于 CI 基础设施配置问题
 
-PR 变更的 4 个文件（Dockerfile、entrypoint.sh、README.md、meta.yml）均不存在导致该失败的代码问题。
+按照任务指令：`infra-error` 类型的 CI 失败无需修改代码，不应强行改动 PR 文件。
+
+## 建议修复方向
+CI 基础设施团队需在构建 runner 上安装 `shunit2` 测试框架（如通过 `dnf install shunit2`），或将 `shunit2` 脚本部署到 `common_funs.sh` 能正确引用的路径。
 
 ## 潜在风险
 无
