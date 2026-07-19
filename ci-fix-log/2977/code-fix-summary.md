@@ -1,13 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施问题（infra-error），由 CI runner 到 `repo.openeuler.org` 的网络连接不稳定导致，与 PR #2977 的代码变更无关。
+无需代码修改。CI 失败为基础设施网络问题（infra-error），与 PR 代码变更无关。
 
 ## 修改的文件
-无（infra-error，无需代码修改）
+无
 
 ## 修复逻辑
-CI 分析报告确认失败类型为 `infra-error`，根因是 aarch64 runner `ecs-build-docker-aarch64-04-sp` 在从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 帧层错误（Curl error 92）和 SSL 读取错误（Curl error 56）。Dockerfile 结构正确，`yum install` 命令语法无误，所列 RPM 包名均有效。修复方式为重新触发 CI 构建，无需修改任何代码。
+CI 失败分析报告明确指出：
+- 失败类型为 `infra-error`，置信度高
+- 根因是 `repo.openeuler.org` 在 aarch64 runner 上出现 HTTP/2 流错误（Curl error 92）和 SSL 连接中断（Curl error 56），导致 `vim-common` 包在所有镜像源重试后仍下载失败
+- 173 个包中 172 个下载成功，仅 1 个因网络问题失败
+- 与 PR 变更（新增 Dockerfile、README、image-info.yml、meta.yml）完全无关
+- Dockerfile 中的包名和命令语法均正确无误
+
+根据分析报告的修复方向建议：**重新触发 CI 构建即可，大概率通过。** 若多次重试仍失败，可考虑在 Dockerfile 的 `yum install` 命令中添加 `--retries 5` 参数。
 
 ## 潜在风险
 无
