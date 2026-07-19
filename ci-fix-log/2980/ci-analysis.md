@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, dnf install, No more mirrors to try
+- 新模式标题: 仓库镜像HTTP/2流中断
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
@@ -22,17 +22,23 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y` 步骤）
-- 失败原因: CI 构建环境在执行 `dnf install` 从 openEuler 24.03-LTS-SP4 官方仓库（`repo.*.org`）下载 RPM 包时，多次遭遇 HTTP/2 协议层面的流错误（Curl error 92: Stream error in the HTTP/2 framing layer, INTERNAL_ERROR）。其中 `cmake-data` 和 `git-core` 在重试后下载成功，但 `gcc-c++` 包在两次 HTTP/2 流错误后耗尽了所有镜像重试次数，导致 `dnf install` 整体失败。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`RUN dnf install -y ...` 步骤）
+- 失败原因: CI 构建环境中 `dnf install` 从 openEuler 24.03-LTS-SP4 仓库下载 RPM 包时，仓库镜像服务器的 HTTP/2 流多次异常中断（`INTERNAL_ERROR (err 2)`），导致 `gcc-c++` 等包重试耗尽所有镜像后下载失败，Docker 构建中断。
 
 ### 与 PR 变更的关联
-**无关。** 本次 PR 新增的 Dockerfile 语法正确，`dnf install` 中列出的所有包名均为 openEuler 24.03-LTS-SP4 仓库中的有效包。日志中 258 个待安装包均已正确识别并开始下载，失败纯粹是由于下载过程中仓库镜像服务器的 HTTP/2 连接不稳定，属于 CI 基础设施问题，与 PR 代码变更无任何关联。
+**与 PR 变更无关。** 该 PR 仅新增了一个 Dockerfile（含 `dnf install` 安装编译依赖的标准步骤）和相关的元数据文件（`README.md`、`image-info.yml`、`meta.yml`）。`dnf install` 命令中列出的所有包名均为 openEuler 24.03-LTS-SP4 官方仓库中的有效包——日志中的 "Dependencies resolved" 部分已确认 RPM 依赖解析成功，包列表正常。失败完全由 CI 构建环境的 openEuler 仓库镜像服务器在传输大文件（如 34 MB 的 `gcc`、13 MB 的 `gcc-c++`）时 HTTP/2 连接不稳定所致，属于 CI 基础设施（infra/proxy）的瞬时网络问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-重新触发 CI 构建。该失败是 openEuler 24.03-LTS-SP4 仓库镜像的**临时性网络波动**导致的 HTTP/2 连接不稳定，属于 `infra-error`。Dockerfile 无需任何修改，等待仓库镜像恢复稳定后重试即可通过。Code Fixer 无需处理。
+**重试构建即可。** 该失败为 CI 基础设施的网络瞬时故障，PR 代码无任何问题。建议直接重新触发 CI 构建流水线。大多数情况下，仓库镜像服务器的 HTTP/2 连接问题不会在重试中复现。
+
+### 方向 2（置信度: 低）
+若多次重试均因相同原因失败，说明 openEuler 24.03-LTS-SP4 仓库镜像持续不稳定。可在 Dockerfile 中为 `dnf` 添加重试参数（如 `dnf install -y --setopt=retries=10`）提高网络容错能力。但不建议针对一次性的 infra 问题修改代码。
 
 ## 需要进一步确认的点
-- 确认 openEuler 24.03-LTS-SP4 官方仓库（`repo.*.org`）镜像服务在当前时间点的 HTTP/2 可用性是否已恢复。
-- 如果多次重试后仍持续出现同类 HTTP/2 错误，需联系 openEuler 仓库运维团队排查 HTTP/2 层（如反向代理、负载均衡器）的配置问题。
+- 确认 openEuler 24.03-LTS-SP4 的仓库镜像（`repo.****.org`）在该 CI 构建时段是否存在已知的 HTTP/2 服务异常。
+- 若同一时段其他 PR 的 x86_64 构建也失败，则可进一步确认为镜像服务临时故障。
+
+## 修复验证要求（仅当修复涉及正则 patch 外部源文件时填写）
+（无——本次失败为 infra-error，无需代码修复。）
