@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, dnf install, repo mirror
+- 新模式标题: 软件源HTTP/2流错误
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, Stream error, INTERNAL_ERROR, No more mirrors to try, repo.****.org
 
 ## 根因分析
 
@@ -21,21 +21,23 @@
 #7 1970.5   gcc-c++-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
 ```
 
+Docker 构建在 `dnf install` 阶段失败，exit code: 1。Dockerfile 第 6-16 行的 `RUN dnf install -y ...` 步骤中，多个 RPM 包在下载过程中遭遇 openEuler 仓库服务器 HTTP/2 协议流错误（Curl error 92），其中 `cmake-data` 和 `git-core` 在重试后成功，但 `gcc-c++`（13 MB）两次重试均失败，耗尽所有镜像后 dnf 报错退出。
+
 ### 根因定位
-- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6-16`（`dnf install` 步骤，Docker 构建阶段 `[2/3]`）
-- 失败原因: CI 构建环境中 dnf 从 openEuler 24.03-LTS-SP4 软件仓库镜像下载 RPM 包时，多个包（cmake-data、git-core、gcc-c++）遭遇 HTTP/2 协议层流错误（`Stream error in the HTTP/2 framing layer: INTERNAL_ERROR`）。cmake-data 和 git-core 重试后成功下载，但 gcc-c++（13MB）经过两次镜像重试均失败，dnf 耗尽所有可用镜像后报错退出。
+- 失败位置: `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile:6`（`RUN dnf install -y ...` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 官方仓库（`repo.****.org`）的 HTTP/2 服务端在本次构建期间不稳定，向多个 RPM 包的下载流发送了 `INTERNAL_ERROR` 帧，导致 curl 抛出流错误 (92)。`gcc-c++` 包两次重试均未能在任意镜像上成功下载，dnf 最终失败。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 本次 PR 仅新增了 `Others/grads/2.2.3/24.03-lts-sp4/Dockerfile`（GrADS 构建镜像）及相关元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 中的 `dnf install` 包列表语法正确，包名在 openEuler 24.03-LTS-SP4 仓库中真实存在（从日志可见依赖解析完成后列出了 258 个待安装包）。失败根因是 openEuler 软件仓库镜像端的 HTTP/2 协议实现存在间歇性缺陷，与 PR 的 Dockerfile 内容无关。
+**与 PR 代码变更无关。** 本次 PR 仅新增了一个 Dockerfile 及对应的 README、image-info.yml、meta.yml 条目，这些文件的内容和格式均正确无误。失败原因是 CI 构建时 openEuler 软件源服务器出现了临时性 HTTP/2 协议故障，属于基础设施问题。同一 Dockerfile 在仓库服务器正常时可以通过构建。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**触发 CI 重试（re-run failed jobs）。** 这是典型的网络/基础设施瞬时故障。从日志可见 cmake-data 和 git-core 在重试后成功下载，仅 gcc-c++ 因连续两次 HTTP/2 流错误而耗尽重试次数。openEuler 仓库镜像的 HTTP/2 问题通常是间歇性的，重新触发构建大概率会成功。Code Fixer 无需修改任何代码。
-
-### 方向 2（置信度: 低）
-**在 dnf 配置中禁用 HTTP/2 或切换镜像源。** 如果多次重试仍然失败，可在 Dockerfile 的 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 或更换仓库镜像地址。但这属于规避方案而非根因修复，且可能影响其他已有 Dockerfile 的一致性，建议仅在上游仓库镜像持续不可用时采用。
+**无需修复代码，等待 CI 重试。** 该错误为 openEuler 软件仓库服务器的临时性 HTTP/2 协议故障（服务端向客户端发送了 `INTERNAL_ERROR` 帧），与 PR 代码无关。在仓库服务恢复稳定后，重新触发 CI 构建即可通过。如果该模式频繁出现，可考虑在 Dockerfile 的 `dnf install` 命令前添加仓库重试/换源逻辑（如设置 `max_retries` 或更换镜像站），但这超出了本次 PR 的范围。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP4 软件仓库镜像（`repo.****.org`）的 HTTP/2 服务是否在当前时间段内存在已知的稳定性问题。
-- 如果重试后仍然失败，需要确认是否需要将下载源切换到其他可用的 openEuler 软件源镜像站。
+- 确认 openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）在构建时刻是否存在已知的服务端 HTTP/2 稳定性问题。
+- 如果连续多次重试 CI 后仍然失败，需要排查仓库源是否对 CI 构建节点（`ecs-build-docker-x86-03-sp`）存在网络连接限制。
+
+## 修复验证要求
+无。本次失败为 infra-error，无需修改任何代码，Code Fixer 无需处理。
