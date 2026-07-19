@@ -29,6 +29,7 @@ Dockerfile:12
 - PR #2265: `Others/netty/4.2.13` — Maven 3.9.14 在 CDN 404 → 换华为云镜像站
 - PR #2100: `Others/netty/4.2.12` — Maven 3.9.12 在 CDN 404 → 升级到 3.9.14
 - PR #1884: `Others/netty/4.2.10` — Maven 3.9.11 在 CDN 404 → 升级到 3.9.12，文件名改用变量
+- PR #2926: `Others/spring-framework/7.0.3/24.03-lts-sp4/Dockerfile` — Maven 3.9.12 从 `dlcdn.apache.org` CDN 下架导致下载 404，将下载源替换为 Apa
 
 ---
 
@@ -55,6 +56,7 @@ Dockerfile:12
 - PR #1932: `Database/phoenix/5.3.0` — `phoenix-hbase-2.4-5.3.0-bin.tar.gz` 不存在（Phoenix 5.3.0 已弃 HBase 2.4） → 换 `archive.apache.org` + `hbase-2.5`
 - PR #2659: `Database/redis/5.4.1/24.03-lts-sp3/Dockerfile` — CI 构建失败：Dockerfile 中 `ARG VERSION=5.4.1` 指定的 Redis 版本不存在（Git
 - PR #2731: `Others/mongoose/7.22/24.03-lts-sp3/Dockerfile` — Dockerfile 中 `ARG VERSION=7.22` 引用的上游 Git tag `7.22` 在 `cesa
+- PR #2938: `Others/wireshark/4.6.5/24.03-lts-sp4/Dockerfile` — 将 Wireshark 4.6.5 源码下载 URL 从主路径改为归档路径，修复 HTTP 404 错误导致的 Dock
 
 ---
 
@@ -121,6 +123,7 @@ RUN dnf install -y shadow python3-pip ...
 - PR #2266: `AI/mlflow/3.12.0`
 - PR #2164: `AI/mlflow/3.11.1`
 - PR #1858: `AI/mlflow/3.9.0` — 同类问题，两架构均失败
+- PR #2896: `Others/dotnet-deps/8.0/24.03-lts-sp4/Dockerfile` — openEuler 24.03-lts-sp4 基础镜像缺少 `shadow` 包导致 `groupadd`/`user
 
 ---
 
@@ -143,6 +146,7 @@ RUN dnf install -y shadow python3-pip ...
 - PR #2206: `Bigdata/logstash/9.3.4`
 - PR #2163: `Bigdata/logstash/9.3.3`
 - PR #2743: `HPC/seissol/202103.Sumatra/24.03-lts-sp3/Dockerfile` — SeisSol 202103.Sumatra 的 CMakeLists.txt 无 `install()` 目标，`cm
+- PR #2901: `Others/kselftests-virtme/1.27/24.03-lts-sp4/Dockerfile` — Docker 构建失败：`COPY entrypoint.sh tap2json.py /` 引用的两个文件在 `24.
 
 ---
 
@@ -581,3 +585,194 @@ RUN sed -i 's/#define HAS_RGBTOUVMATRIXROW_NEON/\/\/#define HAS_RGBTOUVMATRIXROW
 
 **历史案例**:
 - PR #2751: `Cloud/openvelinux/velinux/1.0 velinux2/24.03-lts-sp3/Dockerfile` — 将 `velinux/1.0+velinux2` 版本目录从三级扁平化为二级，使其符合 CI 校验要求的 `{image
+
+---
+
+## 模式30：架构不匹配（meta缺失arch约束）
+
+**症状关键词**: does not have a compatible architecture, x86_64, aarch64, intel-basekit
+
+**根因**: - 失败位置: `AI/oneapi-basekit/2024.2.0/24.03-lts-sp4/Dockerfile:30`（`yum install` 步骤）
+- 失败原因: CI 在 aarch64 runner（`ecs-build-docker-aarch64-01-sp`）上构建该 Dockerfile，但 Intel oneAPI / GPU 仓库（配置为 RHEL x86_64 源）仅提供 x86_64 架构的 RPM 包（如 `intel-basekit-2025.3.2-19.x86_64`、`intel-opencl-...x86_64`），yum 在 aarch64 
+
+**修复方法**: `meta.yml` 中新增的 `2024.2.0-oe2403sp4` 条目缺少 `arch: x86_64` 约束，导致 CI 将该镜像调度到 aarch64 runner 上构建失败。
+
+**历史案例**:
+- PR #3135: `AI/oneapi-basekit/meta.yml` — `meta.yml` 中新增的 `2024.2.0-oe2403sp4` 条目缺少 `arch: x86_64` 约束，
+- PR #3130: `AI/llm/meta.yml` — 为 `meta.yml` 中新增的 `chatglm2_6b-pytorch2.1.0.a1-cann7.0.RC1.a
+
+---
+
+## 模式31：架构不匹配
+
+**症状关键词**: does not have a compatible architecture, x86_64 on aarch64, oneAPI, yum install
+
+**根因**: - 失败位置: `AI/oneapi-runtime/2024.2.0/24.03-lts-sp4/Dockerfile:30`
+- 失败原因: 新增 Dockerfile 对应的 `meta.yml` 条目未设置 `arch: x86_64`，导致 CI 在 aarch64 节点上也尝试构建该镜像。而 Intel oneAPI 仓库和 Intel GPU 驱动仓库均只提供 x86_64 架构的 RPM 包，在 aarch64 上 yum 无法安装，报 "does not have a compatible architecture"。
+
+**修复方法**: 新增的 `2024.2.0-oe2403sp4` 镜像条目缺少 `arch: x86_64` 架构限制，导致 CI 在 aarch64 节点上也尝试构建该镜像，Intel oneAPI 包仅支持 x86_64 而安装失败。
+
+**历史案例**:
+- PR #3136: `AI/oneapi-runtime/meta.yml` — 新增的 `2024.2.0-oe2403sp4` 镜像条目缺少 `arch: x86_64` 架构限制，导致 CI 在 
+
+---
+
+## 模式32：Git快照返回HTML
+
+**症状关键词**: `gzip: stdin: not in gzip format`, `text/html`, `saved [2090]`, `git.kernel.org`, `snapshot`
+
+**根因**: - 失败位置: `Others/bcache/1.1/24.03-lts-sp4/Dockerfile:20`（wget + tar 步骤）
+- 失败原因: `wget` 请求 `git.kernel.org` 的 snapshot URL（`bcache-tools-1.1.tar.gz`），服务器返回 `text/html` 内容（仅 2090 字节的 HTML 页面）而非 gzip 压缩包，`tar -zxvf` 解压时报 `not in gzip format`。
+
+**修复方法**: `git.kernel.org` 的 Anubis 反爬保护导致 `wget` 下载 snapshot tar.gz 时返回 HTML 页面而非 gzip 压缩包，构建失败。
+
+**历史案例**:
+- PR #2929: `Others/bcache/1.1/24.03-lts-sp4/Dockerfile` — `git.kernel.org` 的 Anubis 反爬保护导致 `wget` 下载 snapshot tar.gz 时
+
+---
+
+## 模式33：Apache 镜像站网络不通
+
+**症状关键词**: Connection timed out, download.apache.org, wget, exit code: 4
+
+**根因**: - 失败位置: `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile:21`（wget 下载 Knox 步骤）
+- 失败原因: CI 构建环境无法与 `downloads.apache.org` 建立 TCP 连接（所有 IPv4 地址均 Connection timed out，IPv6 地址 Network is unreachable），导致 wget 下载 Knox 2.1.0 压缩包失败（exit code: 4）。
+
+**修复方法**: CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 超时失败（exit code: 4），将下载源切换为已验证可达的 `dlcdn.apache.org`。
+
+**历史案例**:
+- PR #3101: `Bigdata/knox/2.1.0/24.03-lts-sp4/Dockerfile` — CI 构建环境中 `downloads.apache.org` 网络不可达，导致 wget 下载 Knox 2.1.0 
+- PR #3077: `Bigdata/accumulo/3.0.0/24.03-lts-sp4/Dockerfile` — 将 Zookeeper 下载源从 `archive.apache.org` 更换为 `repo.huaweicloud.
+- PR #3108: `Bigdata/mesos/1.11.0/24.03-lts-sp4/Dockerfile` — CI 构建环境无法连接 `archive.apache.org` 下载 Mesos 1.11.0 源码包，导致 Dock
+- PR #3103: `Bigdata/kyuubi/1.11.1/24.03-lts-sp4/Dockerfile` — CI 构建时 `archive.apache.org` 不可达，导致 Spark 3.4.2 下载超时失败。
+- PR #2836: `Database/cassandra/5.0.6/24.03-lts-sp4/Dockerfile` — Dockerfile 中 curl 下载 Cassandra 5.0.6 二进制包时，`archive.apache.o
+- PR #3088: `Bigdata/druid/35.0.0/24.03-lts-sp4/Dockerfile` — CI 构建环境中 `archive.apache.org` 不可达，导致 Docker build 中 wget 下载 
+
+---
+
+## 模式34：SVN证书主机名不匹配
+
+**症状关键词**: svn, E230001, certificate issued for a different hostname, checkout_externals, chem_proc
+
+**根因**: - 失败位置: Dockerfile 第 52-57 行 RUN 指令中的 `./manage_externals/checkout_externals` 步骤，具体在 checkout `chem_proc` 子组件时
+- 失败原因: CESM 的 `manage_externals/checkout_externals` 脚本内部通过 `svn checkout` 从 `svn-ccsm-models.cgd.ucar.edu` 拉取 `chem_proc` 组件，该 SVN 服务器的 TLS 证书与访问主机名 `svn-ccsm-models.cgd.ucar.edu` 不匹配，SVN 
+
+**修复方法**: CESM 2.2.2 构建过程中 `checkout_externals` 步骤因 SVN 服务器证书主机名不匹配（`E230001: certificate issued for a different hostname`）而失败。
+
+**历史案例**:
+- PR #2997: `HPC/cesm/2.2.2/24.03-lts-sp4/Dockerfile` — CESM 2.2.2 构建过程中 `checkout_externals` 步骤因 SVN 服务器证书主机名不匹配（`E
+
+---
+
+## 模式35：x86专属编译标志
+
+**症状关键词**: unrecognized command-line option, -mno-red-zone, -mno-vzeroupper, aarch64, SeisSol
+
+**根因**: - 失败位置: SeisSol 构建阶段，文件 `CMakeFiles/SeisSol-lib.dir/src/generated_code/subroutine.cpp.o`
+- 失败原因: SeisSol 上游源码的 CMake 构建系统向编译命令中注入了 `-mno-red-zone` 标志，该标志是 x86_64 架构专属的 GCC 选项。CI 在 aarch64（ARM64） runner 上构建时，GCC 12 无法识别该选项，导致编译失败。日志中 PARMETIS 构建路径（`Linux-aarch64`）进一步确认编译发生在 aarch64 架构上。
+
+**修复方法**: 修复 SeisSol 在 aarch64 架构上构建失败的问题（x86_64 专属编译标志 `-mno-red-zone` 不被 GCC 识别），并修复 `$LD_LIBRARY_PATH` 未定义变量 lint 警告。
+
+**历史案例**:
+- PR #3033: `HPC/seissol/202103.Sumatra/24.03-lts-sp4/Dockerfile` — 修复 SeisSol 在 aarch64 架构上构建失败的问题（x86_64 专属编译标志 `-mno-red-zone
+
+---
+
+## 模式36：pip镜像下载超时
+
+**症状关键词**: Read timed out, HTTPSConnectionPool, mirrors.aliyun.com, nvidia_cudnn, pip install
+
+**根因**: - 失败位置: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile:28`（`RUN pip install -r backend/requirements.txt ...` 步骤）
+- 失败原因: pip 从 `mirrors.aliyun.com` 下载 `nvidia_cudnn_cu13`（366 MB）至 96% 时 HTTP 读取超时，整个 RUN 命令失败（exit code: 2）。该 RUN 命令将 npm 构建、npm 安装和大量 pip 包安装串行放在一个 Docker 层中，一旦任何一个子步骤因网络波动失败，整层都需重建。
+
+**修复方法**: 将 Dockerfile 中第28-35行的单体 RUN 指令（串联 npm 构建 + pip 安装 5 个子步骤）拆分为 4 个独立 RUN，并为重型 pip 依赖安装添加 `--retries 5`，利用 Docker 层缓存使网络波动导致的重试无需重建已成功的子步骤。
+
+**历史案例**:
+- PR #3139: `AI/open-webui/0.1.108/24.03-lts-sp4/Dockerfile` — 将 Dockerfile 中第28-35行的单体 RUN 指令（串联 npm 构建 + pip 安装 5 个子步骤）拆分
+
+---
+
+## 模式37：系统包管理器冲突
+
+**症状关键词**: removing existing npm, failed!, install.sh, dnf-installed npm
+
+**根因**: - 失败位置: `Others/npm/11.13.0/24.03-lts-sp4/Dockerfile:11`
+- 失败原因: `npmjs.com/install.sh` 脚本尝试移除系统中已有的 npm（由 `dnf install nodejs` 安装的 RPM 版本 10.8.2），但该 npm 是由系统包管理器（RPM/dnf）管理的文件，install.sh 无权或无法正确移除这些文件，导致 "removing existing npm" 步骤失败。
+
+构建流程为：
+1. `dnf install nodejs -y` 从 openEuler 仓库安装了 nodejs 20.18
+
+**修复方法**: `install.sh` 脚本无法移除 dnf 安装的 RPM 包管理型 npm，导致 Docker 构建在 "removing existing npm" 步骤失败。
+
+**历史案例**:
+- PR #2941: `Others/npm/11.13.0/24.03-lts-sp4/Dockerfile` — `install.sh` 脚本无法移除 dnf 安装的 RPM 包管理型 npm，导致 Docker 构建在 "remo
+
+---
+
+## 模式38：ActiveMQ 下载源 404
+
+**症状关键词**: dlcdn.apache.org, 404 Not Found, activemq, wget, exit code: 8
+
+**根因**: - 失败位置: `Others/activemq/6.1.7/24.03-lts-sp4/Dockerfile:28`
+- 失败原因: Dockerfile 中 ActiveMQ 6.1.7 的下载源 `dlcdn.apache.org/activemq/6.1.7/apache-activemq-6.1.7-bin.tar.gz` 返回 HTTP 404。`dlcdn.apache.org` 是 Apache 的 CDN 分发节点，通常只保留最新版本，不保证历史版本的可用性（与模式01中 Maven 的问题同根）。此外，URL 中存在双斜杠拼写错误（`//activemq`），虽非 404 
+
+**修复方法**: ActiveMQ 6.1.7 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 下载 URL 返回 HTTP 404，构建失败。
+
+**历史案例**:
+- PR #2944: `Others/activemq/6.1.7/24.03-lts-sp4/Dockerfile:28` — ActiveMQ 6.1.7 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 下载 UR
+
+---
+
+## 模式39：CI工具依赖缺失
+
+**症状关键词**: ModuleNotFoundError, eulerpublisher, distroless
+
+**根因**: - 失败位置: `/usr/local/lib/python3.9/site-packages/eulerpublisher/container/cli.py:5`
+- 失败原因: CI 编排工具 `eulerpublisher` 在 executor 关闭阶段启动时因缺少 `eulerpublisher.container.distroless` 模块而崩溃。Docker 镜像构建和推送本身均已成功完成（`#10 DONE 38.8s`，`[Build] finished`，`[Push] finished`），失败仅发生在 `eulerpublisher` 工具的后处理/清理阶段。
+
+**修复方法**: CI 失败为 infra-error（`eulerpublisher` 包缺少 `distroless` 模块），与 PR 代码变更无关，无需修改 Dockerfile 或构建逻辑。顺带修正了 README.md 和 image-info.yml 中新镜像版本描述的文字笔误（`22.03` → `24.03`）。
+
+**历史案例**:
+- PR #2894: `Others/bisheng-jdk/README.md` — CI 失败为 infra-error（`eulerpublisher` 包缺少 `distroless` 模块），与 P
+
+---
+
+## 模式40：Meson wrap文件hash不匹配
+
+**症状关键词**: Incorrect hash for source, subproject, meson.build, wayland-protocols, expected, actual
+
+**根因**: - 失败位置: Dockerfile:26-54（`RUN mkdir build && meson setup build ...` 步骤）
+- 失败原因: Mesa 25.3.4 源码包内 `subprojects/wayland-protocols.wrap` 文件记录的 wayland-protocols 1.41 SHA256 hash（`2786b6b..`）与从 GitLab 实际下载到的文件 hash（`a802b63..`）不匹配，meson 配置阶段拒绝继续运行。
+
+**修复方法**: Mesa 25.3.4 构建时 meson 子项目 wayland-protocols 下载 hash 不匹配，meson 配置阶段失败。
+
+**历史案例**:
+- PR #2962: `Others/mesa/25.3.4/24.03-lts-sp4/Dockerfile` — Mesa 25.3.4 构建时 meson 子项目 wayland-protocols 下载 hash 不匹配，meso
+
+---
+
+## 模式41：MariaDB ABI 检查工具链不兼容
+
+**症状关键词**: ABI check found difference, do_abi_check.cmake, plugin_audit.h.pp, Check size of uint32 - failed
+
+**根因**: - 失败位置: MariaDB 源码内 `cmake/do_abi_check.cmake:84`（abi_check 构建目标）
+- 失败原因: openEuler 24.03-LTS-SP4 上的 GCC 预处理器输出与 MariaDB 12.1.1 源码自带的 `abi_check.out` 参考文件不一致，ABI 检查目标构建失败，进而导致 `make -j8` 整体返回错误码 2。
+
+**修复方法**: 在 cmake 配置中添加 `-DWITHOUT_ABI_CHECK=1` 禁用 ABI 检查，解决 openEuler 24.03-LTS-SP4 上 GCC 预处理器输出与 MariaDB 12.1.1 自带 `abi_check.out` 参考文件不一致导致的构建失败。
+
+**历史案例**:
+- PR #2848: `Database/mariadb/12.1.1/24.03-lts-sp4/Dockerfile` — 在 cmake 配置中添加 `-DWITHOUT_ABI_CHECK=1` 禁用 ABI 检查，解决 openEuler
+
+---
+
+## 模式42：日志缺失无法定位
+
+**症状关键词**: (无，CI 日志未提供)
+
+**根因**: - 失败位置: 未知（日志缺失）
+- 失败原因: 无法确认，日志不足以定位具体错误
+
+**修复方法**: 在 cmake 配置阶段添加 `-DVVENC_ENABLE_WERROR=OFF`，避免因 openEuler 24.03-LTS-SP4 基础镜像中编译器版本差异产生的新警告被 `-Werror` 转为编译错误。
+
+**历史案例**:
+- PR #2991: `Others/vvenc/1.14.0/24.03-lts-sp4/Dockerfile` — 在 cmake 配置阶段添加 `-DVVENC_ENABLE_WERROR=OFF`，避免因 openEuler 24.
