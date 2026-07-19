@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit构建器断连
-- 新模式症状关键词: closing transport, connection error, EOF, graceful_stop, no builder found, euler_builder
+- 新模式标题: BuildKit Builder 意外终止
+- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, buildkit
 
 ## 根因分析
 
@@ -19,17 +19,18 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建阶段，Dockerfile 第 2/4 步（`dnf install` 下载 metadata 期间）
-- 失败原因: BuildKit 构建器 `euler_builder_20260709_224657` 在执行 `dnf install` 的过程中被意外终止（gRPC `graceful_stop`），导致客户端 RPC 连接断开（`connection error: EOF`），后续查询该构建器时返回 `no builder found`。失败与 PR 代码变更无关。
+- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install ...`（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）
+- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被意外终止（`graceful_stop` goaway），导致 `dnf install` 步骤的 gRPC 传输连接断开，构建进程失去与 builder 的连接后报 `no builder found`
 
 ### 与 PR 变更的关联
-**无关**。PR 新增的 Dockerfile 内容正确：`dnf install` 安装的包（`gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel`）均为 openEuler 24.03-LTS-SP4 标准仓库包，不存在拼写错误或不存在的包名。构建在 `dnf install` 下载 metadata 阶段就因构建器断连而失败，尚未执行到 Python 编译或 pip 安装步骤。失败是 CI 基础设施层面（BuildKit 构建器崩溃/被回收）的问题。
+**与 PR 代码变更无关。** 此次失败是 CI 基础设施层面的问题——BuildKit builder 进程在 `dnf install` 下载元数据阶段被意外终止。PR 新增的 Dockerfile 本身没有语法或逻辑错误，构建刚开始执行第一个 `RUN` 指令（安装编译依赖）时就遇到了 builder 崩溃。这属于 CI runner / buildkit 资源回收、超时或节点不稳定的问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**重新触发 CI 构建**。这是 BuildKit 构建器基础设施故障（构建器进程意外 graceful stop），与 PR 代码无关。Code Fixer 无需修改任何文件，仅需重新触发失败的 job 即可。若重试后仍然失败，再考虑是否为 runner 资源不足（OOM）导致构建器被系统杀死。
+**无需代码修复。** 这是 CI 基础设施故障，Code Fixer 无需对 Dockerfile 或任何代码文件做修改。建议重新触发 CI 流水线重试。如果多次重试均在同一位置失败，则需检查 CI 构建节点（`ecs-build-docker-x86-hk`）的 BuildKit daemon 健康状态和资源配额。
 
 ## 需要进一步确认的点
-- 若重试后仍然在相同位置失败，需检查 Jenkins runner `ecs-build-docker-x86-hk` 的内存/磁盘资源是否充足，`dnf install` 阶段下载 metadata 和安装多个 `-devel` 包可能导致瞬时内存飙升触发 OOM。
-- 确认 BuildKit builder `euler_builder_20260709_224657` 的 lifecycle，排除因构建超时或空闲回收策略导致 builder 被提前终止的可能。
+- CI 构建节点 `ecs-build-docker-x86-hk` 上的 BuildKit daemon 是否存在资源不足（内存/磁盘）或超时自动回收策略
+- 同一时间段是否有其他构建任务也因 builder 意外终止而失败（判断是单点故障还是系统性资源问题）
+- `graceful_stop` 的触发来源——是 BuildKit daemon 主动发送还是上层编排系统（如 Jenkins plugin）触发了 builder 清理
