@@ -1,17 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需代码修改。
+CI 基础设施故障导致构建中断（BuildKit builder 被外部终止），与 PR 代码变更无关，无需修改任何代码。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告确认本次失败为 `infra-error`：BuildKit 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据时被外部信号终止（`graceful_stop` goaway 帧），与 PR 代码变更无关。
-
-PR 的 4 个变更文件（Dockerfile、README.md、doc/image-info.yml、meta.yml）内容均符合规范，不存在语法错误或配置问题。
-
-建议重新触发 CI 构建。若持续复现，需由 CI 运维团队排查 runner 节点的资源或稳定性问题。
+CI 失败分析报告明确指出失败类型为 `infra-error`，根因是 BuildKit 构建器实例 `euler_builder_20260709_224657` 在 `dnf install` 下载仓库元数据时被外部信号终止（`graceful_stop` goaway 帧）。PR #2994 仅新增了标准的 Dockerfile 及配套元数据文件，所有代码均符合规范，不存在语法错误或配置问题。该失败属于 CI 基础设施层面的构建器意外终止，重新触发 CI 构建即可恢复。
 
 ## 潜在风险
-无
+无（未修改任何代码）
