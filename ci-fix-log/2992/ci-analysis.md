@@ -5,8 +5,8 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP/2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
+- 新模式标题: 仓库HTTP/2流错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, dnf, MIRROR, No more mirrors to try
 
 ## 根因分析
 
@@ -23,19 +23,20 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（`RUN dnf install` 步骤，builder 阶段）
-- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 仓库镜像 `repo.****.org` 在 CI 构建期间出现 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR），导致 `gcc`、`gcc-gfortran`、`guile` 等多个 RPM 包下载失败，所有镜像重试耗尽后 `dnf install` 退出码为 1。
+- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（builder 阶段的 `dnf install` 命令）
+- 失败原因: openEuler 24.03-LTS-SP4 的 RPM 软件仓库（`repo.****.org`）在提供多个软件包下载时反复出现 HTTP/2 流错误（Curl error 92: INTERNAL_ERROR），经过多次镜像重试后仍无法完成 `gcc-12.3.1-110.oe2403sp4.x86_64.rpm` 的下载，导致 dnf 安装失败。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 本 PR 的改动仅为新增 `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile` 及配套元数据文件（README.md、image-info.yml、meta.yml），这些文件结构正确、符合规范。失败完全由 CI 构建环境与 openEuler RPM 仓库之间的网络问题（HTTP/2 流传输异常）引起，非代码缺陷。
-
-值得注意的是，stage-1（最终运行阶段）的 `dnf install`（步骤 #7）虽然部分包也遇到 `[MIRROR]` 警告（`glibc-devel`、`gcc-gfortran`），但由于所需包数量少（32 个 vs builder 阶段的 157 个），大部分包仍成功下载。builder 阶段因包数量多、重试耗尽而率先失败，导致 stage-1 被 `CANCELED`。
+**与 PR 无关**。PR #2992 仅新增了一个常规的 multiwfn Dockerfile（对应 openEuler 24.03-LTS-SP4 基础镜像），Dockerfile 本身结构正确，与已有的 `24.03-lts-sp3` 版本 Dockerfile 模式一致。失败纯粹由 CI 构建过程中 openEuler 24.03-LTS-SP4 软件仓库的 HTTP/2 传输异常导致，属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修复代码。** 这是一个 CI 基础设施的暂时性网络问题。直接重试 CI job 即可——HTTP/2 流错误通常是仓库服务器侧的瞬时问题，在后续运行中可能不再复现。PR 的 Dockerfile 及元数据变更本身没有错误。
+**重试 CI 构建**。该失败为 openEuler 24.03-LTS-SP4 仓库服务器的临时性 HTTP/2 流错误，PR 代码无问题。等待仓库服务恢复稳定后重新触发 CI 构建即可。
+
+### 方向 2（置信度: 低）
+**调整 dnf 配置以规避 HTTP/2 问题**。如果仓库 HTTP/2 问题持续出现，可在 Dockerfile 中为 dnf 添加 `--setopt=proxy=_none_` 或配置 dnf 使用 HTTP/1.1 协议（如 `echo 'http2=false' >> /etc/dnf/dnf.conf`），但这是临时规避手段，优先建议方向 1。
 
 ## 需要进一步确认的点
-- 确认 `repo.****.org` 仓库在 CI 失败时段是否存在已知的 HTTP/2 服务端问题或负载过高导致的流中断。
-- 如果该问题频繁复现（同一仓库在多个不同 PR 的构建中反复出现 Curl error 92），可考虑在 CI 构建环境中配置 `dnf` 回退到 HTTP/1.1（如设置 `http2=false` 于 dnf 仓库配置中）或切换到其他镜像源。
+- openEuler 24.03-LTS-SP4 仓库（`repo.****.org`）的 HTTP/2 服务端是否已恢复稳定
+- 如果多次重试 CI 均失败且同一时段其他基于 24.03-LTS-SP4 的 PR 构建也出现相同错误，则可能需要反馈给仓库运维团队
