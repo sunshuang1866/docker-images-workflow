@@ -5,17 +5,19 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像HTTP2流错误
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try
+- 新模式标题: OS 仓库 HTTP/2 传输错误
+- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, INTERNAL_ERROR, No more mirrors to try, dnf install
 
 ## 根因分析
 
 ### 直接错误
 ```
 #8 1243.9 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm [HTTP/2 stream 31 was not closed cleanly: INTERNAL_ERROR (err 2)]
-#8 1468.3 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for ...
-#8 1767.8 [MIRROR] guile-2.2.7-6.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for ...
-#8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for ...
+#7 1268.5 [MIRROR] glibc-devel-2.38-107.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.****.org/openEuler-24.03-LTS-SP4/OS/x86_64/Packages/glibc-devel-2.38-107.oe2403sp4.x86_64.rpm [HTTP/2 stream 17 was not closed cleanly: INTERNAL_ERROR (err 2)]
+#8 1468.3 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...
+#7 1598.9 [MIRROR] gcc-gfortran-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...
+#8 1767.8 [MIRROR] guile-2.2.7-6.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...
+#8 1830.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer ...
 #8 1830.2 [FAILED] gcc-12.3.1-110.oe2403sp4.x86_64.rpm: No more mirrors to try - All mirrors were already tried without success
 #8 1830.2 Error: Error downloading packages:
 #8 1830.2   gcc-12.3.1-110.oe2403sp4.x86_64: Cannot download, all mirrors were already tried without success
@@ -23,17 +25,20 @@
 ```
 
 ### 根因定位
-- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（builder 阶段的 `dnf install` 步骤）
-- 失败原因: 构建过程中，openEuler 24.03-LTS-SP4 的 RPM 仓库镜像站出现 HTTP/2 协议层流错误（Curl error 92），多个软件包（gcc-gfortran、glibc-devel、guile、gcc）下载失败。gcc 包（34 MB）在尝试了所有可用镜像后均未成功，`dnf` 最终报错退出。这是 CI 基础设施/仓库镜像站的网络问题，与 PR 代码变更无关。
+- 失败位置: `Others/multiwfn/cb37c53/24.03-lts-sp4/Dockerfile:7-10`（`RUN dnf install` 步骤）
+- 失败原因: openEuler 24.03-LTS-SP4 的 OS 软件包仓库（`repo.****.org`）发生 HTTP/2 协议层传输错误（`Curl error (92): Stream error in the HTTP/2 framing layer`），多个 RPM 包（gcc-gfortran、glibc-devel、guile、gcc）下载时被 HTTP/2 流异常中断。所有镜像源重试耗尽后，`gcc-12.3.1-110.oe2403sp4.x86_64.rpm` 最终无法下载，导致 `dnf install` 失败（exit code: 1）。
 
 ### 与 PR 变更的关联
-**无关**。PR 仅新增了 multiwfn 在 openEuler 24.03-lts-sp4 上的 Dockerfile（以及对应的 README、image-info.yml、meta.yml 条目），该 Dockerfile 中的 `dnf install` 步骤语法和包名均正确无误。失败原因是构建时 openEuler 24.03-LTS-SP4 的官方 RPM 仓库镜像站出现了 HTTP/2 协议层通信错误，导致大体积包（gcc 34 MB）在多次重试后仍无法下载完成。同样的问题也影响了 `#7`（stage-1 运行时阶段）的 `dnf install`，只是该阶段在 `#8` builder 阶段失败后被 CANCELED。
+**与 PR 代码变更无关。** PR 仅新增了 multiwfn 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及配套元数据（README.md、image-info.yml、meta.yml），Dockerfile 中的 `dnf install` 命令为标准包安装操作，与已存在的 SP3 版本 Dockerfile 结构一致。失败完全由 openEuler OS 软件包仓库的 HTTP/2 传输层故障引起，属于 CI 基础设施问题。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-**无需修改 PR 代码**。这是 CI 基础设施问题，正确做法是等待仓库镜像站恢复稳定后重试构建（retry the CI job）。PR 新增的 Dockerfile、README、image-info.yml、meta.yml 均无语法或逻辑错误。
+**无需代码修复，触发重试即可。** 该失败是 openEuler 24.03-LTS-SP4 软件包仓库在镜像拉取期间的瞬时网络故障（HTTP/2 流异常中断），与 Dockerfile 或 PR 变更无关。待仓库恢复后重新触发 CI 构建即可通过。
 
 ## 需要进一步确认的点
-- openEuler 24.03-LTS-SP4 的 RPM 仓库镜像站（`repo.****.org`）在构建时间点（2026-07-09 14:46 UTC 前后）是否存在已知的 HTTP/2 协议问题或服务降级。
-- 该镜像站的 HTTP/2 支持是否稳定——如果频繁出现此类 Curl error (92)，可建议 CI 构建环境强制使用 HTTP/1.1（如通过 `dnf` 配置 `http2=false` 或设置 `CURLOPT_HTTP_VERSION` 环境变量），但这属于 CI 基础设施层面的调整，不属于本次 PR 修复范围。
+- 确认 `repo.****.org`（openEuler 24.03-LTS-SP4 OS 仓库）的 HTTP/2 服务是否已恢复正常。可以手动尝试 `curl -I` 请求该仓库中的任意 RPM 包地址验证。
+- 如果多次重试后仍然失败，需确认 CI 构建节点到该仓库的网络链路是否存在持续性故障，或仓库是否变更了访问策略（如限流、强制 HTTP/1.1 等）。
+
+## 修复验证要求
+无需代码修复，因此无需额外验证步骤。
