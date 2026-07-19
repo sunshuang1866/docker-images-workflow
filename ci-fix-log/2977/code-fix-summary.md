@@ -1,19 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。CI 失败为 `infra-error`，根因是 openEuler 24.03-LTS-SP4 官方仓库 `repo.openeuler.org` 在 aarch64 架构下的 HTTP/2 协议层服务端错误（Curl error 92: INTERNAL_ERROR），导致 `vim-common` 等软件包下载失败，与 PR 提交的代码无关。
+无需代码修改。CI 失败为 infra-error，由 `repo.openeuler.org` 镜像站在 aarch64 构建期间出现间歇性 HTTP/2 传输层错误（Curl error 92 / 56）导致 RPM 包下载失败，与 PR #2977 的代码变更无关。
 
 ## 修改的文件
-无。未修改任何文件。
+无
 
 ## 修复逻辑
-分析报告确认失败类型为 `infra-error`，置信度 **高**：
-- PR 仅新增了 `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile` 及三个文档/元数据文件
-- Dockerfile 中 `yum install` 命令语法正确，包名列表与同仓库其他版本一致
-- 失败原因是 openEuler 官方包仓库服务端的 HTTP/2 协议层临时故障，部分包的下载在重试后成功（gcc、kernel-headers、perl-MIME-Base64），仅 `vim-common` 重试全部失败
-- 修复方向 1（置信度：高）明确指出**无需代码修复**，应触发 CI 重跑等待仓库服务恢复正常
-
-因为分析报告明确指出这是 `infra-error`（CI 基础设施问题），按照规范要求，不做任何代码修改。
+CI 分析报告已明确判定该失败为 infra-error（置信度：高）。Dockerfile 中 `yum install` 列出的所有包名均正确且存在于 openEuler 24.03-LTS-SP4 仓库中，构建日志中的依赖解析阶段已确认全部 173 个包均可识别。失败发生在 RPM 下载传输阶段，gcc、kernel-headers、perl-MIME-Base64 均遇到相同错误后重试成功，仅 vim-common 在最后一轮重试中彻底失败。这是远端镜像站的服务端网络问题，重新触发 CI 构建即可通过。
 
 ## 潜在风险
-无。未修改任何代码，不存在引入新问题的风险。若 CI 重跑后仍持续失败，需由 CI 基础设施团队联系 openEuler 仓库运维排查 HTTP/2 服务端配置。
+无
