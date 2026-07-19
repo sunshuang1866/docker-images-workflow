@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无代码修复。此 CI 失败属于基础设施故障（infra-error），与 PR 代码变更无关。
+无需代码修改。CI 失败为基础设施错误（infra-error）：openEuler 24.03-LTS-SP4 官方 RPM 仓库镜像（`repo.****.org`）在 HTTP/2 传输层出现间歇性 `INTERNAL_ERROR (err 2)` 流错误，导致 `gcc-c++`、`cmake-data`、`git-core` 等包下载失败，DNF 耗尽重试后构建终止。
 
 ## 修改的文件
-无。根据分析报告，PR 中变更的所有文件（Dockerfile、README.md、image-info.yml、meta.yml）均无问题，无需修改。
+无。此失败与 PR 新增的 Dockerfile 代码无关，`dnf install` 命令语法及包名均正确。
 
 ## 修复逻辑
-CI 构建在执行 `dnf install` 下载 RPM 包时，openEuler 24.03-LTS-SP4 的 yum 仓库镜像服务器多次返回 HTTP/2 协议层流错误（`Curl error (92): Stream error in the HTTP/2 framing layer: INTERNAL_ERROR (err 2)`）。其中 `gcc-c++` 包的两次下载尝试均失败，导致 `dnf install` 退出码 1。这是服务端临时性 HTTP/2 基础设施故障，与此次 PR 的代码变更无关。建议重试 CI 构建即可。
+CI 失败分析报告将失败类型归类为 `infra-error`，根因是 openEuler 24.03-LTS-SP4 RPM 仓库镜像服务端的 HTTP/2 协议栈间歇性故障，非代码层面可修复的问题。建议在仓库镜像服务恢复正常后重新触发 CI 构建。如果重试后仍频繁出现相同错误，可考虑在 `dnf install` 前添加 `echo "http2=false" >> /etc/dnf/dnf.conf` 强制降级到 HTTP/1.1 作为规避手段，但当前阶段无需实施代码变更。
 
 ## 潜在风险
-无 — 未修改任何代码。
+无。未进行任何代码修改。
