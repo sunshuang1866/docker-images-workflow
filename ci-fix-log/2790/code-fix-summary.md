@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施误报（infra-error），PR #2790 仅修改了仓库根目录的 `README.md`，该文件不在 appstore 镜像发布路径规范管辖范围内。
+无需代码修改 — 本次 CI 失败为基础设施/流程错误（infra-error），非代码缺陷。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 分析报告将此次失败归类为 `infra-error`（置信度：高）。失败原因是 CI 的 appstore 发布预检工具（`eulerpublisher/update/container/app/update.py`）的路径校验算法无法将根目录级纯文档文件（`README.md`）映射到有效的镜像目录路径，从而产生误报。PR 的变更内容本身正确无误，问题出在 CI 工具侧——预检工具应增加对根目录级非镜像文件的跳过逻辑。此问题需由 CI 维护团队在工具侧修复，PR 自身无需任何代码修改。
+CI 分析报告明确指出失败类型为 `infra-error`。PR #2790 仅修改了仓库根目录下的 `README.md`（更新 Tags 列表和版本信息），属于纯文档变更。CI 流水线中的 `eulerpublisher/update/container/app/update.py` 工具在 appstore 发布规范预检阶段将 `README.md` 纳入路径校验，因其不在任何镜像目录树（如 `AI/`、`Bigdata/` 等）下而判定 `FAILURE`。该 PR 本身不存在代码或构建错误，需要 CI 侧配置跳过纯文档 PR 的 appstore 预检，或由仓库管理员手动合入。
 
 ## 潜在风险
 无
