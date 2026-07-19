@@ -1,18 +1,22 @@
 # 修复摘要
 
 ## 修复的问题
-CI 失败为 `infra-error`，由 `eulerpublisher` 工具对根目录 `README.md` 的误校验触发，**与 PR 变更内容无关**，无需对源代码进行任何修改。
+无需修改代码 — CI 失败根因是基础设施工具 `eulerpublisher` 的 bug，而非 PR 变更的文件有误。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告明确指出：
-- 失败类型: **infra-error**（CI 基础设施/工具问题）
-- 根因: `eulerpublisher` 工具的 appstore 发布规范预检将仓库根目录的 `README.md` 误识别为应用镜像文件，对其执行了镜像路径校验（期望路径格式为 `{category}/{image}/{version}/{os-version}/README.md`），导致 `Path Error`。
-- 修复应在 `eulerpublisher` 工具侧增加文件过滤逻辑，排除仓库根目录文档文件，而非修改本 PR 的文件内容。
+CI 失败由 `eulerpublisher/update/container/app/update.py` 的 appstore 发布规范预检工具引起。该工具在 diff 检测中将仓库根目录的 `README.md` 视为 appstore 镜像条目进行路径校验，但根目录文档不符合 `{category}/{image-name}/{version}/{os-version}/README.md` 的层级路径格式，导致路径校验报错。
 
-本次 PR 仅修改了 `README.md` 和 `README.en.md` 的文档内容（Tags 列表更新），不涉及任何镜像构建相关的代码变更，无需也不应对该文件进行任何代码修复。
+PR #2790 仅修改了 `README.md`（更新基础镜像 Tags 列表），该文件是仓库级文档，不属于任何 appstore 镜像目录（`Base/`、`AI/` 等分类目录）。`README.md` 本身内容正确无误，bug 出在 CI 工具未对根目录文件做过滤排除。
+
+由于：
+- `README.md` 是唯一允许修改的文件，且其内容没有错误；
+- CI 工具 `eulerpublisher` 不在可修改文件范围内；
+- 规则禁止创建新文件（如 `.ci-ignore` 配置）；
+
+因此本次无需对源码仓库做任何代码修改。修复应在 CI 基础设施侧完成：使 `eulerpublisher` 仅对位于镜像分类目录（`Base/`、`AI/`、`Bigdata/`、`Cloud/`、`Database/`、`Distroless/`、`HPC/`、`Others/`、`Storage/`）下的文件执行 appstore 路径校验，排除根目录文档。
 
 ## 潜在风险
-无
+无（未修改任何代码）
