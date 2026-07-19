@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。该 CI 失败为基础设施问题（infra-error）：openEuler 24.03-LTS-SP4 软件仓库在 Docker 构建过程中出现 HTTP/2 协议层间歇性错误（Curl error 92: Stream error in the HTTP/2 framing layer），导致多个 RPM 包下载失败。
+无需代码修改。CI 失败为 infra-error：openEuler 24.03-LTS-SP4 官方软件仓库镜像发生 HTTP/2 协议层错误（Curl error 92: INTERNAL_ERROR），导致 `dnf install` 下载 RPM 包失败。
 
 ## 修改的文件
-无
+无（基础设施问题，非代码缺陷）
 
 ## 修复逻辑
-CI 分析报告置信度"高"判定为 infra-error。Dockerfile 内容正确、语法无误，失败根因是 `repo.****.org` 的 HTTP/2 服务端网络波动，与 PR 变更无关。stage-1 和 stage-2 阶段均出现相同的 `[MIRROR]` 警告，进一步印证是服务端问题。修复方向：触发 CI 重试即可。若多次重试均失败，需联系 openEuler 仓库基础设施团队排查 HTTP/2 服务配置。
+分析报告明确指出：失败根因是 openEuler 24.03-LTS-SP4 仓库镜像在响应 HTTP/2 请求时发生流级协议错误（`Stream error in the HTTP/2 framing layer`），多个 RPM 包（`gcc-gfortran`、`glibc-devel`、`guile`、`gcc`）下载均受此影响，最终 `gcc` 包因所有镜像均尝试失败而报 `No more mirrors to try`。该错误与 PR 变更的 Dockerfile 内容无关，属于上游仓库的临时性基础设施故障。
+
+建议：等待上游仓库恢复后重新触发 CI 构建。若问题持续，可考虑在 Dockerfile 中为 `dnf install` 添加重试参数（如 `--setopt=retries=10`）或切换备用镜像源，但这超出了当前 infra-error 的修复范围。
 
 ## 潜在风险
-无
+无。不涉及任何代码修改。
