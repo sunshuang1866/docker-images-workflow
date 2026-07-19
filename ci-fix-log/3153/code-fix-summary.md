@@ -1,17 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 `infra-error`（基础设施问题），CI 的 appstore 发布规范预检工具 `eulerpublisher/update/container/app/update.py` 对仓库根目录的 `README.md` 文档变更误报了路径校验错误。
+CI 失败为 infra-error，无需修改 PR 代码。
 
 ## 修改的文件
-无代码修改。原始 PR 仅涉及 `README.md` 的文档内容更新，文件内容本身无错误。
+无。
 
 ## 修复逻辑
-CI 分析报告指出失败类型为 `infra-error`，置信度高。根因是 CI 工具 `eulerpublisher` 的 appstore 预检逻辑未区分根目录文档变更与应用镜像发布变更，将不适用 appstore 规范的根目录 `README.md` 纳入了路径检查范围，导致误报 `[Path Error] The expected path should be /README.md`。
+CI 失败分析报告明确指出该失败与 PR #3153 的代码变更无关。PR 仅修改了 `README.md` 中的文档内容（更新基础镜像 tag 列表和下载链接），而失败是由 CI 工具 `eulerpublisher/update/container/app/update.py` 中的路径校验逻辑 bug 引起的：`git diff --name-only` 输出的路径格式为 `README.md`（无前导 `/`），而 appstore 规范预期的路径格式为 `/README.md`（带前导 `/`），严格字符串比较导致校验失败。
 
-实际需要修复的是 CI 工具（`eulerpublisher/update/container/app/update.py`）中的文件路径过滤逻辑，该文件不在 PR 变更范围（`pr.changed_files`）内，且属于 CI 基础设施代码，不应由本次代码修复环节处理。
-
-当前 PR 的 `README.md` 文档更新正确无误，无需任何代码修改。
+此问题需要在 CI 工具 (`eulerpublisher`) 仓库中修复，分别有两种修复方向：
+1. 在路径比较逻辑中对 git diff 输出添加前导 `/` 或对预期路径去除前导 `/`；
+2. 将根级 `README.md` 和 `README.en.md` 加入 appstore 预检白名单。
 
 ## 潜在风险
-无。未对任何文件进行修改。
+无。本次未修改任何源代码。
