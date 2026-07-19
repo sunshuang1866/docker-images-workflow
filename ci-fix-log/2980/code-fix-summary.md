@@ -1,13 +1,20 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修复。此 CI 失败为 `infra-error`，根因是 openEuler 24.03-LTS-SP4 软件源（`repo.****.org`）在构建期间出现 HTTP/2 流层传输错误（`INTERNAL_ERROR (err 2)`），导致 `gcc-c++` 等 RPM 包下载失败。与 PR #2980 的代码变更**无关**。
+无需代码修改 — 本次 CI 失败属于 `infra-error`（基础设施问题），非代码缺陷。
 
 ## 修改的文件
-无。本次不修改任何源文件。
+无
 
 ## 修复逻辑
-分析报告明确指出：PR 仅新增了格式正确的 Dockerfile 和对应元数据文件，`dnf install` 命令语法无误，包名列表正确。构建失败完全由 CI 运行时基础设施（软件源网络波动）导致，属于临时性偶发问题。按照修复指南中"如果分析报告指出是 `infra-error`，在 output_file 中说明无需代码修改，不要强行改代码"的要求，本次不做代码改动。建议重新触发 CI 构建即可。
+CI 失败发生在 Docker 构建的 `dnf install` 阶段，从 openEuler 24.03-LTS-SP4 官方仓库下载 `gcc-c++-12.3.1-110.oe2403sp4.x86_64.rpm` 时遭遇 HTTP/2 协议层流错误（Curl error 92: Stream error in the HTTP/2 framing layer, `INTERNAL_ERROR (err 2)`），所有可用镜像均失败导致构建中断。
+
+分析报告明确指出：
+- 本次 PR 仅新增了 GrADS 2.2.3 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及 README、meta.yml、image-info.yml 条目，**与 CI 失败无关**。
+- PR 引入的 Dockerfile 语法和逻辑**均正确无误**。
+- 3 个受影响的 RPM 包中有 2 个（cmake-data、git-core）通过镜像切换重试成功，说明这是镜像站 HTTP/2 协议层的临时间歇性故障。
+
+**修复方式**：重新触发 CI 构建即可。镜像站 HTTP/2 问题大概率已自愈，无需修改任何代码。
 
 ## 潜在风险
-无。
+无
