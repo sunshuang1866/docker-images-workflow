@@ -4,9 +4,8 @@
 - PR: #2839 — chore(postgres): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
 - 置信度: 高
-- 知识库匹配: 新模式
-- 新模式标题: CI测试依赖缺失
-- 新模式症状关键词: shunit2: No such file or directory, eulerpublisher, [Check] test failed
+- 知识库匹配: 模式39
+- 新模式标题: (不适用)
 
 ## 根因分析
 
@@ -14,26 +13,24 @@
 ```
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: shunit2: No such file or directory
 2026-07-09 09:40:24,021-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
-+-------------+-------------+--------------+
-| Check Items | Description | Check Result |
-+-------------+-------------+--------------+
-+-------------+-------------+--------------+
-Build step 'Execute shell' marked build as failure
-Finished: FAILURE
+2026-07-09 09:40:24,021 - CRITICAL - [Check] test failed
 ```
 
 ### 根因定位
-- 失败位置: CI Runner 上的 `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13`
-- 失败原因: CI 测试编排工具 `eulerpublisher` 在执行镜像健康检查（`[Check]` 阶段）时，依赖 `shunit2` shell 测试框架，但该工具未安装在 CI Runner 上，导致 `source shunit2` 失败。
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh` (CI 测试框架脚本)
+- 失败原因: CI 运行器的测试框架缺失 `shunit2`（Shell 单元测试框架），导致 [Check] 阶段无法执行镜像验证测试。
 
 ### 与 PR 变更的关联
-**与 PR 无关。** PR 的变更仅为新增 Postgres 17.6 在 openEuler 24.03-LTS-SP4 上的 Dockerfile、entrypoint.sh，以及更新 `README.md` 和 `meta.yml`。Docker 镜像构建（`[Build]`）和推送（`[Push]`）阶段均已成功完成（日志中 `#8 DONE 268.4s`、`#11 DONE 58.0s`、`[Build] finished`、`[Push] finished`）。失败仅发生在构建后的 CI 检查阶段，根本原因是 CI Runner 缺少 `shunit2` 依赖。
+**与 PR 变更无关。** Docker 镜像构建和推送均已完成并成功（日志中 `[Build] finished` 和 `[Push] finished` 均正常，所有 10 个 Docker 构建步骤均 `DONE`，镜像 tag `17.6-oe2403sp4-x86_64` 已成功推送到 registry）。失败仅发生在 CI 管线的 [Check] 阶段——这是一个独立的镜像验证步骤，由 CI 工具链 `eulerpublisher` 调用 `shunit2` 执行，与 PR 的 Dockerfile 或 entrypoint.sh 无关。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-CI Runner 环境中缺少 `shunit2` 测试框架。需要在 CI 运行环境中安装 `shunit2`（可通过包管理器安装或将其作为 eulerpublisher 的依赖项）。这与 PR 代码变更无关，属于 CI 基础设施配置问题。
+### 方向 1（置信度: 低 — 此为 infra-error，非 code-fixer 可修复）
+CI 运行器需要安装 `shunit2` 测试框架。这是 CI 基础设施层面的问题，应由 CI 运维团队处理，Code Fixer 无需介入。
 
 ## 需要进一步确认的点
-- 确认其他使用 openEuler 24.03-LTS-SP4 基础镜像的 PR 是否也遇到相同的 `shunit2` 缺失问题（可能是一个系统性的 CI Runner 环境问题）
-- 确认 `shunit2` 是否应作为 `eulerpublisher` Python 包的依赖自动安装，还是需要手动预装在 CI Runner 镜像中
+1. 确认该 CI 运行器是否正确安装了 `shunit2`（典型安装方式为 `dnf install shunit2` 或将 shell 库文件部署到 `$PATH` 可及位置）。
+2. 确认同一运行器上其他镜像的 [Check] 阶段是否也因同样的 `shunit2` 缺失而失败——如所有镜像均失败，则为运行器环境配置问题；如仅此 PR 失败，则可能为运行器临时分配导致的环境缺失。
+
+## 修复验证要求
+不适用。此为 CI 基础设施问题，不涉及代码修改。
