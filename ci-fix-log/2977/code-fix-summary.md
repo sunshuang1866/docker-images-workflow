@@ -1,13 +1,13 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为 **infra-error**，由 `repo.openeuler.org` 镜像站 aarch64 仓库的 HTTP/2 网络波动导致 RPM 包下载失败。
+CI 失败为 openEuler 24.03-LTS-SP4 官方软件仓库 (`repo.openeuler.org`) 在 aarch64 架构构建期间的临时性网络故障（HTTP/2 INTERNAL_ERROR + SSL_ERROR_SYSCALL），属于 transient infra-error，PR 代码无需修改。
 
 ## 修改的文件
-无
+无代码修改。
 
 ## 修复逻辑
-分析报告确认失败与 PR 代码无关。Dockerfile 中 `yum install` 所列包名均为有效的 openEuler 24.03-LTS-SP4 开发依赖，无语法错误。失败原因是 CI 在 aarch64 runner 上构建时，`repo.openeuler.org` 的 SP4 aarch64 仓库出现 Curl error 92 (HTTP/2 INTERNAL_ERROR) 和 Curl error 56 (SSL_ERROR_SYSCALL)，导致 `vim-common` 等 RPM 包下载失败。这是临时性网络基础设施问题，重新触发 CI 构建即可通过。
+CI 分析报告确认该失败为 infra-error，置信度高。失败原因是在 `yum install` 阶段从 `repo.openeuler.org` 下载 RPM 包时遭遇 HTTP/2 协议层错误和 SSL 连接中断，这是上游仓库的网络基础设施问题，与本次 PR（新增 brpc 1.16.0 在 openEuler 24.03-LTS-SP4 上的 Dockerfile 及文档/元数据）的代码变更无关。只需重新触发 CI 构建即可。
 
 ## 潜在风险
-无
+如 `repo.openeuler.org` 在 aarch64 架构上长期存在 HTTP/2 不稳定性，后续同类镜像构建可能再次遇到此问题。若频繁复现，可考虑在 Dockerfile 中添加 yum retry 配置或切换至备用镜像站。
