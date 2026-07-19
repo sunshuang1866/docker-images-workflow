@@ -14,30 +14,32 @@
 ```
 /usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh: line 13: .: shunit2: file not found
 2026-07-10 09:24:00,662-/usr/local/lib/python3.11/site-packages/eulerpublisher/container/app/app.py[line:173]-CRITICAL: [Check] test failed
+2026-07-10 09:24:00,662 - CRITICAL - [Check] test failed
 Build step 'Execute shell' marked build as failure
 Finished: FAILURE
 ```
 
 ### 根因定位
-- 失败位置: CI 基础设施的 Check 阶段（`eulerpublisher` 测试框架）
-- 失败原因: CI 运行环境中缺少 `shunit2` shell 测试框架，`common_funs.sh:13` 的 `. shunit2` 命令无法找到该文件，导致测试框架初始化失败
+- 失败位置: `/usr/local/etc/eulerpublisher/tests/container/common/common_funs.sh:13`
+- 失败原因: eulerpublisher 测试框架的 `common_funs.sh` 脚本尝试 source `shunit2`（Shell 单元测试框架），但该文件在 CI runner 上不存在，导致 `[Check]` 测试阶段失败。
 
 ### 与 PR 变更的关联
-**与 PR 变更无关。** 该失败发生在 CI 的 `[Check]` 阶段，此时 Docker 镜像构建和推送均已成功完成：
-- `[Build] finished` — 构建成功（全部 6 个 Dockerfile 步骤 `#9`～`#12` 均 DONE，meson 编译全部 422 个目标链接完成）
-- `[Push] finished` — 推送成功（镜像 `openeulertest/bind9:9.21.23-oe2403sp4-aarch64` 已推送到 Docker Hub）
-- `[Check] test failed` — 测试框架因缺少 `shunit2` 组件而无法启动，未能执行任何实际的镜像测试
+**完全无关。** Docker 镜像构建和推送均已成功完成：
+- meson 配置、422 个编译目标全部链接成功（`[422/422] Linking target named`）
+- 6 个 Dockerfile 构建步骤全部完成（`#13 exporting to image ... DONE`）
+- 镜像已推送至 `docker.io/openeulertest/bind9:9.21.23-oe2403sp4-aarch64`
+- 日志中可见 `[Build] finished`、`[Push] finished`
 
-失败的根因是 CI runner 测试环境未安装 `shunit2`（一个 shell 单元测试框架），与本次 PR 新增的 Dockerfile、named.conf、meta.yml、image-info.yml 和 README.md 变更均无关联。
+失败仅发生在 `eulerpublisher` 工具的后处理 / 检查阶段，与 PR 新增的 bind9 Dockerfile、named.conf、meta.yml 等文件无关。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-CI 运维侧在检查阶段所使用的 runner 环境中安装 `shunit2` 测试框架，使其对 `common_funs.sh` 中 `source`/`.` 命令可用。这是 CI 基础设施配置问题，不需要修改任何仓库中的代码文件。
+CI runner 的测试环境中缺少 `shunit2` 依赖。需由 CI 基础设施维护者在执行镜像检查的 runner 上安装 `shunit2` 包（`yum install shunit2` 或 `pip install shunit2`），或确保 `shunit2` 文件位于 `eulerpublisher` 测试脚本预期的路径下。
 
 ## 需要进一步确认的点
-- 确认 `shunit2` 在 CI 检查阶段的 runner 环境中应安装的准确路径（当前 `common_funs.sh` 的 `. shunit2` 期望在 `PATH` 或相对于脚本的路径中找到该文件）
-- 确认该问题是否仅影响 aarch64 runner（当前日志显示构建的是 aarch64 架构镜像），x86_64 runner 是否同样缺少 `shunit2`
+- CI 日志中仅包含 aarch64 架构的构建输出（镜像 tag 为 `...-aarch64`），需确认 x86_64 架构的构建 job 是否也因相同原因失败。
+- 确认 `shunit2` 依赖是近期 eulerpublisher 版本更新引入的新增依赖，还是 CI runner 环境变更导致原有文件被删除。
 
 ## 修复验证要求
-无需 code-fixer 介入（infra-error，非代码层面问题）。
+（不适用——本失败为 infra-error，无需对 PR 代码进行任何修改。）
