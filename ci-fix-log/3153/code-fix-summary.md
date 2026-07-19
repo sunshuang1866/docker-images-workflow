@@ -1,16 +1,19 @@
 # 修复摘要
 
 ## 修复的问题
-CI 基础设施问题（infra-error），无需修改 PR 代码。CI 工具 eulerpublisher 的 appstore 发布规范检查器对根目录 `README.md` 文件报告了 `Path Error`，其路径比较逻辑存在前导 `/` 匹配不一致的 bug（提取的路径 `README.md` 与期望路径 `/README.md` 不匹配），属于 CI 层面缺陷。
+无需代码修改。CI 失败属于基础设施问题（infra-error），由外部 appstore 发布规范预检工具 `eulerpublisher/update/container/app/update.py` 的路径校验逻辑误判导致。
 
 ## 修改的文件
-无（无需代码修改）
+无。PR #3153 仅修改了 `README.md`（仓库根目录文档），文件路径 `/README.md` 与 CI 工具声明的期望路径完全一致，不存在代码层面的问题。
 
 ## 修复逻辑
-- PR #3153 仅修改了 `README.md` 的文档内容（更新可用基础镜像标签列表），不涉及任何文件路径变更或元数据文件修改。
-- CI 失败原因为 eulerpublisher 的路径校验逻辑 bug，与 PR 变更无关。
-- 此为 CI 基础设施问题，需由 CI 平台维护团队修复 eulerpublisher 的路径比较逻辑，或调整 appstore 发布规范检查的触发范围（对仅修改根目录文档的 PR 不应执行该检查）。
-- 在本仓库范围内无需且不应进行任何代码修改。
+CI 分析报告明确指出：
+1. 文件路径 `/README.md` 与期望路径 `/README.md` 完全匹配
+2. CI 仍报告 `[Path Error]` 并判定 FAILURE，属于 CI 工具自身的误判
+3. 分析报告结论为"此失败很可能不是真正的路径问题，而是 CI 工具自身的误判"
+4. 根因在 `eulerpublisher/update/container/app/update.py:273`，该文件不在当前仓库中，属于外部 CI 基础设施组件
+
+PR #3153 为纯文档变更（更新 README 中的基础镜像 tag 列表），不涉及任何应用镜像，CI 的 appstore 发布规范预检不应触发对该类 PR 的检查。此问题需要联系 CI 基础设施团队在 CI 流程层面或 `update.py` 工具中修复，而非在当前仓库中修改代码。
 
 ## 潜在风险
-无
+无。当前仓库无需任何代码修改，不会引入风险。
