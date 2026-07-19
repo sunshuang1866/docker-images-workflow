@@ -3,10 +3,10 @@
 ## 基本信息
 - PR: #2994 — chore(scann): add openEuler 24.03-LTS-SP4 support
 - 失败类型: infra-error
-- 置信度: 高
+- 置信度: 中
 - 知识库匹配: 新模式
-- 新模式标题: BuildKit Builder 意外终止
-- 新模式症状关键词: graceful_stop, no builder found, closing transport, rpc error, buildkit
+- 新模式标题: BuildKit构建器中断
+- 新模式症状关键词: graceful_stop, closing transport, error reading from server: EOF, no builder found, euler_builder
 
 ## 根因分析
 
@@ -19,18 +19,26 @@ ERROR: no builder "euler_builder_20260709_224657" found
 ```
 
 ### 根因定位
-- 失败位置: Docker 构建步骤 `[2/4] RUN dnf install ...`（`Others/scann/1.4.2/24.03-lts-sp4/Dockerfile`）
-- 失败原因: BuildKit builder 实例 `euler_builder_20260709_224657` 在构建过程中被意外终止（`graceful_stop` goaway），导致 `dnf install` 步骤的 gRPC 传输连接断开，构建进程失去与 builder 的连接后报 `no builder found`
+- 失败位置: Docker 构建步骤 `[2/4]`（`dnf install` 执行期间）
+- 失败原因: BuildKit 构建器实例 `euler_builder_20260709_224657` 在执行 `dnf install` 过程中被优雅关闭（`graceful_stop`），导致传输层连接断开（EOF），随后构建器实例已不可用（`no builder found`）。这是 CI 基础设施层面的故障，与 PR 的代码变更无关。
 
 ### 与 PR 变更的关联
-**与 PR 代码变更无关。** 此次失败是 CI 基础设施层面的问题——BuildKit builder 进程在 `dnf install` 下载元数据阶段被意外终止。PR 新增的 Dockerfile 本身没有语法或逻辑错误，构建刚开始执行第一个 `RUN` 指令（安装编译依赖）时就遇到了 builder 崩溃。这属于 CI runner / buildkit 资源回收、超时或节点不稳定的问题。
+PR 变更为新增 scann 1.4.2 在 openEuler 24.03-lts-sp4 上的 Dockerfile 及配套元数据文件（README.md、image-info.yml、meta.yml）。Dockerfile 内容为标准模式（安装编译依赖 → 编译 Python → pip 安装 scann），`dnf install` 安装的包（gcc、gcc-c++、make、wget、openssl-devel、bzip2-devel、zlib-devel）均为 openEuler 仓库中的常规包，不存在拼写错误或不存在的包名。
+
+构建失败发生在 `dnf install` 下载元数据阶段（运行约 39 秒，下载速度仅 77 kB/s），尚未进入包的安装或后续 Python 编译阶段。BuildKit 构建器实例被关闭（`graceful_stop`）属于 CI 节点资源回收或构建器守护进程异常，与 Dockerfile 内容无因果关系。
 
 ## 修复方向
 
-### 方向 1（置信度: 高）
-**无需代码修复。** 这是 CI 基础设施故障，Code Fixer 无需对 Dockerfile 或任何代码文件做修改。建议重新触发 CI 流水线重试。如果多次重试均在同一位置失败，则需检查 CI 构建节点（`ecs-build-docker-x86-hk`）的 BuildKit daemon 健康状态和资源配额。
+### 方向 1（置信度: 中）
+**触发 CI 重试。** 该失败属于 CI 基础设施问题（BuildKit 构建器被意外终止），非代码层面错误。同一 PR 在其他架构节点（如 aarch64）上可能构建成功。直接重新触发 CI pipeline（re-run）即可验证。
+
+### 方向 2（置信度: 低）
+如果多次重试仍然在同一位置失败，且始终表现为 `dnf install` 阶段耗时过长（下载速度极慢），可能与 CI 构建节点到 openEuler 仓库的网络连接质量有关。此时需由 CI 运维排查构建节点（`ecs-build-docker-x86-hk`）的网络状况，而非修改 Dockerfile。
 
 ## 需要进一步确认的点
-- CI 构建节点 `ecs-build-docker-x86-hk` 上的 BuildKit daemon 是否存在资源不足（内存/磁盘）或超时自动回收策略
-- 同一时间段是否有其他构建任务也因 builder 意外终止而失败（判断是单点故障还是系统性资源问题）
-- `graceful_stop` 的触发来源——是 BuildKit daemon 主动发送还是上层编排系统（如 Jenkins plugin）触发了 builder 清理
+1. 该 PR 在 aarch64 架构 job（`/job/aarch64/…`）上的构建结果如何？如果 aarch64 构建成功，则进一步证实 x86-64 节点上的失败是孤立的基础设施事件。
+2. x86-64 构建节点 `ecs-build-docker-x86-hk` 在同一时间段是否有其他 job 也出现 BuildKit 构建器中断？如果普遍存在，说明节点或 BuildKit 服务存在问题。
+3. `dnf install` 下载元数据仅 77 kB/s 的速率是否正常？如果该节点持续如此，可能是网络带宽被其他并发 job 耗尽或仓库镜像站限速。
+
+## 修复验证要求
+无需特殊验证。本 PR 的失败为 infra-error，无需修改代码。CI 重试后若构建通过即可合入。
