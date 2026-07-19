@@ -1,13 +1,15 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败属于基础设施错误（infra-error），根因是 `eulerpublisher` appstore 校验工具在处理变更文件路径时未添加前导 `/`，导致 `README.md`（diff 提取的路径）与 `/README.md`（工具期望的路径）格式不匹配，属于工具本身的路径格式化缺陷。
+无需代码修改。CI 失败为基础设施问题（infra-error），非 PR 代码缺陷。
 
 ## 修改的文件
-无。
+无。PR #3153 仅修改 `README.md` 文档内容，不涉及任何应用镜像、构建文件或代码变更。
 
 ## 修复逻辑
-PR #3153 仅修改了根目录下的 `README.md` 文档内容（更新可用基础镜像 tags 列表），不涉及任何需要 appstore 发布规范校验的应用镜像文件。CI 失败是由校验工具 `eulerpublisher` 的 bug 触发，与 PR 变更内容无关。该问题应在 CI 基础设施侧修复（在路径提取逻辑中统一添加前导 `/`，或将根级文档文件排除出校验范围），不应通过修改源代码来绕过。
+CI 分析报告明确指出：失败类型为 `infra-error`，根因是 CI 的 appstore 发布规范校验工具（`eulerpublisher/update/container/app/update.py:273`）对根目录 `README.md` 的变更错误地触发了 appstore 路径校验。PR 实际改动为纯文档更新（更新基础镜像可用 Tags 列表），与 appstore 应用镜像发布无关，该校验本不应针对根目录 README 执行。
+
+根据修复原则，infra-error 类失败不应强行修改代码。建议重新触发 CI 运行，或联系 CI 维护团队确认 appstore 校验工具是否需要排除根目录 README 文档变更。
 
 ## 潜在风险
-无。
+无。未对代码做任何修改。
