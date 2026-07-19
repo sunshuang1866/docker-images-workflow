@@ -1,18 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-CI [Check] 测试阶段因 CI runner 环境缺少 `shunit2` shell 测试库导致测试框架无法加载，触发 CRITICAL 失败。此为纯 CI 基础设施问题，无需代码修改。
+无需代码修改。CI 失败类型为 `infra-error`，根因是 CI Runner 运行环境缺少 `shunit2` shell 测试框架包。
 
 ## 修改的文件
-无
+无。PR 代码（Dockerfile、httpd-foreground、README.md、image-info.yml、meta.yml）均正确无误，镜像构建和推送阶段已成功完成。
 
 ## 修复逻辑
-根据 CI 失败分析报告：
-- 失败类型: **infra-error**（CI 基础设施问题）
-- 根因: `/usr/local/etc/eulerpublisher/tests/container/app/../common/common_funs.sh:13` 尝试 `source shunit2`，但该 shell 测试库未安装在 CI runner 环境中
-- 与 PR 变更的关系: **无关**。Docker 镜像构建（`[Build] finished`）和推送（`[Push] finished`）阶段均完全成功，失败仅发生在 CI runner 的 [Check] 后置验证阶段
-
-修复方向：需在 CI 测试节点上安装 `shunit2`（如 `dnf install shunit2`），或将其部署到 `/usr/local/etc/eulerpublisher/tests/common/` 目录下。此为纯 CI 基础设施维护操作，不涉及任何代码变更。
+CI 分析报告明确指出：
+- 失败仅发生在构建后的 `[Check]` 阶段，`common_funs.sh:13` 因找不到 `shunit2` 而报错
+- 镜像构建（`#10 DONE 41.6s`）和推送（`#14 DONE 31.3s`）均已完成且成功
+- 根因与 PR 变更无关，属于 CI 基础设施问题
+- 修复方向：在 CI Runner 上通过 `dnf install shunit2` 安装 shunit2 包（基础设施层面）
 
 ## 潜在风险
-无
+无。此问题完全在 CI 基础设施层面，不涉及任何代码变更，不会对仓库代码产生任何影响。
