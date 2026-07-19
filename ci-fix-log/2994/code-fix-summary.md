@@ -1,18 +1,17 @@
 # 修复摘要
 
 ## 修复的问题
-无需代码修改。CI 失败为基础设施异常（Docker BuildKit 构建器在 `dnf install` 期间被 `graceful_stop` 终止），与 PR 代码变更无直接因果关系。
+无需代码修改。CI 失败为基础设施故障（BuildKit builder 实例 `euler_builder_20260709_224657` 在 Docker 构建过程中异常丢失），与 PR #2994 的代码变更无关。
 
 ## 修改的文件
 无
 
 ## 修复逻辑
-CI 失败分析报告将此错误分类为 `infra-error`（置信度：中）。具体表现为：
-- BuildKit 构建器实例 `euler_builder_20260709_224657` 在构建步骤 `[2/4]` — `dnf install` 执行期间被优雅关闭（`graceful_stop`）
-- 根因是 `dnf` 下载仓库元数据耗时 38.59 秒仅完成 2.8 MB（速率 77 kB/s），网络极度缓慢，可能触发 CI 构建超时或资源限制导致构建器被终止
-- Dockerfile 中 `dnf install` 命令语法正确、包名有效，不直接导致构建器断连
-
-按照项目规范，`infra-error` 类型的 CI 失败不需要代码修改。建议的修复方式为**重新触发 CI 构建**。若重试后仍反复失败，需检查 CI 环境中 BuildKit 构建器的超时配置和资源限制，或考虑在 Dockerfile 中添加 dnf 仓库镜像源配置（参考 `AI/llm-server/1.0.0.cpu/22.03-lts-sp3/Dockerfile` 中的 `sed` 替换模式）。
+CI 分析报告（置信度：高）确认此为 infra-error：
+- Docker 构建正常启动，Dockerfile 无语法错误、依赖缺失或版本冲突
+- 失败发生在 `RUN dnf install -y gcc gcc-c++ make wget openssl-devel bzip2-devel zlib-devel && dnf clean all` 执行约 37 秒时
+- BuildKit builder 实例被 CI 基础设施终止（goaway 原因：`graceful_stop`），与 PR 代码变更无关
+- 建议 CI 运维侧重试构建，或排查 runner 资源水位及 builder 生命周期管理问题
 
 ## 潜在风险
-无（未修改任何代码）
+无
