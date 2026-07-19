@@ -5,49 +5,34 @@
 - 失败类型: infra-error
 - 置信度: 高
 - 知识库匹配: 新模式
-- 新模式标题: 仓库镜像下载网络故障
-- 新模式症状关键词: Curl error (92), Stream error in the HTTP/2 framing layer, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, repo.openeuler.org
+- 新模式标题: 镜像站HTTP/2网络波动
+- 新模式症状关键词: Curl error (92), HTTP/2 framing layer, INTERNAL_ERROR, Curl error (56), SSL_ERROR_SYSCALL, No more mirrors to try, yum install
 
 ## 根因分析
 
 ### 直接错误
-
 ```
-#7 556.2 [MIRROR] gcc-12.3.1-110.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/gcc-12.3.1-110.oe2403sp4.aarch64.rpm [HTTP/2 stream 41 was not closed cleanly: INTERNAL_ERROR (err 2)]
-
-#7 836.2 [MIRROR] kernel-headers-6.6.0-159.4.3.154.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/kernel-headers-6.6.0-159.4.3.154.oe2403sp4.aarch64.rpm [HTTP/2 stream 59 was not closed cleanly: INTERNAL_ERROR (err 2)]
-
-#7 1029.3 [MIRROR] perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm: Curl error (56): Failure when receiving data from the peer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/perl-MIME-Base64-3.16-2.oe2403sp4.aarch64.rpm [OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0]
-
 #7 1310.2 [MIRROR] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: Curl error (92): Stream error in the HTTP/2 framing layer for https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm [HTTP/2 stream 125 was not closed cleanly: INTERNAL_ERROR (err 2)]
-
 #7 1310.2 [FAILED] vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm: No more mirrors to try - All mirrors were already tried without success
-
 #7 1310.3 Error: Error downloading packages:
 #7 1310.3   vim-common-2:9.0.2092-36.oe2403sp4.aarch64: Cannot download, all mirrors were already tried without success
-
 #7 ERROR: process "/bin/sh -c yum install -y ..." did not complete successfully: exit code: 1
 ```
 
 ### 根因定位
-
-- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4`（`RUN yum install ...` 步骤）
-- 失败原因: CI 构建环境（aarch64 runner `ecs-build-docker-aarch64-04-sp`）在执行 `yum install` 从 `repo.openeuler.org` 下载 aarch64 RPM 包时，遭遇连续的 HTTP/2 协议层错误（`Curl error 92: INTERNAL_ERROR`）和 SSL 连接中断（`Curl error 56: SSL_ERROR_SYSCALL`），最终 `vim-common` 包耗尽所有镜像重试后下载失败，导致整个 yum 安装事务中止。
+- 失败位置: `Others/brpc/1.16.0/24.03-lts-sp4/Dockerfile:4-11`（`RUN yum install -y` 步骤）
+- 失败原因: CI 在 aarch64 runner 上构建时，`repo.openeuler.org` 镜像站的 openEuler 24.03-LTS-SP4 aarch64 仓库出现 HTTP/2 连接异常（Curl error 92: INTERNAL_ERROR）和 SSL 读取错误（Curl error 56: SSL_ERROR_SYSCALL），导致多个 RPM 包下载失败。yum 自动重试机制解决了 `gcc`、`kernel-headers`、`perl-MIME-Base64` 的失败下载，但 `vim-common`（7.8 MB）耗尽所有重试后仍失败，yum 安装中断并返回 exit code 1。
 
 ### 与 PR 变更的关联
-
-**与 PR 变更无关。** 本次 PR 新增的 Dockerfile 语法正确、依赖包列表完整有效。失败纯粹是 openEuler 官方软件仓库 `repo.openeuler.org` 在构建时段对 aarch64 runner 存在网络服务不稳定问题（HTTP/2 stream 被服务端异常关闭、SSL 连接被对端重置）。PR 的 Dockerfile 没有引入任何错误。
+**与 PR 代码无关。** PR 仅新增了一个 brpc 1.16.0 的 Dockerfile，其 `yum install` 命令中列出的包均为正常可用的开发依赖，不存在语法错误或错误的包名。失败完全由 `repo.openeuler.org` 镜像站的网络基础设施问题导致（aarch64 架构 SP4 仓库的 HTTP/2 连接不稳定）。该构建如果重新触发，在网络正常时可成功完成。
 
 ## 修复方向
 
 ### 方向 1（置信度: 高）
-此失败为 CI 基础设施问题（`infra-error`），与 PR 代码无关。**无需修改 Dockerfile 或任何 PR 文件。** 建议触发 CI 重试（re-run），在网络状况正常时构建即可通过。如果多次重试仍失败，需排查 `repo.openeuler.org` 对特定 aarch64 runner 节点的网络可达性。
-
-### 方向 2（可选，置信度: 低）
-若 `repo.openeuler.org` 持续不稳定，可考虑在 `RUN` 命令开头添加 `--retries` 或分步重试逻辑（如 `yum install --setopt=retries=10 ...`），但这并非根本解决方案，不推荐。
+**无需修改 PR 代码，重新触发 CI 构建即可。** 这是镜像站临时性网络波动问题，非代码缺陷。若问题持续复现，考虑：
+- 在 `yum install` 前添加 `yum makecache` 预热仓库元数据，或添加 `--retries` 相关参数增加重试次数
+- 向 openEuler 基础设施团队反馈 `repo.openeuler.org` 的 SP4 aarch64 仓库 HTTP/2 服务稳定性问题
 
 ## 需要进一步确认的点
-
-- `repo.openeuler.org` 在构建时段是否存在已知的服务中断或降级。
-- 其他同时段运行的 aarch64 构建 job 是否也出现相同类型的 Curl/HTTP/2 错误（可确认是否为仓库侧问题而非 runner 个别网络问题）。
-- 该 aarch64 runner（`ecs-build-docker-aarch64-04-sp`）与 `repo.openeuler.org` 之间的网络链路是否存在间歇性故障。
+- 如果多次重试 CI 仍然失败，需要确认 `repo.openeuler.org` 的 SP4 aarch64 仓库是否存在持续的服务端问题，或 CI runner 到该镜像站的网络链路是否稳定
+- 可尝试在相同时间点手动 `curl` 测试 `https://repo.openeuler.org/openEuler-24.03-LTS-SP4/OS/aarch64/Packages/vim-common-9.0.2092-36.oe2403sp4.aarch64.rpm` 的连通性
